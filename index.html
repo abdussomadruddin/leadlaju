@@ -1,0 +1,578 @@
+<!doctype html>
+<html lang="ms">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="LeadLaju membantu pasukan hartanah menerima dan menghubungi lead baru dengan pantas."
+    />
+    <meta name="theme-color" content="#101c36" />
+    <title>LeadLaju - Property Lead Router</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css?v=20260613-2" />
+    <script src="app.js?v=20260613-2" defer></script>
+  </head>
+  <body class="auth-pending">
+    <section class="login-screen" id="login-screen" aria-labelledby="login-title">
+      <div class="login-showcase">
+        <a class="login-brand" href="#" aria-label="LeadLaju">
+          <span class="brand-mark">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M13.2 2.8 5.1 13.2h6.2l-.5 8 8.1-10.5h-6.2l.5-7.9Z" />
+            </svg>
+          </span>
+          <span>
+            <strong>LeadLaju</strong>
+            <small>Property Lead Router</small>
+          </span>
+        </a>
+        <div class="login-showcase-copy">
+          <span class="login-kicker">Lead response platform</span>
+          <h1>Hubungi lead baru<br />sebelum peluang berlalu.</h1>
+          <p>
+            Terima lead daripada Meta dan TikTok, agihkan kepada ejen,
+            dan pastikan setiap prospek dihubungi dalam masa lima minit.
+          </p>
+          <div class="login-features">
+            <span>
+              <b>01</b>
+              Google Sheets live sync
+            </span>
+            <span>
+              <b>02</b>
+              Auto-pass selepas 5 minit
+            </span>
+            <span>
+              <b>03</b>
+              Aktiviti pasukan dalam satu dashboard
+            </span>
+          </div>
+        </div>
+        <p class="login-copyright">LeadLaju • Dibina untuk pasukan hartanah</p>
+      </div>
+
+      <div class="login-panel">
+        <div class="login-card">
+          <div class="login-mobile-brand">
+            <span class="brand-mark">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M13.2 2.8 5.1 13.2h6.2l-.5 8 8.1-10.5h-6.2l.5-7.9Z" />
+              </svg>
+            </span>
+            <strong>LeadLaju</strong>
+          </div>
+          <span class="section-kicker">Selamat kembali</span>
+          <h2 id="login-title">Log masuk ke akaun anda</h2>
+          <p class="login-subtitle">Gunakan emel dan kata laluan yang didaftarkan oleh admin.</p>
+
+          <form id="login-form" novalidate>
+            <label for="login-email">Alamat emel</label>
+            <div class="login-input">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 4h16v16H4V4Z" />
+                <path d="m4 6 8 6 8-6" />
+              </svg>
+              <input
+                id="login-email"
+                type="email"
+                autocomplete="email"
+                placeholder="nama@agency.com"
+                required
+              />
+            </div>
+
+            <label for="login-password">Kata laluan</label>
+            <div class="login-input">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="5" y="10" width="14" height="11" rx="2" />
+                <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+              </svg>
+              <input
+                id="login-password"
+                type="password"
+                autocomplete="current-password"
+                placeholder="Masukkan kata laluan"
+                required
+              />
+              <button class="password-toggle" id="password-toggle" type="button" aria-label="Tunjukkan kata laluan">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" />
+                  <circle cx="12" cy="12" r="2.5" />
+                </svg>
+              </button>
+            </div>
+
+            <p class="login-error" id="login-error" role="alert"></p>
+            <button class="login-button" type="submit">
+              Log masuk
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 12h14M14 7l5 5-5 5" />
+              </svg>
+            </button>
+          </form>
+
+          <div class="demo-credentials">
+            <span class="demo-icon">i</span>
+            <span>
+              <strong>Akaun admin demo</strong>
+              <small><b>azlan@leadlaju.my</b> • <b>Admin123!</b></small>
+            </span>
+          </div>
+          <p class="session-note">
+            Sesi kekal aktif selama 365 hari pada peranti ini, sehingga anda log keluar.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <div class="app-shell" id="app-shell" aria-hidden="true">
+      <aside class="sidebar" id="sidebar">
+        <a class="brand" href="#" aria-label="LeadLaju home">
+          <span class="brand-mark">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M13.2 2.8 5.1 13.2h6.2l-.5 8 8.1-10.5h-6.2l.5-7.9Z" />
+            </svg>
+          </span>
+          <span>
+            <strong>LeadLaju</strong>
+            <small>Property Lead Router</small>
+          </span>
+        </a>
+
+        <nav class="main-nav" aria-label="Navigasi utama">
+          <button class="nav-item active" data-view="dashboard" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="3" y="3" width="7" height="7" rx="2" />
+              <rect x="14" y="3" width="7" height="7" rx="2" />
+              <rect x="3" y="14" width="7" height="7" rx="2" />
+              <rect x="14" y="14" width="7" height="7" rx="2" />
+            </svg>
+            Dashboard
+          </button>
+          <button class="nav-item" data-view="leads" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M19 8v6M22 11h-6" />
+            </svg>
+            Semua Leads
+            <span class="nav-count" id="nav-lead-count">0</span>
+          </button>
+          <button class="nav-item admin-only" data-view="agents" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M19 8v6M22 11h-6" />
+            </svg>
+            Pengurusan Ejen
+          </button>
+          <button class="nav-item admin-only" data-view="integration" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3v12" />
+              <path d="m8 11 4 4 4-4" />
+              <path d="M5 21h14a2 2 0 0 0 2-2v-3H3v3a2 2 0 0 0 2 2Z" />
+            </svg>
+            Google Sheets
+          </button>
+        </nav>
+
+        <div class="sync-card">
+          <div class="sync-card-top">
+            <span class="sheet-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M6 2h8l4 4v16H6V2Z" />
+                <path d="M14 2v5h5M9 11h6M9 15h6M9 19h6" />
+              </svg>
+            </span>
+            <span>
+              <strong>Google Sheets</strong>
+              <small id="sidebar-sync-text">Mod demo</small>
+            </span>
+          </div>
+          <div class="sync-status">
+            <span class="status-dot"></span>
+            <span id="sidebar-sync-status">Sedia menerima lead</span>
+          </div>
+        </div>
+
+        <div class="sidebar-user">
+          <span class="avatar" id="sidebar-avatar">NA</span>
+          <span>
+            <strong id="sidebar-user-name">Nur Aina</strong>
+            <small id="sidebar-user-role">Property Agent</small>
+          </span>
+          <button class="icon-button" id="sidebar-settings" type="button" aria-label="Log keluar">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M10 17l5-5-5-5M15 12H3" />
+              <path d="M14 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5" />
+            </svg>
+          </button>
+        </div>
+      </aside>
+
+      <main class="main-content">
+        <header class="topbar">
+          <button class="mobile-menu" id="mobile-menu" type="button" aria-label="Buka menu">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 7h16M4 12h16M4 17h16" />
+            </svg>
+          </button>
+          <div class="page-title">
+            <p id="today-label">Dashboard</p>
+            <h1 id="view-title">Selamat pagi, <span>Nur Aina</span></h1>
+          </div>
+          <div class="topbar-actions">
+            <div class="live-sync-pill">
+              <span class="pulse"></span>
+              <span id="live-sync-label">Live sync aktif</span>
+            </div>
+            <button class="notification-button" id="notification-button" type="button" aria-label="Notifikasi">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" />
+              </svg>
+              <span id="notification-count">1</span>
+            </button>
+            <button class="topbar-logout" id="logout-button" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M10 17l5-5-5-5M15 12H3" />
+                <path d="M14 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5" />
+              </svg>
+              <span>Log keluar</span>
+            </button>
+          </div>
+        </header>
+
+        <section class="view active" id="dashboard-view">
+          <div class="dashboard-summary">
+            <div>
+              <span class="section-kicker">Ringkasan hari ini</span>
+              <h2>Respon pantas, peluang lebih tinggi.</h2>
+            </div>
+            <button class="secondary-button" id="demo-lead-button" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              Simulasi lead baru
+            </button>
+          </div>
+
+          <div class="stats-grid">
+            <article class="stat-card">
+              <span class="stat-icon blue">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                  <circle cx="9" cy="7" r="4" />
+                  <path d="M19 8v6M22 11h-6" />
+                </svg>
+              </span>
+              <span>
+                <small>Lead hari ini</small>
+                <strong id="stat-today">0</strong>
+              </span>
+              <span class="trend good">Live</span>
+            </article>
+            <article class="stat-card">
+              <span class="stat-icon green">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="m5 12 4 4L19 6" />
+                </svg>
+              </span>
+              <span>
+                <small>Telah dihubungi</small>
+                <strong id="stat-contacted">0</strong>
+              </span>
+              <span class="trend" id="contact-rate">0%</span>
+            </article>
+            <article class="stat-card">
+              <span class="stat-icon amber">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M12 7v5l3 2" />
+                </svg>
+              </span>
+              <span>
+                <small>Purata respons</small>
+                <strong id="stat-response">--</strong>
+              </span>
+              <span class="trend">Sasaran 5m</span>
+            </article>
+            <article class="stat-card">
+              <span class="stat-icon purple">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M3 18h18M6 15l4-4 3 2 5-6" />
+                </svg>
+              </span>
+              <span>
+                <small>Conversion</small>
+                <strong id="stat-conversion">0%</strong>
+              </span>
+              <span class="trend">Bulan ini</span>
+            </article>
+          </div>
+
+          <section class="new-lead-section">
+            <div class="section-heading">
+              <div>
+                <span class="section-kicker red-dot">Perlu tindakan segera</span>
+                <h2>New Leads</h2>
+              </div>
+              <span class="queue-label" id="queue-label">0 lead menunggu</span>
+            </div>
+
+            <div id="active-lead-container"></div>
+          </section>
+
+          <div class="bottom-grid">
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <span class="section-kicker">Aktiviti terkini</span>
+                  <h3>Log Lead</h3>
+                </div>
+                <button class="text-button" data-view-link="leads" type="button">Lihat semua</button>
+              </div>
+              <div class="activity-list" id="activity-list"></div>
+            </section>
+
+            <section class="panel team-panel">
+              <div class="panel-heading">
+                <div>
+                  <span class="section-kicker">Giliran agihan</span>
+                  <h3>Pasukan Aktif</h3>
+                </div>
+                <span class="online-count" id="online-count">0 online</span>
+              </div>
+              <div class="team-list" id="team-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="leads-view">
+          <div class="content-heading">
+            <div>
+              <span class="section-kicker">Rekod pusat</span>
+              <h2>Semua Leads</h2>
+              <p>Jejak setiap lead dan tindakan pasukan anda.</p>
+            </div>
+            <button class="secondary-button" id="demo-lead-button-2" type="button">+ Tambah lead demo</button>
+          </div>
+          <div class="table-card">
+            <div class="table-toolbar">
+              <label class="search-box">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="m20 20-4-4" />
+                </svg>
+                <input id="lead-search" type="search" placeholder="Cari nama atau nombor telefon" />
+              </label>
+              <select id="lead-filter" aria-label="Tapis status lead">
+                <option value="all">Semua status</option>
+                <option value="new">New</option>
+                <option value="contacted">Contacted</option>
+                <option value="passed">Passed</option>
+              </select>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Lead</th>
+                    <th>Sumber</th>
+                    <th>Ejen</th>
+                    <th>Masa masuk</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="leads-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section class="view admin-only-view" id="agents-view">
+          <div class="content-heading">
+            <div>
+              <span class="section-kicker">Admin sahaja</span>
+              <h2>Pengurusan Ejen</h2>
+              <p>Daftar pasukan dan tentukan siapa yang menerima giliran lead.</p>
+            </div>
+            <button class="primary-button compact" id="add-agent-button" type="button">+ Daftar ejen</button>
+          </div>
+          <div class="agents-grid" id="agents-grid"></div>
+        </section>
+
+        <section class="view admin-only-view" id="integration-view">
+          <div class="content-heading">
+            <div>
+              <span class="section-kicker">Integrasi</span>
+              <h2>Google Sheets Sync</h2>
+              <p>Sambungkan sheet yang menerima lead daripada Meta atau TikTok.</p>
+            </div>
+          </div>
+
+          <div class="integration-grid">
+            <section class="panel integration-form-card">
+              <div class="integration-brand">
+                <span class="large-sheet-icon">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M6 2h8l4 4v16H6V2Z" />
+                    <path d="M14 2v5h5M9 11h6M9 15h6M9 19h6" />
+                  </svg>
+                </span>
+                <div>
+                  <h3>Sambungan Sheet</h3>
+                  <p>App menyemak lead baru melalui Google Apps Script.</p>
+                </div>
+              </div>
+              <form id="integration-form">
+                <label for="sheet-endpoint">Web App URL</label>
+                <input
+                  id="sheet-endpoint"
+                  type="url"
+                  placeholder="https://script.google.com/macros/s/.../exec"
+                />
+                <label for="poll-interval">Semak setiap</label>
+                <select id="poll-interval">
+                  <option value="15">15 saat</option>
+                  <option value="30">30 saat</option>
+                  <option value="60">1 minit</option>
+                  <option value="120">2 minit</option>
+                </select>
+                <div class="form-actions">
+                  <button class="primary-button" type="submit">Simpan & sambung</button>
+                  <button class="secondary-button" id="sync-now-button" type="button">Sync sekarang</button>
+                </div>
+              </form>
+              <div class="connection-result" id="connection-result">
+                <span class="status-dot"></span>
+                <span>Belum disambungkan. Mod demo sedang aktif.</span>
+              </div>
+            </section>
+
+            <section class="panel setup-guide">
+              <span class="section-kicker">Format diperlukan</span>
+              <h3>Kolum Google Sheet</h3>
+              <p>Pastikan baris pertama menggunakan tajuk ini. Susunan kolum tidak penting.</p>
+              <div class="column-list">
+                <span><b>name</b><small>Nama lead</small></span>
+                <span><b>phone</b><small>Nombor telefon</small></span>
+                <span><b>source</b><small>Meta / TikTok</small></span>
+                <span><b>created_at</b><small>Tarikh & masa</small></span>
+              </div>
+              <div class="guide-note">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M12 10v6M12 7h.01" />
+                </svg>
+                <p>
+                  Fail <strong>google-apps-script/Code.gs</strong> dalam projek ini boleh terus digunakan
+                  untuk menerbitkan data Sheet sebagai Web App URL.
+                </p>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="modal-backdrop" id="agent-modal" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="agent-modal-title">
+        <div class="modal-heading">
+          <div>
+            <span class="section-kicker">Ahli pasukan baru</span>
+            <h2 id="agent-modal-title">Daftar Ejen</h2>
+          </div>
+          <button class="modal-close" data-close-modal="agent-modal" type="button" aria-label="Tutup">×</button>
+        </div>
+        <form id="agent-form">
+          <label for="agent-name">Nama penuh</label>
+          <input id="agent-name" type="text" placeholder="Contoh: Amir Hakim" required />
+          <label for="agent-phone">Nombor telefon</label>
+          <input id="agent-phone" type="tel" placeholder="+60 12-345 6789" required />
+          <label for="agent-email">Emel</label>
+          <input id="agent-email" type="email" placeholder="amir@agency.com" required />
+          <label for="agent-password">Kata laluan sementara</label>
+          <input
+            id="agent-password"
+            type="password"
+            minlength="8"
+            autocomplete="new-password"
+            placeholder="Minimum 8 aksara"
+            required
+          />
+          <button class="primary-button full" type="submit">Daftar ejen</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite">
+      <span class="toast-icon">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m5 12 4 4L19 6" />
+        </svg>
+      </span>
+      <span>
+        <strong id="toast-title">Berjaya</strong>
+        <small id="toast-message">Tindakan telah disimpan.</small>
+      </span>
+    </div>
+
+    <template id="active-lead-template">
+      <article class="lead-alert">
+        <div class="lead-alert-top">
+          <span class="lead-source-badge"></span>
+          <span class="lead-arrival"></span>
+          <span class="lead-urgency">Lead baru</span>
+        </div>
+        <div class="lead-alert-body">
+          <div class="lead-profile">
+            <span class="lead-avatar"></span>
+            <span>
+              <small>Name</small>
+              <h3 class="lead-name"></h3>
+            </span>
+          </div>
+          <div class="lead-phone-block">
+            <small>Phone number</small>
+            <strong class="lead-phone"></strong>
+          </div>
+          <div class="countdown-block">
+            <span class="countdown-ring">
+              <svg viewBox="0 0 42 42" aria-hidden="true">
+                <circle class="ring-bg" cx="21" cy="21" r="17" />
+                <circle class="ring-progress" cx="21" cy="21" r="17" />
+              </svg>
+              <span class="countdown-short"></span>
+            </span>
+            <span>
+              <small>Masa berbaki</small>
+              <strong class="countdown-full"></strong>
+            </span>
+          </div>
+          <button class="call-button" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.4 2.1L8.1 10a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.6 1.9Z" />
+            </svg>
+            <span>CALL NOW</span>
+          </button>
+        </div>
+        <div class="lead-alert-footer">
+          <span>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 7v5l3 2" />
+            </svg>
+            Tekan <strong>CALL NOW</strong> sebelum masa tamat.
+          </span>
+          <span class="assigned-agent"></span>
+        </div>
+      </article>
+    </template>
+  </body>
+</html>
