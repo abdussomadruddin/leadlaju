@@ -15,8 +15,9 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260613-2" />
-    <script src="app.js?v=20260613-2" defer></script>
+    <link rel="stylesheet" href="styles.css?v=20260613-5" />
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="app.js?v=20260613-5" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -108,6 +109,9 @@
               </button>
             </div>
 
+            <button class="forgot-password-button" id="forgot-password-button" type="button">
+              Lupa kata laluan?
+            </button>
             <p class="login-error" id="login-error" role="alert"></p>
             <button class="login-button" type="submit">
               Log masuk
@@ -122,6 +126,7 @@
             <span>
               <strong>Akaun admin demo</strong>
               <small><b>azlan@leadlaju.my</b> • <b>Admin123!</b></small>
+              <small><b>aina@leadlaju.my</b> • <b>Agent123!</b></small>
             </span>
           </div>
           <p class="session-note">
@@ -163,6 +168,14 @@
             </svg>
             Semua Leads
             <span class="nav-count" id="nav-lead-count">0</span>
+          </button>
+          <button class="nav-item" data-view="contacts" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="4" y="3" width="16" height="18" rx="2" />
+              <circle cx="12" cy="9" r="3" />
+              <path d="M7.5 18a4.5 4.5 0 0 1 9 0" />
+            </svg>
+            Pelanggan Saya
           </button>
           <button class="nav-item admin-only" data-view="agents" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -369,7 +382,7 @@
                   <circle cx="11" cy="11" r="7" />
                   <path d="m20 20-4-4" />
                 </svg>
-                <input id="lead-search" type="search" placeholder="Cari nama atau nombor telefon" />
+                <input id="lead-search" type="search" placeholder="Cari nama, telefon atau projek" />
               </label>
               <select id="lead-filter" aria-label="Tapis status lead">
                 <option value="all">Semua status</option>
@@ -383,6 +396,7 @@
                 <thead>
                   <tr>
                     <th>Lead</th>
+                    <th>Projek</th>
                     <th>Sumber</th>
                     <th>Ejen</th>
                     <th>Masa masuk</th>
@@ -390,6 +404,43 @@
                   </tr>
                 </thead>
                 <tbody id="leads-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section class="view" id="contacts-view">
+          <div class="content-heading">
+            <div>
+              <span class="section-kicker">Lead yang telah dihubungi</span>
+              <h2>Pelanggan Saya</h2>
+              <p>Urus nama, nombor telefon, emel dan projek untuk lead yang telah anda claim.</p>
+            </div>
+          </div>
+          <div class="table-card">
+            <div class="table-toolbar">
+              <label class="search-box">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="m20 20-4-4" />
+                </svg>
+                <input id="contact-search" type="search" placeholder="Cari nama, telefon, emel atau projek" />
+              </label>
+              <span class="queue-label" id="contact-count">0 pelanggan</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Nama</th>
+                    <th>Nombor telefon</th>
+                    <th>Emel</th>
+                    <th>Projek</th>
+                    <th>Dihubungi</th>
+                    <th>Tindakan</th>
+                  </tr>
+                </thead>
+                <tbody id="contacts-table-body"></tbody>
               </table>
             </div>
           </div>
@@ -415,6 +466,31 @@
               <p>Sambungkan sheet yang menerima lead daripada Meta atau TikTok.</p>
             </div>
           </div>
+
+          <section class="panel supabase-card">
+            <div class="integration-brand">
+              <span class="large-sheet-icon supabase-icon">S</span>
+              <div>
+                <h3>Database Supabase</h3>
+                <p>Simpan akaun ejen dan lead untuk kegunaan semua peranti secara live.</p>
+              </div>
+            </div>
+            <form id="supabase-form">
+              <label for="supabase-url">Project URL</label>
+              <input id="supabase-url" type="url" placeholder="https://project-id.supabase.co" />
+              <label for="supabase-key">Publishable / anon key</label>
+              <input id="supabase-key" type="password" autocomplete="off" placeholder="sb_publishable_... atau anon key" />
+              <p class="form-help">Jangan masukkan service_role key di sini. Jalankan fail schema.sql sebelum menyambung.</p>
+              <div class="form-actions">
+                <button class="primary-button" type="submit">Simpan Supabase</button>
+                <button class="secondary-button" id="supabase-disconnect" type="button">Putuskan</button>
+              </div>
+            </form>
+            <div class="connection-result" id="supabase-result">
+              <span class="status-dot"></span>
+              <span>Belum dikonfigurasi. Data tempatan sedang digunakan.</span>
+            </div>
+          </section>
 
           <div class="integration-grid">
             <section class="panel integration-form-card">
@@ -462,6 +538,8 @@
               <div class="column-list">
                 <span><b>name</b><small>Nama lead</small></span>
                 <span><b>phone</b><small>Nombor telefon</small></span>
+                <span><b>email</b><small>Emel lead</small></span>
+                <span><b>project</b><small>Nama projek</small></span>
                 <span><b>source</b><small>Meta / TikTok</small></span>
                 <span><b>created_at</b><small>Tarikh & masa</small></span>
               </div>
@@ -511,6 +589,131 @@
       </div>
     </div>
 
+    <div class="modal-backdrop" id="reset-password-modal" aria-hidden="true">
+      <div class="modal reset-password-modal" role="dialog" aria-modal="true" aria-labelledby="reset-password-title">
+        <div class="modal-heading">
+          <div>
+            <span class="section-kicker">Pemulihan akaun</span>
+            <h2 id="reset-password-title">Lupa Kata Laluan</h2>
+          </div>
+          <button class="modal-close" data-close-modal="reset-password-modal" type="button" aria-label="Tutup">×</button>
+        </div>
+
+        <form id="reset-request-form">
+          <p class="reset-description">
+            Masukkan emel yang didaftarkan. Kami akan hantar kod verifikasi enam digit.
+          </p>
+          <label for="reset-email">Alamat emel</label>
+          <input id="reset-email" type="email" autocomplete="email" placeholder="nama@agency.com" required />
+          <p class="reset-error" id="reset-request-error" role="alert"></p>
+          <button class="primary-button full" type="submit">Hantar kod verifikasi</button>
+        </form>
+
+        <form id="reset-verify-form" class="reset-verify-form" hidden>
+          <p class="reset-description" id="reset-code-message"></p>
+          <div class="demo-reset-code" id="demo-reset-code" hidden>
+            Kod demo: <strong id="demo-reset-code-value"></strong>
+          </div>
+          <div id="reset-code-fields">
+            <label for="reset-code">Kod verifikasi</label>
+            <input
+              id="reset-code"
+              type="text"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              maxlength="6"
+              placeholder="123456"
+              required
+            />
+          </div>
+          <label for="reset-new-password">Kata laluan baru</label>
+          <input
+            id="reset-new-password"
+            type="password"
+            autocomplete="new-password"
+            minlength="8"
+            placeholder="Minimum 8 aksara"
+            required
+          />
+          <label for="reset-confirm-password">Sahkan kata laluan</label>
+          <input
+            id="reset-confirm-password"
+            type="password"
+            autocomplete="new-password"
+            minlength="8"
+            placeholder="Ulang kata laluan baru"
+            required
+          />
+          <p class="reset-error" id="reset-verify-error" role="alert"></p>
+          <button class="primary-button full" type="submit">Tetapkan kata laluan baru</button>
+          <button class="text-button reset-back-button" id="reset-back-button" type="button">
+            Guna emel lain
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal-backdrop" id="agent-password-modal" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="agent-password-title">
+        <div class="modal-heading">
+          <div>
+            <span class="section-kicker">Pengurusan ejen</span>
+            <h2 id="agent-password-title">Tukar Kata Laluan</h2>
+          </div>
+          <button class="modal-close" data-close-modal="agent-password-modal" type="button" aria-label="Tutup">×</button>
+        </div>
+        <form id="agent-password-form">
+          <p class="reset-description" id="agent-password-description"></p>
+          <label for="agent-new-password">Kata laluan baru</label>
+          <input
+            id="agent-new-password"
+            type="password"
+            minlength="8"
+            autocomplete="new-password"
+            placeholder="Minimum 8 aksara"
+            required
+          />
+          <label for="agent-confirm-password">Sahkan kata laluan</label>
+          <input
+            id="agent-confirm-password"
+            type="password"
+            minlength="8"
+            autocomplete="new-password"
+            placeholder="Ulang kata laluan baru"
+            required
+          />
+          <p class="reset-error" id="agent-password-error" role="alert"></p>
+          <button class="primary-button full" type="submit">Simpan kata laluan</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal-backdrop" id="contact-modal" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="contact-modal-title">
+        <div class="modal-heading">
+          <div>
+            <span class="section-kicker">Database pelanggan</span>
+            <h2 id="contact-modal-title">Edit Lead</h2>
+          </div>
+          <button class="modal-close" data-close-modal="contact-modal" type="button" aria-label="Tutup">×</button>
+        </div>
+        <form id="contact-form">
+          <label for="contact-name">Nama</label>
+          <input id="contact-name" type="text" required />
+          <label for="contact-phone">Nombor telefon</label>
+          <input id="contact-phone" type="tel" required />
+          <label for="contact-email">Emel</label>
+          <input id="contact-email" type="email" />
+          <label for="contact-project">Projek</label>
+          <input id="contact-project" type="text" required />
+          <label for="contact-notes">Nota</label>
+          <textarea id="contact-notes" rows="4" placeholder="Contoh: Berminat untuk site visit hujung minggu"></textarea>
+          <p class="reset-error" id="contact-form-error" role="alert"></p>
+          <button class="primary-button full" type="submit">Simpan perubahan</button>
+        </form>
+      </div>
+    </div>
+
     <div class="toast" id="toast" role="status" aria-live="polite">
       <span class="toast-icon">
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -538,9 +741,14 @@
               <h3 class="lead-name"></h3>
             </span>
           </div>
+          <div class="lead-project-block">
+            <small>Projek</small>
+            <strong class="lead-project"></strong>
+          </div>
           <div class="lead-phone-block">
             <small>Phone number</small>
-            <strong class="lead-phone"></strong>
+            <strong class="lead-phone locked-phone"></strong>
+            <span class="phone-lock-note">Dibuka selepas CALL NOW</span>
           </div>
           <div class="countdown-block">
             <span class="countdown-ring">
@@ -559,7 +767,10 @@
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.4 2.1L8.1 10a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.6 1.9Z" />
             </svg>
-            <span>CALL NOW</span>
+            <span class="call-button-copy">
+              <b>CALL NOW</b>
+              <small class="call-project"></small>
+            </span>
           </button>
         </div>
         <div class="lead-alert-footer">
