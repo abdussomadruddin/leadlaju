@@ -1,5 +1,6 @@
 const STORAGE_KEY = "leadlaju-state-v1";
 const AUTH_KEY = "leadlaju-auth-v1";
+const SUPABASE_CONFIG_KEY = "leadlaju-supabase-config-v1";
 const SESSION_DURATION_MS = 365 * 24 * 60 * 60 * 1000;
 const RESPONSE_WINDOW_MS = 5 * 60 * 1000;
 
@@ -59,12 +60,17 @@ const defaultState = {
 };
 
 const demoNames = [
-  ["Muhammad Faris", "+60 12-887 2341"],
-  ["Siti Hajar", "+60 11-2098 7654"],
-  ["Daniel Wong", "+60 16-543 9012"],
-  ["Nurul Izzati", "+60 17-662 1180"],
-  ["Arif Zulkifli", "+60 13-778 4501"],
-  ["Priya Nair", "+60 18-920 3372"],
+  ["Aishah", "+60 12-345 6789", "aishah@gmail.com"],
+  ["Muhammad Faris", "+60 12-887 2341", "faris@gmail.com"],
+  ["Siti Hajar", "+60 11-2098 7654", "sitihajar@gmail.com"],
+  ["Daniel Wong", "+60 16-543 9012", "daniel@gmail.com"],
+  ["Nurul Izzati", "+60 17-662 1180", "nurul@gmail.com"],
+  ["Arif Zulkifli", "+60 13-778 4501", "arif@gmail.com"],
+];
+const demoProjects = [
+  "DSTH Puncak Awani, Sungai Buloh",
+  "Residensi Harmoni",
+  "Skyline Sentral",
 ];
 
 let state = loadState();
@@ -73,6 +79,13 @@ let tickTimer;
 let syncTimer;
 let toastTimer;
 let lastRenderedActiveLeadKey = null;
+let passwordResetRequest = null;
+let selectedAgentId = null;
+let selectedContactId = null;
+let supabaseClient = null;
+let supabaseChannel = null;
+let supabaseMode = false;
+let remoteReloadTimer = null;
 
 const elements = {
   sidebar: document.querySelector("#sidebar"),
@@ -83,6 +96,20 @@ const elements = {
   loginPassword: document.querySelector("#login-password"),
   loginError: document.querySelector("#login-error"),
   passwordToggle: document.querySelector("#password-toggle"),
+  forgotPasswordButton: document.querySelector("#forgot-password-button"),
+  resetPasswordModal: document.querySelector("#reset-password-modal"),
+  resetRequestForm: document.querySelector("#reset-request-form"),
+  resetVerifyForm: document.querySelector("#reset-verify-form"),
+  resetEmail: document.querySelector("#reset-email"),
+  resetCode: document.querySelector("#reset-code"),
+  resetNewPassword: document.querySelector("#reset-new-password"),
+  resetConfirmPassword: document.querySelector("#reset-confirm-password"),
+  resetRequestError: document.querySelector("#reset-request-error"),
+  resetVerifyError: document.querySelector("#reset-verify-error"),
+  resetCodeMessage: document.querySelector("#reset-code-message"),
+  demoResetCode: document.querySelector("#demo-reset-code"),
+  demoResetCodeValue: document.querySelector("#demo-reset-code-value"),
+  resetBackButton: document.querySelector("#reset-back-button"),
   logoutButton: document.querySelector("#logout-button"),
   mobileMenu: document.querySelector("#mobile-menu"),
   viewTitle: document.querySelector("#view-title"),
@@ -107,10 +134,27 @@ const elements = {
   leadsTableBody: document.querySelector("#leads-table-body"),
   leadSearch: document.querySelector("#lead-search"),
   leadFilter: document.querySelector("#lead-filter"),
+  contactSearch: document.querySelector("#contact-search"),
+  contactCount: document.querySelector("#contact-count"),
+  contactsTableBody: document.querySelector("#contacts-table-body"),
+  contactModal: document.querySelector("#contact-modal"),
+  contactForm: document.querySelector("#contact-form"),
+  contactName: document.querySelector("#contact-name"),
+  contactPhone: document.querySelector("#contact-phone"),
+  contactEmail: document.querySelector("#contact-email"),
+  contactProject: document.querySelector("#contact-project"),
+  contactNotes: document.querySelector("#contact-notes"),
+  contactFormError: document.querySelector("#contact-form-error"),
   agentsGrid: document.querySelector("#agents-grid"),
   addAgentButton: document.querySelector("#add-agent-button"),
   agentModal: document.querySelector("#agent-modal"),
   agentForm: document.querySelector("#agent-form"),
+  agentPasswordModal: document.querySelector("#agent-password-modal"),
+  agentPasswordForm: document.querySelector("#agent-password-form"),
+  agentPasswordDescription: document.querySelector("#agent-password-description"),
+  agentNewPassword: document.querySelector("#agent-new-password"),
+  agentConfirmPassword: document.querySelector("#agent-confirm-password"),
+  agentPasswordError: document.querySelector("#agent-password-error"),
   integrationForm: document.querySelector("#integration-form"),
   sheetEndpoint: document.querySelector("#sheet-endpoint"),
   pollInterval: document.querySelector("#poll-interval"),
@@ -119,6 +163,12 @@ const elements = {
   sidebarSyncText: document.querySelector("#sidebar-sync-text"),
   sidebarSyncStatus: document.querySelector("#sidebar-sync-status"),
   liveSyncLabel: document.querySelector("#live-sync-label"),
+  supabaseForm: document.querySelector("#supabase-form"),
+  supabaseUrl: document.querySelector("#supabase-url"),
+  supabaseKey: document.querySelector("#supabase-key"),
+  supabaseResult: document.querySelector("#supabase-result"),
+  supabaseDisconnect: document.querySelector("#supabase-disconnect"),
+  resetCodeFields: document.querySelector("#reset-code-fields"),
   toast: document.querySelector("#toast"),
   toastTitle: document.querySelector("#toast-title"),
   toastMessage: document.querySelector("#toast-message"),
@@ -148,6 +198,12 @@ function loadState() {
       ...agent,
       password: agent.password || (agent.role === "admin" ? "Admin123!" : "Agent123!"),
     }));
+    merged.leads = merged.leads.map((lead) => ({
+      ...lead,
+      email: lead.email || "",
+      project: lead.project || "Tidak dinyatakan",
+      notes: lead.notes || "",
+    }));
     return merged;
   } catch {
     return structuredClone(defaultState);
@@ -156,6 +212,210 @@ function loadState() {
 
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function loadSupabaseConfig() {
+  try {
+    const config = JSON.parse(localStorage.getItem(SUPABASE_CONFIG_KEY));
+    if (!config?.url || !config?.key) return null;
+    return config;
+  } catch {
+    return null;
+  }
+}
+
+function initSupabase() {
+  const config = loadSupabaseConfig();
+  if (!config || !window.supabase?.createClient) return null;
+  supabaseClient = window.supabase.createClient(config.url, config.key, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
+  });
+  return supabaseClient;
+}
+
+function mapProfile(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    phone: row.phone || "",
+    email: row.email,
+    role: row.role || "agent",
+    active: row.active !== false,
+    leadsHandled: row.leads_handled || 0,
+  };
+}
+
+function mapLead(row) {
+  return {
+    id: row.id,
+    dedupeKey: row.dedupe_key || row.id,
+    name: row.name,
+    phone: row.phone || "",
+    email: row.email || "",
+    project: row.project || "Tidak dinyatakan",
+    source: row.source || "Google Sheet",
+    createdAt: new Date(row.created_at).getTime(),
+    receivedAt: new Date(row.received_at || row.created_at).getTime(),
+    assignedAgentId: row.assigned_agent_id,
+    expiresAt: new Date(row.expires_at).getTime(),
+    status: row.status || "new",
+    passCount: row.pass_count || 0,
+    responseMs: row.response_ms,
+    contactedAt: row.contacted_at ? new Date(row.contacted_at).getTime() : null,
+    notes: row.notes || "",
+  };
+}
+
+function mapActivity(row) {
+  return {
+    id: row.id,
+    type: row.type,
+    leadId: row.lead_id,
+    leadName: row.lead_name,
+    message: row.message,
+    createdAt: new Date(row.created_at).getTime(),
+  };
+}
+
+async function loadRemoteState(userId) {
+  if (!supabaseClient) return false;
+  try {
+    const [profilesResult, leadsResult, activitiesResult, settingsResult] = await Promise.all([
+      supabaseClient.from("profiles").select("*").order("created_at"),
+      supabaseClient.rpc("get_visible_leads"),
+      supabaseClient.from("activities").select("*").order("created_at", { ascending: false }).limit(80),
+      supabaseClient.from("app_settings").select("*").eq("id", 1).maybeSingle(),
+    ]);
+
+    if (profilesResult.error) throw profilesResult.error;
+    if (leadsResult.error) throw leadsResult.error;
+    if (activitiesResult.error) throw activitiesResult.error;
+
+    const profiles = profilesResult.data.map(mapProfile);
+    const currentUser = profiles.find((agent) => agent.id === userId);
+    if (!currentUser) throw new Error("Profil pengguna belum tersedia.");
+
+    state = {
+      ...structuredClone(defaultState),
+      currentUserId: userId,
+      agents: profiles,
+      leads: leadsResult.data.map(mapLead),
+      activities: activitiesResult.data.map(mapActivity),
+      roundRobinIndex: settingsResult.data?.round_robin_index || 0,
+      integration: {
+        ...defaultState.integration,
+        endpoint: settingsResult.data?.google_sheet_endpoint || "",
+        interval: settingsResult.data?.poll_interval || 30,
+        connected: Boolean(settingsResult.data?.google_sheet_endpoint),
+        lastSyncAt: settingsResult.data?.last_sync_at
+          ? new Date(settingsResult.data.last_sync_at).getTime()
+          : null,
+      },
+    };
+    supabaseMode = true;
+    saveState();
+    subscribeToSupabase();
+    return true;
+  } catch (error) {
+    console.error("Supabase load failed", error);
+    supabaseMode = false;
+    return false;
+  }
+}
+
+function subscribeToSupabase() {
+  if (!supabaseClient || supabaseChannel) return;
+  supabaseChannel = supabaseClient
+    .channel("leadlaju-live")
+    .on("postgres_changes", { event: "*", schema: "public", table: "leads" }, queueRemoteReload)
+    .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, queueRemoteReload)
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "activities" }, queueRemoteReload)
+    .subscribe();
+}
+
+function queueRemoteReload() {
+  window.clearTimeout(remoteReloadTimer);
+  remoteReloadTimer = window.setTimeout(async () => {
+    if (!supabaseMode) return;
+    await loadRemoteState(state.currentUserId);
+    renderAll();
+  }, 250);
+}
+
+async function persistProfile(agent) {
+  if (!supabaseMode) return true;
+  const { error } = await supabaseClient
+    .from("profiles")
+    .update({
+      name: agent.name,
+      phone: agent.phone,
+      active: agent.active,
+      leads_handled: agent.leadsHandled || 0,
+    })
+    .eq("id", agent.id);
+  if (error) throw error;
+  return true;
+}
+
+async function persistLead(lead) {
+  if (!supabaseMode) return true;
+  const { error } = await supabaseClient
+    .from("leads")
+    .update({
+      name: lead.name,
+      phone: lead.phone,
+      email: lead.email || null,
+      project: lead.project,
+      assigned_agent_id: lead.assignedAgentId,
+      expires_at: new Date(lead.expiresAt).toISOString(),
+      status: lead.status,
+      pass_count: lead.passCount || 0,
+      response_ms: lead.responseMs,
+      contacted_at: lead.contactedAt ? new Date(lead.contactedAt).toISOString() : null,
+      notes: lead.notes || "",
+    })
+    .eq("id", lead.id);
+  if (error) throw error;
+  return true;
+}
+
+async function persistNewLead(lead) {
+  if (!supabaseMode) return true;
+  const { error } = await supabaseClient.from("leads").insert({
+    id: lead.id,
+    dedupe_key: lead.dedupeKey,
+    name: lead.name,
+    phone: lead.phone,
+    email: lead.email || null,
+    project: lead.project,
+    source: lead.source,
+    created_at: new Date(lead.createdAt).toISOString(),
+    received_at: new Date(lead.receivedAt).toISOString(),
+    assigned_agent_id: lead.assignedAgentId,
+    expires_at: new Date(lead.expiresAt).toISOString(),
+    status: lead.status,
+    pass_count: lead.passCount,
+  });
+  if (error) throw error;
+  return true;
+}
+
+async function persistActivity(activity) {
+  if (!supabaseMode) return true;
+  const { error } = await supabaseClient.from("activities").insert({
+    id: activity.id,
+    type: activity.type,
+    lead_id: activity.leadId,
+    lead_name: activity.leadName,
+    message: activity.message,
+    created_at: new Date(activity.createdAt).toISOString(),
+  });
+  if (error) throw error;
+  return true;
 }
 
 function loadSession() {
@@ -219,7 +479,7 @@ function setLoginError(message) {
   elements.loginPassword.closest(".login-input").classList.toggle("invalid", Boolean(message));
 }
 
-function handleLogin(event) {
+async function handleLogin(event) {
   event.preventDefault();
   const email = elements.loginEmail.value.trim().toLowerCase();
   const password = elements.loginPassword.value;
@@ -228,9 +488,28 @@ function handleLogin(event) {
     return;
   }
 
+  if (supabaseClient) {
+    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+    if (!error && data.user) {
+      const loaded = await loadRemoteState(data.user.id);
+      if (loaded) {
+        setLoginError("");
+        activeView = "dashboard";
+        switchView("dashboard");
+        startAuthenticatedApp(getCurrentUser());
+        return;
+      }
+      await supabaseClient.auth.signOut();
+    }
+  }
+
   const user = state.agents.find((agent) => agent.email.toLowerCase() === email);
   if (!user || user.password !== password) {
-    setLoginError("Emel atau kata laluan tidak betul.");
+    setLoginError(
+      supabaseClient
+        ? "Login Supabase gagal dan akaun demo tidak sepadan. Semak database atau kata laluan."
+        : "Emel atau kata laluan tidak betul.",
+    );
     return;
   }
   if (!user.active) {
@@ -252,8 +531,12 @@ function handleLogin(event) {
   startAuthenticatedApp(user);
 }
 
-function logout() {
+async function logout() {
+  if (supabaseClient) {
+    await supabaseClient.auth.signOut();
+  }
   localStorage.removeItem(AUTH_KEY);
+  supabaseMode = false;
   showLogin();
 }
 
@@ -264,6 +547,155 @@ function togglePasswordVisibility() {
     "aria-label",
     isVisible ? "Tunjukkan kata laluan" : "Sembunyikan kata laluan",
   );
+}
+
+function resetPasswordFlow() {
+  passwordResetRequest = null;
+  elements.resetRequestForm.reset();
+  elements.resetVerifyForm.reset();
+  elements.resetRequestForm.hidden = false;
+  elements.resetVerifyForm.hidden = true;
+  elements.demoResetCode.hidden = true;
+  elements.resetCodeFields.hidden = false;
+  elements.resetCode.required = true;
+  elements.resetRequestError.textContent = "";
+  elements.resetVerifyError.textContent = "";
+}
+
+function openResetPasswordModal() {
+  resetPasswordFlow();
+  elements.resetEmail.value = elements.loginEmail.value.trim();
+  elements.resetPasswordModal.classList.add("open");
+  elements.resetPasswordModal.setAttribute("aria-hidden", "false");
+  window.setTimeout(() => elements.resetEmail.focus(), 80);
+}
+
+function openSupabaseRecoveryModal() {
+  resetPasswordFlow();
+  passwordResetRequest = { supabaseRecovery: true };
+  elements.resetRequestForm.hidden = true;
+  elements.resetVerifyForm.hidden = false;
+  elements.resetCodeFields.hidden = true;
+  elements.resetCode.required = false;
+  elements.resetCodeMessage.textContent = "Tetapkan kata laluan baru untuk akaun anda.";
+  elements.resetPasswordModal.classList.add("open");
+  elements.resetPasswordModal.setAttribute("aria-hidden", "false");
+  window.setTimeout(() => elements.resetNewPassword.focus(), 80);
+}
+
+async function sendPasswordResetEmail(agent, code) {
+  const endpoint = state.integration.endpoint.trim();
+  if (!endpoint || !state.integration.connected) return false;
+
+  try {
+    await fetch(endpoint, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "send_reset_code",
+        email: agent.email,
+        name: agent.name,
+        code,
+      }),
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function requestPasswordReset(event) {
+  event.preventDefault();
+  const email = elements.resetEmail.value.trim().toLowerCase();
+  if (supabaseClient) {
+    const redirectTo = `${window.location.origin}${window.location.pathname}`;
+    const { error } = await supabaseClient.auth.resetPasswordForEmail(email, { redirectTo });
+    if (error) {
+      elements.resetRequestError.textContent = "Emel reset tidak dapat dihantar. Semak tetapan Supabase Auth.";
+      return;
+    }
+    closeModal(elements.resetPasswordModal);
+    showToast("Semak emel anda", "Pautan untuk menetapkan kata laluan baru telah dihantar.");
+    return;
+  }
+
+  const agent = state.agents.find((item) => item.email.trim().toLowerCase() === email);
+  if (!agent) {
+    elements.resetRequestError.textContent = "Emel ini tidak didaftarkan dalam sistem.";
+    return;
+  }
+
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  const emailSent = await sendPasswordResetEmail(agent, code);
+  passwordResetRequest = {
+    agentId: agent.id,
+    email: agent.email,
+    code,
+    expiresAt: Date.now() + 10 * 60 * 1000,
+  };
+
+  elements.resetRequestForm.hidden = true;
+  elements.resetVerifyForm.hidden = false;
+  elements.resetCodeMessage.textContent = emailSent
+    ? `Kod verifikasi telah dihantar ke ${agent.email}.`
+    : `Google Apps Script emel belum disambungkan. Gunakan kod demo di bawah untuk menguji reset.`;
+  elements.demoResetCode.hidden = emailSent;
+  elements.demoResetCodeValue.textContent = code;
+  elements.resetRequestError.textContent = "";
+  window.setTimeout(() => elements.resetCode.focus(), 80);
+}
+
+async function verifyPasswordReset(event) {
+  event.preventDefault();
+  const code = elements.resetCode.value.trim();
+  const password = elements.resetNewPassword.value;
+  const confirmation = elements.resetConfirmPassword.value;
+
+  if (!passwordResetRequest) {
+    elements.resetVerifyError.textContent = "Permintaan reset tidak sah.";
+    return;
+  }
+  if (!passwordResetRequest.supabaseRecovery && passwordResetRequest.expiresAt <= Date.now()) {
+    elements.resetVerifyError.textContent = "Kod telah tamat. Minta kod baru.";
+    return;
+  }
+  if (!passwordResetRequest.supabaseRecovery && code !== passwordResetRequest.code) {
+    elements.resetVerifyError.textContent = "Kod verifikasi tidak betul.";
+    return;
+  }
+  if (password.length < 8) {
+    elements.resetVerifyError.textContent = "Kata laluan mesti sekurang-kurangnya 8 aksara.";
+    return;
+  }
+  if (password !== confirmation) {
+    elements.resetVerifyError.textContent = "Pengesahan kata laluan tidak sepadan.";
+    return;
+  }
+
+  if (passwordResetRequest.supabaseRecovery) {
+    const { error } = await supabaseClient.auth.updateUser({ password });
+    if (error) {
+      elements.resetVerifyError.textContent = "Kata laluan tidak dapat dikemas kini.";
+      return;
+    }
+    closeModal(elements.resetPasswordModal);
+    resetPasswordFlow();
+    showToast("Kata laluan dikemas kini", "Anda kini boleh menggunakan kata laluan baru.");
+    return;
+  }
+
+  const agent = getAgent(passwordResetRequest.agentId);
+  if (!agent) {
+    elements.resetVerifyError.textContent = "Akaun tidak ditemui.";
+    return;
+  }
+  agent.password = password;
+  saveState();
+  elements.loginEmail.value = agent.email;
+  closeModal(elements.resetPasswordModal);
+  resetPasswordFlow();
+  showToast("Kata laluan dikemas kini", "Anda kini boleh log masuk menggunakan kata laluan baru.");
 }
 
 function makeId(prefix) {
@@ -331,15 +763,18 @@ function showToast(title, message, tone = "success") {
 }
 
 function addActivity(type, lead, message) {
-  state.activities.unshift({
-    id: makeId("activity"),
+  const activity = {
+    id: crypto.randomUUID?.() || makeId("activity"),
     type,
     leadId: lead.id,
     leadName: lead.name,
     message,
     createdAt: Date.now(),
-  });
+  };
+  state.activities.unshift(activity);
   state.activities = state.activities.slice(0, 80);
+  persistActivity(activity).catch((error) => console.error("Activity save failed", error));
+  return activity;
 }
 
 function selectNextAgent(excludeId = null) {
@@ -362,13 +797,23 @@ function normalizePhone(value) {
   return String(value || "").replace(/[^\d+]/g, "");
 }
 
-function addLead(input, options = {}) {
+async function addLead(input, options = {}) {
   const name = String(input.name || input.full_name || input.fullName || "").trim();
   const phone = String(input.phone || input.phone_number || input.mobile || "").trim();
+  const email = String(input.email || input.email_address || input.emailAddress || "").trim();
+  const project = String(
+    input.project ||
+      input.projek ||
+      input.project_name ||
+      input.projectName ||
+      input.campaign_name ||
+      "Tidak dinyatakan",
+  ).trim();
   if (!name || !phone) return false;
 
   const sourceId = String(input.id || input.lead_id || "").trim();
-  const dedupeKey = sourceId || `${normalizePhone(phone)}-${input.created_at || input.createdAt || ""}`;
+  const dedupeKey =
+    sourceId || `${normalizePhone(phone)}-${project}-${input.created_at || input.createdAt || ""}`;
   if (state.leads.some((lead) => lead.dedupeKey === dedupeKey)) return false;
 
   const assignedAgent = selectNextAgent();
@@ -381,10 +826,12 @@ function addLead(input, options = {}) {
   const parsedCreatedAt = createdAtValue ? new Date(createdAtValue).getTime() : Date.now();
   const now = Date.now();
   const lead = {
-    id: makeId("lead"),
+    id: crypto.randomUUID?.() || makeId("lead"),
     dedupeKey,
     name,
     phone,
+    email,
+    project,
     source: String(input.source || input.platform || "Google Sheet"),
     createdAt: Number.isFinite(parsedCreatedAt) ? parsedCreatedAt : now,
     receivedAt: now,
@@ -393,10 +840,21 @@ function addLead(input, options = {}) {
     status: "new",
     passCount: 0,
     responseMs: null,
+    notes: "",
   };
 
   state.leads.unshift(lead);
-  addActivity("new", lead, `Lead baru diberikan kepada ${assignedAgent.name}`);
+  saveState();
+  try {
+    await persistNewLead(lead);
+  } catch (error) {
+    state.leads = state.leads.filter((item) => item.id !== lead.id);
+    saveState();
+    showToast("Lead tidak dapat disimpan", "Semak sambungan dan polisi Supabase.", "error");
+    console.error(error);
+    return false;
+  }
+  addActivity("new", lead, `${lead.project} diberikan kepada ${assignedAgent.name}`);
   saveState();
 
   if (!options.silent) {
@@ -406,12 +864,14 @@ function addLead(input, options = {}) {
   return true;
 }
 
-function addDemoLead() {
+async function addDemoLead() {
   const item = demoNames[Math.floor(Math.random() * demoNames.length)];
-  addLead({
-    id: makeId("demo"),
+  await addLead({
+    id: crypto.randomUUID?.() || makeId("demo"),
     name: item[0],
     phone: item[1],
+    email: item[2],
+    project: demoProjects[Math.floor(Math.random() * demoProjects.length)],
     source: Math.random() > 0.5 ? "Meta Ads" : "TikTok Ads",
     created_at: new Date().toISOString(),
   });
@@ -422,7 +882,7 @@ async function sendSystemNotification(lead) {
   if (!("Notification" in window) || Notification.permission !== "granted") return;
   const agent = getAgent(lead.assignedAgentId);
   new Notification("Lead baru perlu dihubungi", {
-    body: `${lead.name} • ${lead.phone}\nDiberikan kepada ${agent?.name || "ejen"}.`,
+    body: `${lead.project} • ${lead.name}\nNombor dibuka selepas CALL NOW. Diberikan kepada ${agent?.name || "ejen"}.`,
     tag: lead.id,
   });
 }
@@ -446,7 +906,7 @@ async function requestNotifications() {
   );
 }
 
-function processExpiredLeads() {
+async function processExpiredLeads() {
   const now = Date.now();
   let changed = false;
   state.leads
@@ -468,6 +928,16 @@ function processExpiredLeads() {
         `Masa ${previousAgent?.name || "ejen"} tamat, dipindahkan kepada ${nextAgent.name}`,
       );
       changed = true;
+      if (supabaseMode) {
+        supabaseClient
+          .rpc("pass_expired_lead", {
+            p_lead_id: lead.id,
+            p_next_agent_id: nextAgent.id,
+          })
+          .then(({ error }) => {
+            if (error) console.error("Lead pass save failed", error);
+          });
+      }
 
       if (nextAgent.id === state.currentUserId) {
         showToast("Lead dipindahkan kepada anda", `${lead.name} menunggu tindakan dalam 5 minit.`);
@@ -481,24 +951,43 @@ function processExpiredLeads() {
   }
 }
 
-function handleCall(leadId) {
+async function handleCall(leadId) {
   const lead = state.leads.find((item) => item.id === leadId);
   if (!lead || lead.status !== "new") return;
 
-  lead.status = "contacted";
-  lead.contactedAt = Date.now();
-  lead.responseMs = lead.contactedAt - lead.receivedAt;
+  if (supabaseMode) {
+    const { data, error } = await supabaseClient.rpc("claim_lead", { p_lead_id: leadId });
+    if (error || !data?.length) {
+      showToast("Lead tidak dapat dikunci", "Lead mungkin telah dipindahkan atau diambil ejen lain.", "error");
+      await loadRemoteState(state.currentUserId);
+      renderAll();
+      return;
+    }
+    const claimed = mapLead(data[0]);
+    Object.assign(lead, claimed);
+  } else {
+    lead.status = "contacted";
+    lead.contactedAt = Date.now();
+    lead.responseMs = lead.contactedAt - lead.receivedAt;
+    const localAgent = getAgent(lead.assignedAgentId);
+    if (localAgent) localAgent.leadsHandled = (localAgent.leadsHandled || 0) + 1;
+    addActivity("contacted", lead, `${localAgent?.name || "Ejen"} CALL NOW untuk ${lead.project}`);
+  }
+
   const agent = getAgent(lead.assignedAgentId);
-  if (agent) agent.leadsHandled = (agent.leadsHandled || 0) + 1;
-  addActivity("contacted", lead, `${agent?.name || "Ejen"} menekan CALL NOW`);
   saveState();
-  showToast("Lead berjaya dikunci", `${lead.name} kini milik ${agent?.name || "ejen ini"}.`);
+  showToast(
+    "Lead berjaya dikunci",
+    `${lead.name} untuk projek ${lead.project} kini milik ${agent?.name || "ejen ini"}.`,
+  );
   renderAll();
 
   const callablePhone = lead.phone.replace(/[^\d+]/g, "");
-  window.setTimeout(() => {
-    window.location.href = `tel:${callablePhone}`;
-  }, 250);
+  if (callablePhone) {
+    window.setTimeout(() => {
+      window.location.href = `tel:${callablePhone}`;
+    }, 250);
+  }
 }
 
 function getVisibleActiveLead() {
@@ -507,6 +996,15 @@ function getVisibleActiveLead() {
     .sort((a, b) => a.expiresAt - b.expiresAt);
   if (isAdmin()) return newLeads[0] || null;
   return newLeads.find((lead) => lead.assignedAgentId === state.currentUserId) || null;
+}
+
+function canViewLeadPhone(lead) {
+  if (lead.status !== "contacted") return false;
+  return isAdmin() || lead.assignedAgentId === state.currentUserId;
+}
+
+function displayLeadPhone(lead) {
+  return canViewLeadPhone(lead) && lead.phone ? lead.phone : "•••• •••• ••••";
 }
 
 function renderActiveLead() {
@@ -544,7 +1042,9 @@ function renderActiveLead() {
     fragment.querySelector(".lead-arrival").textContent = `Masuk ${relativeTime(lead.receivedAt)}`;
     fragment.querySelector(".lead-avatar").textContent = initials(lead.name);
     fragment.querySelector(".lead-name").textContent = lead.name;
-    fragment.querySelector(".lead-phone").textContent = lead.phone;
+    fragment.querySelector(".lead-project").textContent = lead.project || "Tidak dinyatakan";
+    fragment.querySelector(".lead-phone").textContent = "•••• •••• ••••";
+    fragment.querySelector(".call-project").textContent = lead.project || "Tidak dinyatakan";
     fragment.querySelector(".assigned-agent").textContent =
       `Assigned: ${getAgent(lead.assignedAgentId)?.name || "Tiada"}`;
     fragment.querySelector(".call-button").addEventListener("click", () => handleCall(lead.id));
@@ -639,8 +1139,12 @@ function renderLeadsTable() {
   const search = elements.leadSearch.value.trim().toLowerCase();
   const filter = elements.leadFilter.value;
   const rows = state.leads.filter((lead) => {
+    if (!isAdmin() && lead.assignedAgentId !== state.currentUserId) return false;
     const matchesSearch =
-      lead.name.toLowerCase().includes(search) || lead.phone.toLowerCase().includes(search);
+      lead.name.toLowerCase().includes(search) ||
+      (canViewLeadPhone(lead) && lead.phone.toLowerCase().includes(search)) ||
+      String(lead.email || "").toLowerCase().includes(search) ||
+      String(lead.project || "").toLowerCase().includes(search);
     const visualStatus = lead.status === "new" && lead.passCount > 0 ? "passed" : lead.status;
     return matchesSearch && (filter === "all" || visualStatus === filter);
   });
@@ -653,7 +1157,8 @@ function renderLeadsTable() {
             visualStatus === "contacted" ? "Contacted" : visualStatus === "passed" ? "Passed" : "New";
           return `
             <tr>
-              <td><strong>${escapeHtml(lead.name)}</strong><small>${escapeHtml(lead.phone)}</small></td>
+              <td><strong>${escapeHtml(lead.name)}</strong><small>${escapeHtml(displayLeadPhone(lead))}</small></td>
+              <td><strong>${escapeHtml(lead.project || "Tidak dinyatakan")}</strong></td>
               <td>${escapeHtml(lead.source)}</td>
               <td>${escapeHtml(getAgent(lead.assignedAgentId)?.name || "Tiada ejen")}</td>
               <td>${formatDateTime(lead.receivedAt)}</td>
@@ -661,7 +1166,43 @@ function renderLeadsTable() {
             </tr>`;
         })
         .join("")
-    : `<tr><td class="table-empty" colspan="5">Tiada lead ditemui.</td></tr>`;
+    : `<tr><td class="table-empty" colspan="6">Tiada lead ditemui.</td></tr>`;
+}
+
+function getContactedLeads() {
+  return state.leads
+    .filter(
+      (lead) =>
+        lead.status === "contacted" &&
+        (isAdmin() || lead.assignedAgentId === state.currentUserId),
+    )
+    .sort((a, b) => (b.contactedAt || 0) - (a.contactedAt || 0));
+}
+
+function renderContacts() {
+  const search = elements.contactSearch.value.trim().toLowerCase();
+  const rows = getContactedLeads().filter((lead) =>
+    [lead.name, lead.phone, lead.email, lead.project]
+      .join(" ")
+      .toLowerCase()
+      .includes(search),
+  );
+  elements.contactCount.textContent = `${rows.length} pelanggan`;
+  elements.contactsTableBody.innerHTML = rows.length
+    ? rows
+        .map(
+          (lead) => `
+            <tr>
+              <td><strong>${escapeHtml(lead.name)}</strong></td>
+              <td><strong>${escapeHtml(lead.phone || "-")}</strong></td>
+              <td>${escapeHtml(lead.email || "-")}</td>
+              <td><strong>${escapeHtml(lead.project || "Tidak dinyatakan")}</strong></td>
+              <td>${lead.contactedAt ? formatDateTime(lead.contactedAt) : "-"}</td>
+              <td><button class="contact-edit-button" type="button" data-contact-edit="${lead.id}">Edit</button></td>
+            </tr>`,
+        )
+        .join("")
+    : `<tr><td class="table-empty" colspan="6">Belum ada lead yang dihubungi.</td></tr>`;
 }
 
 function renderAgents() {
@@ -690,7 +1231,7 @@ function renderAgents() {
             <span>Lead dikendalikan <b>${agent.leadsHandled || 0}</b></span>
           </div>
           <div class="agent-card-actions">
-            <button type="button">${agent.active ? "Aktif menerima lead" : "Tidak aktif"}</button>
+            <button class="edit-password" type="button" data-agent-password="${agent.id}">Edit password</button>
             ${
               agent.id !== state.currentUserId
                 ? `<button class="remove-agent" type="button" data-agent-remove="${agent.id}" aria-label="Buang ${escapeHtml(agent.name)}">×</button>`
@@ -733,8 +1274,21 @@ function renderUser() {
 
 function renderIntegration() {
   const integration = state.integration;
+  const supabaseConfig = loadSupabaseConfig();
   elements.sheetEndpoint.value = integration.endpoint;
   elements.pollInterval.value = String(integration.interval);
+  elements.supabaseUrl.value = supabaseConfig?.url || "";
+  elements.supabaseKey.value = supabaseConfig?.key || "";
+  elements.supabaseResult.classList.toggle("error", Boolean(supabaseConfig && !supabaseMode));
+  elements.supabaseResult.innerHTML = `
+    <span class="status-dot"></span>
+    <span>${
+      supabaseMode
+        ? "Supabase aktif. Akaun, lead dan aktiviti sedang diselaraskan secara live."
+        : supabaseConfig
+          ? "Konfigurasi disimpan tetapi sambungan belum aktif. Semak schema dan akaun Auth."
+          : "Belum dikonfigurasi. Data tempatan sedang digunakan."
+    }</span>`;
   elements.sidebarSyncText.textContent = integration.connected ? "Disambungkan" : "Mod demo";
   elements.sidebarSyncStatus.textContent = integration.connected
     ? `Sync ${integration.lastSyncAt ? relativeTime(integration.lastSyncAt) : "aktif"}`
@@ -757,12 +1311,14 @@ function renderAll() {
   renderActivities();
   renderTeam();
   renderLeadsTable();
+  renderContacts();
   renderAgents();
   renderIntegration();
 }
 
 const viewTitles = {
   leads: "Semua Leads",
+  contacts: "Pelanggan Saya",
   agents: "Pengurusan Ejen",
   integration: "Google Sheets Sync",
 };
@@ -799,7 +1355,7 @@ function closeModal(modal) {
   modal.setAttribute("aria-hidden", "true");
 }
 
-function addAgent(event) {
+async function addAgent(event) {
   event.preventDefault();
   const name = document.querySelector("#agent-name").value.trim();
   const phone = document.querySelector("#agent-phone").value.trim();
@@ -811,24 +1367,39 @@ function addAgent(event) {
     return;
   }
 
-  state.agents.push({
-    id: makeId("agent"),
-    name,
-    phone,
-    email,
-    password,
-    role: "agent",
-    active: true,
-    leadsHandled: 0,
-  });
-  saveState();
+  if (supabaseMode) {
+    const { data, error } = await supabaseClient.functions.invoke("admin-manage-agent", {
+      body: { action: "create", name, phone, email, password },
+    });
+    if (error || !data?.ok) {
+      showToast(
+        "Ejen tidak dapat didaftarkan",
+        data?.error || "Deploy Edge Function admin-manage-agent dan semak akses admin.",
+        "error",
+      );
+      return;
+    }
+    await loadRemoteState(state.currentUserId);
+  } else {
+    state.agents.push({
+      id: makeId("agent"),
+      name,
+      phone,
+      email,
+      password,
+      role: "agent",
+      active: true,
+      leadsHandled: 0,
+    });
+    saveState();
+  }
   elements.agentForm.reset();
   closeModal(elements.agentModal);
   showToast("Ejen didaftarkan", `${name} kini termasuk dalam giliran lead.`);
   renderAll();
 }
 
-function toggleAgent(agentId) {
+async function toggleAgent(agentId) {
   const agent = getAgent(agentId);
   if (!agent) return;
   agent.active = !agent.active;
@@ -848,6 +1419,17 @@ function toggleAgent(agentId) {
     });
   }
   saveState();
+  try {
+    await persistProfile(agent);
+    await Promise.all(
+      state.leads
+        .filter((lead) => lead.status === "new")
+        .map((lead) => persistLead(lead)),
+    );
+  } catch (error) {
+    console.error(error);
+    showToast("Perubahan belum disimpan", "Semak polisi database Supabase.", "error");
+  }
   showToast(
     agent.active ? "Ejen diaktifkan" : "Ejen dinyahaktifkan",
     agent.active ? `${agent.name} akan menerima giliran lead.` : `${agent.name} dikeluarkan daripada giliran.`,
@@ -855,9 +1437,22 @@ function toggleAgent(agentId) {
   renderAll();
 }
 
-function removeAgent(agentId) {
+async function removeAgent(agentId) {
   const agent = getAgent(agentId);
   if (!agent) return;
+  if (supabaseMode) {
+    const { data, error } = await supabaseClient.functions.invoke("admin-manage-agent", {
+      body: { action: "delete", userId: agentId },
+    });
+    if (error || !data?.ok) {
+      showToast("Ejen tidak dapat dibuang", data?.error || "Semak Edge Function Supabase.", "error");
+      return;
+    }
+    await loadRemoteState(state.currentUserId);
+    showToast("Ejen dibuang", `${agent.name} telah dikeluarkan daripada sistem.`);
+    renderAll();
+    return;
+  }
   const replacement = selectNextAgent(agentId);
   state.leads
     .filter((lead) => lead.status === "new" && lead.assignedAgentId === agentId)
@@ -871,6 +1466,94 @@ function removeAgent(agentId) {
   saveState();
   showToast("Ejen dibuang", `${agent.name} telah dikeluarkan daripada sistem.`);
   renderAll();
+}
+
+function openAgentPasswordModal(agentId) {
+  const agent = getAgent(agentId);
+  if (!agent) return;
+  selectedAgentId = agentId;
+  elements.agentPasswordForm.reset();
+  elements.agentPasswordError.textContent = "";
+  elements.agentPasswordDescription.textContent = `Tetapkan kata laluan baru untuk ${agent.name} (${agent.email}).`;
+  elements.agentPasswordModal.classList.add("open");
+  elements.agentPasswordModal.setAttribute("aria-hidden", "false");
+  window.setTimeout(() => elements.agentNewPassword.focus(), 80);
+}
+
+async function updateAgentPassword(event) {
+  event.preventDefault();
+  const agent = getAgent(selectedAgentId);
+  const password = elements.agentNewPassword.value;
+  const confirmation = elements.agentConfirmPassword.value;
+  if (!agent) return;
+  if (password.length < 8) {
+    elements.agentPasswordError.textContent = "Kata laluan mesti sekurang-kurangnya 8 aksara.";
+    return;
+  }
+  if (password !== confirmation) {
+    elements.agentPasswordError.textContent = "Pengesahan kata laluan tidak sepadan.";
+    return;
+  }
+
+  if (supabaseMode) {
+    const { data, error } = await supabaseClient.functions.invoke("admin-manage-agent", {
+      body: { action: "update_password", userId: agent.id, password },
+    });
+    if (error || !data?.ok) {
+      elements.agentPasswordError.textContent =
+        data?.error || "Password tidak dapat dikemas kini. Semak Edge Function Supabase.";
+      return;
+    }
+  } else {
+    agent.password = password;
+    saveState();
+  }
+
+  closeModal(elements.agentPasswordModal);
+  showToast("Kata laluan dikemas kini", `Kata laluan ${agent.name} telah ditukar.`);
+}
+
+function openContactModal(leadId) {
+  const lead = state.leads.find((item) => item.id === leadId);
+  if (!lead || !canViewLeadPhone(lead)) return;
+  selectedContactId = leadId;
+  elements.contactName.value = lead.name;
+  elements.contactPhone.value = lead.phone;
+  elements.contactEmail.value = lead.email || "";
+  elements.contactProject.value = lead.project || "";
+  elements.contactNotes.value = lead.notes || "";
+  elements.contactFormError.textContent = "";
+  elements.contactModal.classList.add("open");
+  elements.contactModal.setAttribute("aria-hidden", "false");
+  window.setTimeout(() => elements.contactName.focus(), 80);
+}
+
+async function updateContact(event) {
+  event.preventDefault();
+  const lead = state.leads.find((item) => item.id === selectedContactId);
+  if (!lead || !canViewLeadPhone(lead)) {
+    elements.contactFormError.textContent = "Lead ini tidak boleh dikemas kini.";
+    return;
+  }
+  lead.name = elements.contactName.value.trim();
+  lead.phone = elements.contactPhone.value.trim();
+  lead.email = elements.contactEmail.value.trim();
+  lead.project = elements.contactProject.value.trim();
+  lead.notes = elements.contactNotes.value.trim();
+  if (!lead.name || !lead.phone || !lead.project) {
+    elements.contactFormError.textContent = "Nama, nombor telefon dan projek diperlukan.";
+    return;
+  }
+  try {
+    await persistLead(lead);
+    saveState();
+    closeModal(elements.contactModal);
+    showToast("Rekod pelanggan disimpan", `${lead.name} telah dikemas kini.`);
+    renderAll();
+  } catch (error) {
+    console.error(error);
+    elements.contactFormError.textContent = "Perubahan tidak dapat disimpan ke Supabase.";
+  }
 }
 
 async function syncGoogleSheet(options = {}) {
@@ -893,15 +1576,24 @@ async function syncGoogleSheet(options = {}) {
     if (!Array.isArray(rows)) throw new Error("Format JSON tidak sah");
 
     let added = 0;
-    rows.forEach((row) => {
-      if (addLead(row, { silent: true })) added += 1;
-    });
+    for (const row of rows) {
+      if (await addLead(row, { silent: true })) added += 1;
+    }
 
     state.integration.endpoint = endpoint;
     state.integration.interval = Number(elements.pollInterval.value) || 30;
     state.integration.connected = true;
     state.integration.lastSyncAt = Date.now();
     saveState();
+    if (supabaseMode) {
+      await supabaseClient.from("app_settings").upsert({
+        id: 1,
+        google_sheet_endpoint: endpoint,
+        poll_interval: state.integration.interval,
+        last_sync_at: new Date(state.integration.lastSyncAt).toISOString(),
+        round_robin_index: state.roundRobinIndex,
+      });
+    }
     scheduleSync();
     renderAll();
     if (!options.silent || added) {
@@ -927,19 +1619,61 @@ async function syncGoogleSheet(options = {}) {
 
 function scheduleSync() {
   window.clearInterval(syncTimer);
-  if (!state.integration.endpoint) return;
+  if (!state.integration.endpoint || !isAdmin()) return;
   syncTimer = window.setInterval(
     () => syncGoogleSheet({ silent: true }),
     Math.max(15, Number(state.integration.interval) || 30) * 1000,
   );
 }
 
-function saveIntegration(event) {
+async function saveIntegration(event) {
   event.preventDefault();
   state.integration.endpoint = elements.sheetEndpoint.value.trim();
   state.integration.interval = Number(elements.pollInterval.value) || 30;
+  if (!state.integration.endpoint) {
+    state.integration.connected = false;
+    state.integration.lastSyncAt = null;
+    saveState();
+    if (supabaseMode) {
+      await supabaseClient.from("app_settings").upsert({
+        id: 1,
+        google_sheet_endpoint: null,
+        poll_interval: state.integration.interval,
+        last_sync_at: null,
+        round_robin_index: state.roundRobinIndex,
+      });
+    }
+    scheduleSync();
+    renderIntegration();
+    showToast("Sambungan dipadam", "App kembali menggunakan mod demo.");
+    return;
+  }
   saveState();
   syncGoogleSheet();
+}
+
+function saveSupabaseConfig(event) {
+  event.preventDefault();
+  const url = elements.supabaseUrl.value.trim().replace(/\/+$/, "");
+  const key = elements.supabaseKey.value.trim();
+  if (!/^https:\/\/.+\.supabase\.co$/i.test(url) || !key) {
+    elements.supabaseResult.classList.add("error");
+    elements.supabaseResult.innerHTML =
+      '<span class="status-dot"></span><span>Masukkan Project URL dan publishable / anon key yang sah.</span>';
+    return;
+  }
+  localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify({ url, key }));
+  showToast("Konfigurasi Supabase disimpan", "App akan dimuat semula untuk mengaktifkan database.");
+  window.setTimeout(() => window.location.reload(), 500);
+}
+
+async function disconnectSupabase() {
+  if (supabaseClient) await supabaseClient.auth.signOut();
+  localStorage.removeItem(SUPABASE_CONFIG_KEY);
+  supabaseClient = null;
+  supabaseMode = false;
+  showToast("Supabase diputuskan", "App kembali menggunakan data tempatan.");
+  window.setTimeout(() => window.location.reload(), 400);
 }
 
 document.querySelectorAll("[data-view]").forEach((button) => {
@@ -957,14 +1691,23 @@ elements.loginForm.addEventListener("submit", handleLogin);
 elements.loginEmail.addEventListener("input", () => setLoginError(""));
 elements.loginPassword.addEventListener("input", () => setLoginError(""));
 elements.passwordToggle.addEventListener("click", togglePasswordVisibility);
+elements.forgotPasswordButton.addEventListener("click", openResetPasswordModal);
+elements.resetRequestForm.addEventListener("submit", requestPasswordReset);
+elements.resetVerifyForm.addEventListener("submit", verifyPasswordReset);
+elements.resetBackButton.addEventListener("click", resetPasswordFlow);
 elements.sidebarSettings.addEventListener("click", logout);
 elements.logoutButton.addEventListener("click", logout);
 elements.leadSearch.addEventListener("input", renderLeadsTable);
 elements.leadFilter.addEventListener("change", renderLeadsTable);
+elements.contactSearch.addEventListener("input", renderContacts);
 elements.addAgentButton.addEventListener("click", openAgentModal);
 elements.agentForm.addEventListener("submit", addAgent);
+elements.agentPasswordForm.addEventListener("submit", updateAgentPassword);
+elements.contactForm.addEventListener("submit", updateContact);
 elements.integrationForm.addEventListener("submit", saveIntegration);
 elements.syncNowButton.addEventListener("click", () => syncGoogleSheet());
+elements.supabaseForm.addEventListener("submit", saveSupabaseConfig);
+elements.supabaseDisconnect.addEventListener("click", disconnectSupabase);
 
 document.querySelectorAll("[data-close-modal]").forEach((button) => {
   button.addEventListener("click", () => closeModal(document.querySelector(`#${button.dataset.closeModal}`)));
@@ -974,24 +1717,69 @@ elements.agentModal.addEventListener("click", (event) => {
   if (event.target === elements.agentModal) closeModal(elements.agentModal);
 });
 
+elements.resetPasswordModal.addEventListener("click", (event) => {
+  if (event.target === elements.resetPasswordModal) closeModal(elements.resetPasswordModal);
+});
+
+[elements.agentPasswordModal, elements.contactModal].forEach((modal) => {
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) closeModal(modal);
+  });
+});
+
 elements.agentsGrid.addEventListener("click", (event) => {
   const toggle = event.target.closest("[data-agent-toggle]");
   const remove = event.target.closest("[data-agent-remove]");
+  const password = event.target.closest("[data-agent-password]");
   if (toggle) toggleAgent(toggle.dataset.agentToggle);
   if (remove) removeAgent(remove.dataset.agentRemove);
+  if (password) openAgentPasswordModal(password.dataset.agentPassword);
+});
+
+elements.contactsTableBody.addEventListener("click", (event) => {
+  const edit = event.target.closest("[data-contact-edit]");
+  if (edit) openContactModal(edit.dataset.contactEdit);
 });
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     closeModal(elements.agentModal);
+    closeModal(elements.resetPasswordModal);
+    closeModal(elements.agentPasswordModal);
+    closeModal(elements.contactModal);
     elements.sidebar.classList.remove("open");
   }
 });
 
-saveState();
-const sessionUser = getSessionUser();
-if (sessionUser) {
-  startAuthenticatedApp(sessionUser);
-} else {
-  showLogin();
+async function bootstrap() {
+  saveState();
+  initSupabase();
+  if (supabaseClient) {
+    supabaseClient.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") {
+        window.setTimeout(openSupabaseRecoveryModal, 0);
+      }
+    });
+    const {
+      data: { session },
+    } = await supabaseClient.auth.getSession();
+    if (session?.user) {
+      const loaded = await loadRemoteState(session.user.id);
+      if (loaded) {
+        startAuthenticatedApp(getCurrentUser());
+        return;
+      }
+    }
+    showLogin();
+    return;
+  }
+
+  const sessionUser = getSessionUser();
+  if (sessionUser) {
+    startAuthenticatedApp(sessionUser);
+  } else {
+    showLogin();
+  }
 }
+
+bootstrap();
