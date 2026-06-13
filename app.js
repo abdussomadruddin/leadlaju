@@ -1,6 +1,11 @@
 const STORAGE_KEY = "leadlaju-state-v1";
 const AUTH_KEY = "leadlaju-auth-v1";
 const SUPABASE_CONFIG_KEY = "leadlaju-supabase-config-v1";
+const SUPABASE_DISABLED_KEY = "leadlaju-supabase-disabled-v1";
+const DEFAULT_SUPABASE_CONFIG = Object.freeze({
+  url: "https://rfqwyhafvfvafiqrcmxa.supabase.co",
+  key: "sb_publishable_or7DVUc_la79KiBz4kR5uw_EIGyN3-l",
+});
 const SESSION_DURATION_MS = 365 * 24 * 60 * 60 * 1000;
 const RESPONSE_WINDOW_MS = 5 * 60 * 1000;
 
@@ -215,13 +220,14 @@ function saveState() {
 }
 
 function loadSupabaseConfig() {
+  if (localStorage.getItem(SUPABASE_DISABLED_KEY) === "true") return null;
   try {
     const config = JSON.parse(localStorage.getItem(SUPABASE_CONFIG_KEY));
-    if (!config?.url || !config?.key) return null;
-    return config;
+    if (config?.url && config?.key) return config;
   } catch {
-    return null;
+    // Fall through to the production project configuration.
   }
+  return DEFAULT_SUPABASE_CONFIG;
 }
 
 function initSupabase() {
@@ -1663,6 +1669,7 @@ function saveSupabaseConfig(event) {
     return;
   }
   localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify({ url, key }));
+  localStorage.removeItem(SUPABASE_DISABLED_KEY);
   showToast("Konfigurasi Supabase disimpan", "App akan dimuat semula untuk mengaktifkan database.");
   window.setTimeout(() => window.location.reload(), 500);
 }
@@ -1670,6 +1677,7 @@ function saveSupabaseConfig(event) {
 async function disconnectSupabase() {
   if (supabaseClient) await supabaseClient.auth.signOut();
   localStorage.removeItem(SUPABASE_CONFIG_KEY);
+  localStorage.setItem(SUPABASE_DISABLED_KEY, "true");
   supabaseClient = null;
   supabaseMode = false;
   showToast("Supabase diputuskan", "App kembali menggunakan data tempatan.");
