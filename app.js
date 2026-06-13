@@ -496,26 +496,26 @@ async function handleLogin(event) {
 
   if (supabaseClient) {
     const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-    if (!error && data.user) {
-      const loaded = await loadRemoteState(data.user.id);
-      if (loaded) {
-        setLoginError("");
-        activeView = "dashboard";
-        switchView("dashboard");
-        startAuthenticatedApp(getCurrentUser());
-        return;
-      }
-      await supabaseClient.auth.signOut();
+    if (error || !data.user) {
+      setLoginError("Emel atau kata laluan tidak betul.");
+      return;
     }
+    const loaded = await loadRemoteState(data.user.id);
+    if (!loaded) {
+      await supabaseClient.auth.signOut();
+      setLoginError("Akaun berjaya disahkan tetapi data sistem tidak dapat dimuatkan.");
+      return;
+    }
+    setLoginError("");
+    activeView = "dashboard";
+    switchView("dashboard");
+    startAuthenticatedApp(getCurrentUser());
+    return;
   }
 
   const user = state.agents.find((agent) => agent.email.toLowerCase() === email);
   if (!user || user.password !== password) {
-    setLoginError(
-      supabaseClient
-        ? "Login Supabase gagal dan akaun demo tidak sepadan. Semak database atau kata laluan."
-        : "Emel atau kata laluan tidak betul.",
-    );
+    setLoginError("Emel atau kata laluan tidak betul.");
     return;
   }
   if (!user.active) {
