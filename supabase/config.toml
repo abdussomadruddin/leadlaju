@@ -1,0 +1,2 @@
+[functions.admin-manage-agent]
+verify_jwt = true
