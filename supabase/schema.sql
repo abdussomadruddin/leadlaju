@@ -326,7 +326,7 @@ begin
   set
     status = 'contacted',
     contacted_at = now(),
-    response_ms = floor(extract(epoch from (now() - received_at)) * 1000)::integer
+    response_ms = floor(extract(epoch from (now() - target.received_at)) * 1000)::integer
   where leads.id = p_lead_id;
 
   update public.profiles
