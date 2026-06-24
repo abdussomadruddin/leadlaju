@@ -36,6 +36,7 @@ const AGENT_FIELD_ALIASES = {
   active: ["status", "active", "aktif"],
   leadsHandled: ["leads handled", "lead dikendalikan", "leads_handled"],
   createdAt: ["created at", "created_at", "tarikh daftar", "tarikh & masa"],
+  password: ["password", "kata laluan", "kata_laluan", "temporary password", "temporary_password"],
 };
 
 const AGENT_HEADERS = [
@@ -192,6 +193,7 @@ function replaceAgents_(agentsInput) {
       active: normalizeAgentActive_(input.active ?? input.status ?? "active"),
       leadsHandled: String(input.leads_handled ?? input.leadsHandled ?? 0).trim(),
       createdAt: String(input.created_at || input.createdAt || new Date().toISOString()).trim(),
+      password: String(input.password || input.kata_laluan || input.temporary_password || "").trim(),
     }))
     .filter((agent) => agent.id && agent.name && agent.email)
     .map((agent) => buildAgentRow_(headers, agent));
@@ -216,10 +218,11 @@ function upsertAgent_(input) {
     active: normalizeAgentActive_(input.active ?? input.status ?? "active"),
     leadsHandled: String(input.leads_handled ?? input.leadsHandled ?? 0).trim(),
     createdAt: String(input.created_at || input.createdAt || new Date().toISOString()).trim(),
+    password: String(input.password || input.kata_laluan || input.temporary_password || "").trim(),
   };
 
-  if (!agent.id || !agent.name || !agent.email) {
-    return { ok: false, error: "ID, nama dan emel ejen diperlukan." };
+  if (!agent.name || !agent.email) {
+    return { ok: false, error: "Nama dan emel ejen diperlukan." };
   }
 
   const values = sheet.getDataRange().getDisplayValues();
@@ -237,7 +240,7 @@ function upsertAgent_(input) {
     }
   }
 
-  const row = buildAgentRow_(headers, agent);
+  const row = buildAgentRow_(headers, agent, rowNumber ? values[rowNumber - 1] : null);
   if (rowNumber) {
     sheet.getRange(rowNumber, 1, 1, row.length).setValues([row]);
     return { ok: true, updated: true, agent };
@@ -273,8 +276,9 @@ function deleteAgent_(input) {
   return { ok: true, deleted };
 }
 
-function buildAgentRow_(headers, agent) {
-  const row = new Array(headers.length).fill("");
+function buildAgentRow_(headers, agent, existingRow) {
+  const row = existingRow ? existingRow.slice(0, headers.length) : new Array(headers.length).fill("");
+  while (row.length < headers.length) row.push("");
   setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "id", agent.id);
   setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "name", agent.name);
   setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "phone", agent.phone);
@@ -283,6 +287,9 @@ function buildAgentRow_(headers, agent) {
   setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "active", agent.active);
   setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "leadsHandled", agent.leadsHandled || "0");
   setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "createdAt", agent.createdAt);
+  if (agent.password) {
+    setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "password", agent.password);
+  }
   return row;
 }
 
@@ -302,8 +309,9 @@ function readAgents_(sheet, headers) {
       active: normalizeAgentActive_(getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "active")),
       leads_handled: Number(getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "leadsHandled")) || 0,
       created_at: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "createdAt"),
+      password: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "password"),
     }))
-    .filter((agent) => agent.id && agent.name && agent.email);
+    .filter((agent) => agent.name && agent.email);
 }
 
 function normalizeAgentActive_(value) {

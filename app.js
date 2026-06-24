@@ -8,6 +8,7 @@ const DEFAULT_SUPABASE_CONFIG = Object.freeze({
 });
 const SESSION_DURATION_MS = 365 * 24 * 60 * 60 * 1000;
 const RESPONSE_WINDOW_MS = 5 * 60 * 1000;
+const DEFAULT_AGENT_PASSWORD = "Agent123!";
 
 const defaultState = {
   currentUserId: "agent-aina",
@@ -838,6 +839,38 @@ function normalizeSheetStatus(value) {
   return "new";
 }
 
+function normalizeAgentActive(value) {
+  if (typeof value === "boolean") return value;
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["inactive", "tidak aktif", "false", "0", "off", "disabled", "no", "tidak"].includes(normalized)) {
+    return false;
+  }
+  return true;
+}
+
+function normalizeAgentRole(value) {
+  return String(value || "").trim().toLowerCase() === "admin" ? "admin" : "agent";
+}
+
+function normalizeSheetAgent(input) {
+  if (!input) return null;
+  const email = String(input.email || input.emel || input.email_address || "").trim().toLowerCase();
+  const name = String(input.name || input.nama || input.full_name || "").trim();
+  if (!name || !email) return null;
+
+  return {
+    id: String(input.id || input.user_id || input.agent_id || "").trim(),
+    name,
+    phone: String(input.phone || input.phone_number || input.mobile || input.telefon || "").trim(),
+    email,
+    role: normalizeAgentRole(input.role || input.peranan),
+    active: normalizeAgentActive(input.active ?? input.status ?? input.aktif),
+    leadsHandled: Number(input.leads_handled ?? input.leadsHandled ?? 0) || 0,
+    password: String(input.password || input.kata_laluan || input.temporary_password || "").trim(),
+    createdAt: input.created_at || input.createdAt ? new Date(input.created_at || input.createdAt).getTime() : null,
+  };
+}
+
 function sheetDedupeKey(input) {
   const sourceId = String(input.id || input.lead_id || "").trim();
   if (sourceId) return sourceId;
@@ -987,20 +1020,20 @@ async function addManualLead(event) {
     status: "new",
   };
 
-  const result = await addLead(leadInput, { silent: true });
-  if (!result) {
-    elements.manualLeadError.textContent = "Lead ini tidak dapat dimasukkan. Semak nombor telefon dan ejen aktif.";
+  const pushedToSheet = await pushManualLeadToSheet(leadInput);
+  if (!pushedToSheet) {
+    elements.manualLeadError.textContent = "Google Sheet belum dapat dikemas kini. Semak Web App URL.";
     return;
   }
-  const pushedToSheet = await pushManualLeadToSheet(leadInput);
+
+  const result = await addLead(leadInput, { silent: true, updateExisting: true });
+  if (!result) {
+    elements.manualLeadError.textContent = "Lead sudah masuk Google Sheet, tetapi dashboard belum dapat sync. Semak ejen aktif.";
+    return;
+  }
+
   closeModal(elements.manualLeadModal);
-  showToast(
-    pushedToSheet ? "Manual lead disimpan" : "Lead masuk dashboard",
-    pushedToSheet
-      ? "Lead telah dihantar ke Google Sheet dan dimasukkan ke New Leads."
-      : "Google Sheet belum dapat dikemas kini. Semak Web App URL.",
-    pushedToSheet ? "success" : "error",
-  );
+  showToast("Manual lead disimpan", "Google Sheet, dashboard dan Supabase telah diselaraskan.", "success");
   const savedLead = state.leads.find((lead) => lead.dedupeKey === leadInput.id);
   if (savedLead) sendSystemNotification(savedLead);
   renderAll();
@@ -1139,8 +1172,8 @@ async function postGoogleSheetAction(payload, errorLabel) {
   }
 }
 
-async function pushAgentsSnapshotToSheet() {
-  const agents = state.agents.map((agent) => ({
+function agentSheetPayload(agent) {
+  return {
     id: agent.id,
     name: agent.name,
     phone: agent.phone || "",
@@ -1149,15 +1182,156 @@ async function pushAgentsSnapshotToSheet() {
     active: agent.active ? "active" : "inactive",
     leadsHandled: agent.leadsHandled || 0,
     created_at: agent.createdAt ? new Date(agent.createdAt).toISOString() : new Date().toISOString(),
-  }));
+  };
+}
 
+async function upsertAgentToSheet(agent) {
+  if (!agent?.name || !agent?.email) return false;
   return postGoogleSheetAction(
     {
-      action: "replace_agents",
-      agents,
+      action: "add_agent",
+      agent: agentSheetPayload(agent),
     },
-    "Agent sheet snapshot failed",
+    "Agent sheet upsert failed",
   );
+}
+
+async function deleteAgentFromSheet(agent) {
+  if (!agent?.id && !agent?.email) return false;
+  return postGoogleSheetAction(
+    {
+      action: "delete_agent",
+      agent: {
+        id: agent.id,
+        email: agent.email,
+      },
+    },
+    "Agent sheet delete failed",
+  );
+}
+
+async function syncAgentsFromSheet(sheetAgentRows) {
+  const result = { added: 0, updated: 0, removed: 0, backfilled: 0, skipped: 0 };
+  if (!Array.isArray(sheetAgentRows)) return result;
+  if (!isAdmin()) {
+    result.skipped += sheetAgentRows.length;
+    return result;
+  }
+
+  const sheetAgents = sheetAgentRows.map(normalizeSheetAgent).filter(Boolean);
+  if (!sheetAgents.length) {
+    result.skipped += 1;
+    return result;
+  }
+
+  const sheetEmails = new Set(sheetAgents.map((agent) => agent.email));
+  let reloadRemote = false;
+
+  for (const sheetAgent of sheetAgents) {
+    const existingAgent = state.agents.find((agent) => {
+      const emailMatches = agent.email?.toLowerCase() === sheetAgent.email;
+      return (sheetAgent.id && agent.id === sheetAgent.id) || emailMatches;
+    });
+
+    if (existingAgent) {
+      const nextActive =
+        existingAgent.id === state.currentUserId && existingAgent.role === "admin" ? true : sheetAgent.active;
+      const updates = {
+        name: sheetAgent.name,
+        phone: sheetAgent.phone,
+        active: nextActive,
+        leadsHandled: sheetAgent.leadsHandled,
+      };
+      const changed = Object.entries(updates).some(([key, value]) => existingAgent[key] !== value);
+      if (changed) {
+        Object.assign(existingAgent, updates);
+        await persistProfile(existingAgent);
+        result.updated += 1;
+      }
+      if (!sheetAgent.id) result.backfilled += 1;
+      continue;
+    }
+
+    if (sheetAgent.role === "admin") {
+      result.skipped += 1;
+      continue;
+    }
+
+    if (supabaseMode) {
+      const { data, error } = await supabaseClient.functions.invoke("admin-manage-agent", {
+        body: {
+          action: "create",
+          name: sheetAgent.name,
+          phone: sheetAgent.phone,
+          email: sheetAgent.email,
+          password: sheetAgent.password.length >= 8 ? sheetAgent.password : DEFAULT_AGENT_PASSWORD,
+        },
+      });
+      if (error || !data?.ok) {
+        throw new Error(data?.error || "Ejen dari Google Sheet tidak dapat dicipta di Supabase.");
+      }
+      reloadRemote = true;
+    } else {
+      state.agents.push({
+        id: sheetAgent.id || makeId("agent"),
+        name: sheetAgent.name,
+        phone: sheetAgent.phone,
+        email: sheetAgent.email,
+        password: sheetAgent.password.length >= 8 ? sheetAgent.password : DEFAULT_AGENT_PASSWORD,
+        role: "agent",
+        active: sheetAgent.active,
+        leadsHandled: sheetAgent.leadsHandled,
+      });
+    }
+    result.added += 1;
+    result.backfilled += sheetAgent.id ? 0 : 1;
+  }
+
+  const removedAgents = state.agents.filter(
+    (agent) =>
+      agent.role === "agent" &&
+      agent.id !== state.currentUserId &&
+      !sheetEmails.has(String(agent.email || "").toLowerCase()),
+  );
+
+  for (const agent of removedAgents) {
+    if (supabaseMode) {
+      const { data, error } = await supabaseClient.functions.invoke("admin-manage-agent", {
+        body: { action: "delete", userId: agent.id },
+      });
+      if (error || !data?.ok) {
+        throw new Error(data?.error || `Ejen ${agent.name} tidak dapat dibuang dari Supabase.`);
+      }
+      reloadRemote = true;
+    } else {
+      state.agents = state.agents.filter((item) => item.id !== agent.id);
+    }
+    result.removed += 1;
+  }
+
+  saveState();
+  if (supabaseMode && reloadRemote) {
+    await loadRemoteState(state.currentUserId);
+    for (const sheetAgent of sheetAgents) {
+      const savedAgent = state.agents.find((agent) => agent.email?.toLowerCase() === sheetAgent.email);
+      if (!savedAgent) continue;
+      const nextActive =
+        savedAgent.id === state.currentUserId && savedAgent.role === "admin" ? true : sheetAgent.active;
+      if (savedAgent.active !== nextActive) {
+        savedAgent.active = nextActive;
+        await persistProfile(savedAgent);
+      }
+    }
+  }
+
+  if (result.backfilled) {
+    for (const sheetAgent of sheetAgents) {
+      const savedAgent = state.agents.find((agent) => agent.email?.toLowerCase() === sheetAgent.email);
+      if (savedAgent) await upsertAgentToSheet(savedAgent);
+    }
+  }
+
+  return result;
 }
 
 async function sendSystemNotification(lead) {
@@ -1687,7 +1861,8 @@ async function addAgent(event) {
     });
     saveState();
   }
-  const agentsPushed = await pushAgentsSnapshotToSheet();
+  const savedAgent = state.agents.find((agent) => agent.email.toLowerCase() === email.toLowerCase());
+  const agentsPushed = await upsertAgentToSheet(savedAgent);
   elements.agentForm.reset();
   closeModal(elements.agentModal);
   showToast(
@@ -1731,7 +1906,7 @@ async function toggleAgent(agentId) {
     console.error(error);
     showToast("Perubahan belum disimpan", "Semak polisi database Supabase.", "error");
   }
-  const agentsPushed = await pushAgentsSnapshotToSheet();
+  const agentsPushed = await upsertAgentToSheet(agent);
   showToast(
     agentsPushed ? (agent.active ? "Ejen diaktifkan" : "Ejen dinyahaktifkan") : "Status ejen belum sync",
     agentsPushed
@@ -1756,7 +1931,7 @@ async function removeAgent(agentId) {
       return;
     }
     await loadRemoteState(state.currentUserId);
-    const agentsPushed = await pushAgentsSnapshotToSheet();
+    const agentsPushed = await deleteAgentFromSheet(agent);
     showToast(
       agentsPushed ? "Ejen dibuang" : "Ejen dibuang dari dashboard",
       agentsPushed
@@ -1778,7 +1953,7 @@ async function removeAgent(agentId) {
     });
   state.agents = state.agents.filter((item) => item.id !== agentId);
   saveState();
-  const agentsPushed = await pushAgentsSnapshotToSheet();
+  const agentsPushed = await deleteAgentFromSheet(agent);
   showToast(
     agentsPushed ? "Ejen dibuang" : "Ejen dibuang dari dashboard",
     agentsPushed
@@ -1929,6 +2104,7 @@ async function syncGoogleSheet(options = {}) {
     }
     if (!Array.isArray(rows)) throw new Error("Format JSON tidak sah");
 
+    const agentSync = Array.isArray(payload) ? { added: 0, updated: 0, removed: 0 } : await syncAgentsFromSheet(payload.agents);
     let added = 0;
     let updated = 0;
     const sheetKeys = new Set(rows.map(sheetDedupeKey).filter(Boolean));
@@ -1969,15 +2145,18 @@ async function syncGoogleSheet(options = {}) {
         round_robin_index: state.roundRobinIndex,
       });
     }
-    await pushAgentsSnapshotToSheet();
     scheduleSync();
     renderAll();
-    if (!options.silent || added || updated || removed) {
+    const agentChanges = (agentSync.added || 0) + (agentSync.updated || 0) + (agentSync.removed || 0);
+    if (!options.silent || added || updated || removed || agentChanges) {
       const title =
         [
           added ? `${added} lead baru` : "",
           updated ? `${updated} dikemas kini` : "",
           removed ? `${removed} dibuang` : "",
+          agentSync.added ? `${agentSync.added} ejen baru` : "",
+          agentSync.updated ? `${agentSync.updated} ejen dikemas kini` : "",
+          agentSync.removed ? `${agentSync.removed} ejen dibuang` : "",
         ]
           .filter(Boolean)
           .join(", ") ||
