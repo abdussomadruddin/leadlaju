@@ -1285,6 +1285,13 @@ svg {
   transform: translateY(-2px);
 }
 
+.call-button:disabled,
+.call-button.is-loading {
+  cursor: wait;
+  opacity: 0.72;
+  transform: none;
+}
+
 .call-button svg {
   width: 19px;
   fill: none;

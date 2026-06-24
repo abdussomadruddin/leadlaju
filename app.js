@@ -46,7 +46,7 @@ const defaultState = {
     {
       id: "admin-azlan",
       name: "Admin",
-      phone: "+60 19-880 1142",
+      phone: "+60173559147",
       email: "admin@leadlaju.my",
       password: "Admin123!",
       role: "admin",
@@ -78,6 +78,7 @@ let supabaseClient = null;
 let supabaseChannel = null;
 let supabaseMode = false;
 let remoteReloadTimer = null;
+let claimingLeadId = null;
 
 const elements = {
   sidebar: document.querySelector("#sidebar"),
@@ -986,6 +987,10 @@ async function addLead(input, options = {}) {
 }
 
 function openManualLeadModal() {
+  if (!isAdmin()) {
+    showToast("Admin sahaja", "Hanya admin boleh tambah manual lead baru.", "error");
+    return;
+  }
   elements.manualLeadForm.reset();
   elements.manualLeadSource.value = "Manual Lead";
   elements.manualLeadError.textContent = "";
@@ -996,6 +1001,10 @@ function openManualLeadModal() {
 
 async function addManualLead(event) {
   event.preventDefault();
+  if (!isAdmin()) {
+    elements.manualLeadError.textContent = "Hanya admin boleh tambah manual lead baru.";
+    return;
+  }
   const name = elements.manualLeadName.value.trim();
   const phone = elements.manualLeadPhone.value.trim();
   const email = elements.manualLeadEmail.value.trim();
@@ -1407,42 +1416,94 @@ async function processExpiredLeads() {
   }
 }
 
+function setCallButtonLoading(leadId, isLoading) {
+  const article = elements.activeLeadContainer.querySelector(".lead-alert");
+  if (!article || article.dataset.leadId !== leadId) return;
+  const button = article.querySelector(".call-button");
+  if (!button) return;
+  button.disabled = isLoading;
+  button.classList.toggle("is-loading", isLoading);
+  const label = button.querySelector(".call-button-copy b");
+  if (label) label.textContent = isLoading ? "CALLING..." : "CALL NOW";
+}
+
+function dialLeadPhone(phone) {
+  const callablePhone = String(phone || "").replace(/[^\d+]/g, "");
+  if (!callablePhone) return false;
+
+  const link = document.createElement("a");
+  link.href = `tel:${callablePhone}`;
+  link.rel = "noopener";
+  link.style.display = "none";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.location.href = `tel:${callablePhone}`;
+  return true;
+}
+
 async function handleCall(leadId) {
   const lead = state.leads.find((item) => item.id === leadId);
-  if (!lead || lead.status !== "new") return;
+  if (!lead || lead.status !== "new") {
+    showToast("Lead tidak tersedia", "Lead ini sudah diambil, tamat masa atau telah dikemas kini.", "error");
+    return;
+  }
+  if (!canAccessLead(lead)) {
+    showToast("Lead bukan giliran anda", "Lead ini telah diberikan kepada ejen lain.", "error");
+    return;
+  }
+  if (claimingLeadId) return;
 
-  if (supabaseMode) {
-    const { data, error } = await supabaseClient.rpc("claim_lead", { p_lead_id: leadId });
-    if (error || !data?.length) {
-      showToast("Lead tidak dapat dikunci", "Lead mungkin telah dipindahkan atau diambil ejen lain.", "error");
+  claimingLeadId = leadId;
+  setCallButtonLoading(leadId, true);
+
+  try {
+    let claimedLead = lead;
+    let phoneToCall = lead.phone;
+
+    if (supabaseMode) {
+      const { data, error } = await supabaseClient.rpc("claim_lead", { p_lead_id: leadId });
+      if (error) throw error;
+      if (!data?.length) {
+        showToast("Lead tidak dapat dikunci", "Lead mungkin telah dipindahkan, tamat masa atau diambil ejen lain.", "error");
+        await loadRemoteState(state.currentUserId);
+        renderAll();
+        return;
+      }
+      claimedLead = mapLead(data[0]);
+      phoneToCall = claimedLead.phone;
+      const currentLead = state.leads.find((item) => item.id === leadId);
+      if (currentLead) Object.assign(currentLead, claimedLead);
+    } else {
+      lead.status = "contacted";
+      lead.contactedAt = Date.now();
+      lead.responseMs = lead.contactedAt - lead.receivedAt;
+      const localAgent = getAgent(lead.assignedAgentId);
+      if (localAgent) localAgent.leadsHandled = (localAgent.leadsHandled || 0) + 1;
+      addActivity("contacted", lead, `${localAgent?.name || "Ejen"} CALL NOW untuk ${lead.project}`);
+    }
+
+    const agent = getAgent((claimedLead || lead).assignedAgentId);
+    saveState();
+    showToast(
+      "Lead berjaya dikunci",
+      `${lead.name} untuk projek ${lead.project} kini milik ${agent?.name || "ejen ini"}.`,
+    );
+    renderAll();
+
+    if (!dialLeadPhone(phoneToCall)) {
+      showToast("Nombor telefon tiada", "Lead ini belum ada nombor telefon yang boleh dipanggil.", "error");
+    }
+  } catch (error) {
+    console.error(error);
+    showToast("CALL NOW gagal", error?.message || "Semak sambungan Supabase dan cuba lagi.", "error");
+    if (supabaseMode) {
       await loadRemoteState(state.currentUserId);
       renderAll();
-      return;
     }
-    const claimed = mapLead(data[0]);
-    Object.assign(lead, claimed);
-  } else {
-    lead.status = "contacted";
-    lead.contactedAt = Date.now();
-    lead.responseMs = lead.contactedAt - lead.receivedAt;
-    const localAgent = getAgent(lead.assignedAgentId);
-    if (localAgent) localAgent.leadsHandled = (localAgent.leadsHandled || 0) + 1;
-    addActivity("contacted", lead, `${localAgent?.name || "Ejen"} CALL NOW untuk ${lead.project}`);
-  }
-
-  const agent = getAgent(lead.assignedAgentId);
-  saveState();
-  showToast(
-    "Lead berjaya dikunci",
-    `${lead.name} untuk projek ${lead.project} kini milik ${agent?.name || "ejen ini"}.`,
-  );
-  renderAll();
-
-  const callablePhone = lead.phone.replace(/[^\d+]/g, "");
-  if (callablePhone) {
-    window.setTimeout(() => {
-      window.location.href = `tel:${callablePhone}`;
-    }, 250);
+  } finally {
+    claimingLeadId = null;
+    setCallButtonLoading(leadId, false);
   }
 }
 
