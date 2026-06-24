@@ -1129,8 +1129,16 @@ svg {
   text-transform: uppercase;
 }
 
+.lead-source-badge.meta {
+  background: #3865d9;
+}
+
 .lead-source-badge.tiktok {
   background: #171923;
+}
+
+.lead-source-badge.manual {
+  background: #0f9f6e;
 }
 
 .lead-arrival {
@@ -1896,9 +1904,19 @@ td small {
 }
 
 .integration-form-card input,
-.modal input {
+.modal input,
+.modal select {
   width: 100%;
   min-height: 45px;
+}
+
+.modal select {
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--ink-700);
+  background: #fff;
+  font-size: 10px;
 }
 
 .modal textarea {

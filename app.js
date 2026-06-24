@@ -44,9 +44,9 @@ const defaultState = {
     },
     {
       id: "admin-azlan",
-      name: "Azlan Malik",
+      name: "Admin",
       phone: "+60 19-880 1142",
-      email: "azlan@leadlaju.my",
+      email: "admin@leadlaju.my",
       password: "Admin123!",
       role: "admin",
       active: true,
@@ -57,26 +57,12 @@ const defaultState = {
   activities: [],
   roundRobinIndex: 0,
   integration: {
-    endpoint: "",
-    interval: 30,
+    endpoint: "https://script.google.com/macros/s/AKfycbyXEPXT-m6YETnvOZEy0CxF82CMmMGDmgpVmDIv-a7XTEdJp92mYkOQhaBSRTPnNH7K/exec",
+    interval: 15,
     lastSyncAt: null,
-    connected: false,
+    connected: true,
   },
 };
-
-const demoNames = [
-  ["Aishah", "+60 12-345 6789", "aishah@gmail.com"],
-  ["Muhammad Faris", "+60 12-887 2341", "faris@gmail.com"],
-  ["Siti Hajar", "+60 11-2098 7654", "sitihajar@gmail.com"],
-  ["Daniel Wong", "+60 16-543 9012", "daniel@gmail.com"],
-  ["Nurul Izzati", "+60 17-662 1180", "nurul@gmail.com"],
-  ["Arif Zulkifli", "+60 13-778 4501", "arif@gmail.com"],
-];
-const demoProjects = [
-  "DSTH Puncak Awani, Sungai Buloh",
-  "Residensi Harmoni",
-  "Skyline Sentral",
-];
 
 let state = loadState();
 let activeView = "dashboard";
@@ -129,10 +115,18 @@ const elements = {
   navLeadCount: document.querySelector("#nav-lead-count"),
   notificationCount: document.querySelector("#notification-count"),
   notificationButton: document.querySelector("#notification-button"),
-  demoLeadButtons: [
-    document.querySelector("#demo-lead-button"),
-    document.querySelector("#demo-lead-button-2"),
+  manualLeadButtons: [
+    document.querySelector("#manual-lead-button"),
+    document.querySelector("#manual-lead-button-2"),
   ],
+  manualLeadModal: document.querySelector("#manual-lead-modal"),
+  manualLeadForm: document.querySelector("#manual-lead-form"),
+  manualLeadName: document.querySelector("#manual-lead-name"),
+  manualLeadPhone: document.querySelector("#manual-lead-phone"),
+  manualLeadEmail: document.querySelector("#manual-lead-email"),
+  manualLeadProject: document.querySelector("#manual-lead-project"),
+  manualLeadSource: document.querySelector("#manual-lead-source"),
+  manualLeadError: document.querySelector("#manual-lead-error"),
   activityList: document.querySelector("#activity-list"),
   teamList: document.querySelector("#team-list"),
   onlineCount: document.querySelector("#online-count"),
@@ -185,6 +179,7 @@ const elements = {
 };
 
 function loadState() {
+  if (new URLSearchParams(window.location.search).has("demo")) return structuredClone(defaultState);
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
     if (!saved) {
@@ -220,6 +215,8 @@ function saveState() {
 }
 
 function loadSupabaseConfig() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.has("demo")) return null;
   if (localStorage.getItem(SUPABASE_DISABLED_KEY) === "true") return null;
   try {
     const config = JSON.parse(localStorage.getItem(SUPABASE_CONFIG_KEY));
@@ -263,7 +260,7 @@ function mapLead(row) {
     phone: row.phone || "",
     email: row.email || "",
     project: row.project || "Tidak dinyatakan",
-    source: row.source || "Google Sheet",
+    source: normalizeLeadSource(row.source || "Google Sheet"),
     createdAt: new Date(row.created_at).getTime(),
     receivedAt: new Date(row.received_at || row.created_at).getTime(),
     assignedAgentId: row.assigned_agent_id,
@@ -315,7 +312,7 @@ async function loadRemoteState(userId) {
       integration: {
         ...defaultState.integration,
         endpoint: settingsResult.data?.google_sheet_endpoint || "",
-        interval: settingsResult.data?.poll_interval || 30,
+        interval: settingsResult.data?.poll_interval || 15,
         connected: Boolean(settingsResult.data?.google_sheet_endpoint),
         lastSyncAt: settingsResult.data?.last_sync_at
           ? new Date(settingsResult.data.last_sync_at).getTime()
@@ -376,6 +373,7 @@ async function persistLead(lead) {
       phone: lead.phone,
       email: lead.email || null,
       project: lead.project,
+      source: lead.source,
       assigned_agent_id: lead.assignedAgentId,
       expires_at: new Date(lead.expiresAt).toISOString(),
       status: lead.status,
@@ -405,6 +403,8 @@ async function persistNewLead(lead) {
     expires_at: new Date(lead.expiresAt).toISOString(),
     status: lead.status,
     pass_count: lead.passCount,
+    response_ms: lead.responseMs,
+    contacted_at: lead.contactedAt ? new Date(lead.contactedAt).toISOString() : null,
   });
   if (error) throw error;
   return true;
@@ -803,6 +803,24 @@ function normalizePhone(value) {
   return String(value || "").replace(/[^\d+]/g, "");
 }
 
+function normalizeLeadSource(value, fallback = "Google Sheet") {
+  const source = String(value || fallback || "Google Sheet").trim();
+  const lower = source.toLowerCase();
+  if (lower.includes("tiktok")) return "TikTok Ads";
+  if (lower.includes("meta") || lower.includes("facebook") || lower === "fb") return "Meta Ads";
+  if (lower.includes("manual")) return "Manual Lead";
+  return source || fallback;
+}
+
+function normalizeSheetStatus(value) {
+  const status = String(value || "").trim().toLowerCase();
+  if (!status || status === "new" || status === "baru") return "new";
+  if (["done", "completed", "complete", "contacted", "called", "call", "telah dihubungi"].includes(status)) {
+    return "contacted";
+  }
+  return "new";
+}
+
 async function addLead(input, options = {}) {
   const name = String(input.name || input.full_name || input.fullName || "").trim();
   const phone = String(input.phone || input.phone_number || input.mobile || "").trim();
@@ -820,7 +838,42 @@ async function addLead(input, options = {}) {
   const sourceId = String(input.id || input.lead_id || "").trim();
   const dedupeKey =
     sourceId || `${normalizePhone(phone)}-${project}-${input.created_at || input.createdAt || ""}`;
-  if (state.leads.some((lead) => lead.dedupeKey === dedupeKey)) return false;
+  const existingLead = state.leads.find((lead) => lead.dedupeKey === dedupeKey);
+  const source = normalizeLeadSource(input.source || input.sumber || input.platform, options.source || "Google Sheet");
+  const createdAtValue = input.created_at || input.createdAt;
+  const parsedCreatedAt = createdAtValue ? new Date(createdAtValue).getTime() : Date.now();
+
+  if (existingLead) {
+    if (!options.updateExisting) return false;
+
+    let changed = false;
+    const updates = { name, phone, email, project, source };
+    Object.entries(updates).forEach(([key, value]) => {
+      if (existingLead[key] !== value) {
+        existingLead[key] = value;
+        changed = true;
+      }
+    });
+
+    const incomingStatus = normalizeSheetStatus(input.status);
+    if (incomingStatus === "contacted" && existingLead.status !== "contacted") {
+      existingLead.status = "contacted";
+      existingLead.contactedAt = existingLead.contactedAt || Date.now();
+      existingLead.responseMs = existingLead.responseMs || existingLead.contactedAt - existingLead.receivedAt;
+      changed = true;
+    }
+
+    if (!changed) return false;
+    saveState();
+    try {
+      await persistLead(existingLead);
+    } catch (error) {
+      showToast("Lead tidak dapat dikemas kini", "Semak sambungan dan polisi Supabase.", "error");
+      console.error(error);
+      return false;
+    }
+    return "updated";
+  }
 
   const assignedAgent = selectNextAgent();
   if (!assignedAgent) {
@@ -828,9 +881,8 @@ async function addLead(input, options = {}) {
     return false;
   }
 
-  const createdAtValue = input.created_at || input.createdAt;
-  const parsedCreatedAt = createdAtValue ? new Date(createdAtValue).getTime() : Date.now();
   const now = Date.now();
+  const initialStatus = normalizeSheetStatus(input.status);
   const lead = {
     id: crypto.randomUUID?.() || makeId("lead"),
     dedupeKey,
@@ -838,14 +890,15 @@ async function addLead(input, options = {}) {
     phone,
     email,
     project,
-    source: String(input.source || input.platform || "Google Sheet"),
+    source,
     createdAt: Number.isFinite(parsedCreatedAt) ? parsedCreatedAt : now,
     receivedAt: now,
     assignedAgentId: assignedAgent.id,
     expiresAt: now + RESPONSE_WINDOW_MS,
-    status: "new",
+    status: initialStatus,
     passCount: 0,
-    responseMs: null,
+    responseMs: initialStatus === "contacted" ? 0 : null,
+    contactedAt: initialStatus === "contacted" ? now : null,
     notes: "",
   };
 
@@ -867,21 +920,112 @@ async function addLead(input, options = {}) {
     showToast("Lead baru masuk", `${lead.name} telah diberikan kepada ${assignedAgent.name}.`);
     sendSystemNotification(lead);
   }
-  return true;
+  return "added";
 }
 
-async function addDemoLead() {
-  const item = demoNames[Math.floor(Math.random() * demoNames.length)];
-  await addLead({
-    id: crypto.randomUUID?.() || makeId("demo"),
-    name: item[0],
-    phone: item[1],
-    email: item[2],
-    project: demoProjects[Math.floor(Math.random() * demoProjects.length)],
-    source: Math.random() > 0.5 ? "Meta Ads" : "TikTok Ads",
-    created_at: new Date().toISOString(),
-  });
+function openManualLeadModal() {
+  elements.manualLeadForm.reset();
+  elements.manualLeadSource.value = "Manual Lead";
+  elements.manualLeadError.textContent = "";
+  elements.manualLeadModal.classList.add("open");
+  elements.manualLeadModal.setAttribute("aria-hidden", "false");
+  window.setTimeout(() => elements.manualLeadName.focus(), 100);
+}
+
+async function addManualLead(event) {
+  event.preventDefault();
+  const name = elements.manualLeadName.value.trim();
+  const phone = elements.manualLeadPhone.value.trim();
+  const email = elements.manualLeadEmail.value.trim();
+  const project = elements.manualLeadProject.value.trim();
+  const source = elements.manualLeadSource.value;
+
+  if (!name || !phone || !project) {
+    elements.manualLeadError.textContent = "Masukkan nama, nombor telefon dan projek.";
+    return;
+  }
+
+  const createdAt = new Date().toISOString();
+  const leadInput = {
+    id: `manual-${Date.now()}-${normalizePhone(phone)}`,
+    name,
+    phone,
+    email,
+    project,
+    source,
+    city: "",
+    created_at: createdAt,
+    status: "new",
+  };
+
+  const result = await addLead(leadInput, { silent: true });
+  if (!result) {
+    elements.manualLeadError.textContent = "Lead ini tidak dapat dimasukkan. Semak nombor telefon dan ejen aktif.";
+    return;
+  }
+  const pushedToSheet = await pushManualLeadToSheet(leadInput);
+  closeModal(elements.manualLeadModal);
+  showToast(
+    pushedToSheet ? "Manual lead disimpan" : "Lead masuk dashboard",
+    pushedToSheet
+      ? "Lead telah dihantar ke Google Sheet dan dimasukkan ke New Leads."
+      : "Google Sheet belum dapat dikemas kini. Semak Web App URL.",
+    pushedToSheet ? "success" : "error",
+  );
+  const savedLead = state.leads.find((lead) => lead.dedupeKey === leadInput.id);
+  if (savedLead) sendSystemNotification(savedLead);
   renderAll();
+}
+
+async function pushManualLeadToSheet(leadInput) {
+  const endpoint = elements.sheetEndpoint.value.trim() || state.integration.endpoint;
+  if (!endpoint) return false;
+
+  const payload = {
+    action: "add_lead",
+    lead: {
+      id: leadInput.id,
+      created_at: leadInput.created_at,
+      name: leadInput.name,
+      phone: leadInput.phone,
+      email: leadInput.email || "",
+      city: leadInput.city || "",
+      project: leadInput.project,
+      status: leadInput.status || "new",
+      source: leadInput.source || "Manual Lead",
+    },
+  };
+  const body = JSON.stringify(payload);
+
+  try {
+    if (navigator.sendBeacon) {
+      const queued = navigator.sendBeacon(
+        endpoint,
+        new Blob([body], { type: "text/plain;charset=UTF-8" }),
+      );
+      if (queued) {
+        state.integration.connected = true;
+        state.integration.lastSyncAt = Date.now();
+        saveState();
+        return true;
+      }
+    }
+
+    await fetch(endpoint, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "text/plain;charset=UTF-8" },
+      body,
+      keepalive: true,
+    });
+    state.integration.connected = true;
+    state.integration.lastSyncAt = Date.now();
+    saveState();
+    return true;
+  } catch (error) {
+    console.error("Manual lead push failed", error);
+    return false;
+  }
 }
 
 async function sendSystemNotification(lead) {
@@ -1038,13 +1182,16 @@ function renderActiveLead() {
     return;
   }
 
-  const activeLeadKey = `${lead.id}:${lead.assignedAgentId}`;
+  const activeLeadKey = `${lead.id}:${lead.assignedAgentId}:${lead.name}:${lead.project}:${lead.source}`;
   if (lastRenderedActiveLeadKey !== activeLeadKey) {
     const fragment = elements.activeLeadTemplate.content.cloneNode(true);
     const article = fragment.querySelector(".lead-alert");
     const source = fragment.querySelector(".lead-source-badge");
     source.textContent = lead.source;
-    source.classList.toggle("tiktok", lead.source.toLowerCase().includes("tiktok"));
+    const leadSource = lead.source.toLowerCase();
+    source.classList.toggle("tiktok", leadSource.includes("tiktok"));
+    source.classList.toggle("manual", leadSource.includes("manual"));
+    source.classList.toggle("meta", leadSource.includes("meta"));
     fragment.querySelector(".lead-arrival").textContent = `Masuk ${relativeTime(lead.receivedAt)}`;
     fragment.querySelector(".lead-avatar").textContent = initials(lead.name);
     fragment.querySelector(".lead-name").textContent = lead.name;
@@ -1582,12 +1729,15 @@ async function syncGoogleSheet(options = {}) {
     if (!Array.isArray(rows)) throw new Error("Format JSON tidak sah");
 
     let added = 0;
+    let updated = 0;
     for (const row of rows) {
-      if (await addLead(row, { silent: true })) added += 1;
+      const result = await addLead(row, { silent: true, updateExisting: true });
+      if (result === "added") added += 1;
+      if (result === "updated") updated += 1;
     }
 
     state.integration.endpoint = endpoint;
-    state.integration.interval = Number(elements.pollInterval.value) || 30;
+    state.integration.interval = Number(elements.pollInterval.value) || 15;
     state.integration.connected = true;
     state.integration.lastSyncAt = Date.now();
     saveState();
@@ -1602,10 +1752,20 @@ async function syncGoogleSheet(options = {}) {
     }
     scheduleSync();
     renderAll();
-    if (!options.silent || added) {
+    if (!options.silent || added || updated) {
+      const title =
+        added && updated
+          ? `${added} lead baru, ${updated} dikemas kini`
+          : added
+            ? `${added} lead baru`
+            : updated
+              ? `${updated} lead dikemas kini`
+              : "Sync selesai";
       showToast(
-        added ? `${added} lead baru` : "Sync selesai",
-        added ? "Lead telah dimasukkan ke giliran pasukan." : "Tiada lead baru ditemui.",
+        title,
+        added || updated
+          ? "Dashboard telah diselaraskan dengan Google Sheet."
+          : "Tiada perubahan baru ditemui.",
       );
     }
     return true;
@@ -1628,14 +1788,14 @@ function scheduleSync() {
   if (!state.integration.endpoint || !isAdmin()) return;
   syncTimer = window.setInterval(
     () => syncGoogleSheet({ silent: true }),
-    Math.max(15, Number(state.integration.interval) || 30) * 1000,
+    Math.max(15, Number(state.integration.interval) || 15) * 1000,
   );
 }
 
 async function saveIntegration(event) {
   event.preventDefault();
   state.integration.endpoint = elements.sheetEndpoint.value.trim();
-  state.integration.interval = Number(elements.pollInterval.value) || 30;
+  state.integration.interval = Number(elements.pollInterval.value) || 15;
   if (!state.integration.endpoint) {
     state.integration.connected = false;
     state.integration.lastSyncAt = null;
@@ -1692,7 +1852,7 @@ document.querySelectorAll("[data-view-link]").forEach((button) => {
   button.addEventListener("click", () => switchView(button.dataset.viewLink));
 });
 
-elements.demoLeadButtons.forEach((button) => button.addEventListener("click", addDemoLead));
+elements.manualLeadButtons.forEach((button) => button.addEventListener("click", openManualLeadModal));
 elements.notificationButton.addEventListener("click", requestNotifications);
 elements.mobileMenu.addEventListener("click", () => elements.sidebar.classList.toggle("open"));
 elements.loginForm.addEventListener("submit", handleLogin);
@@ -1708,6 +1868,10 @@ elements.logoutButton.addEventListener("click", logout);
 elements.leadSearch.addEventListener("input", renderLeadsTable);
 elements.leadFilter.addEventListener("change", renderLeadsTable);
 elements.contactSearch.addEventListener("input", renderContacts);
+elements.manualLeadForm.addEventListener("submit", addManualLead);
+elements.manualLeadPhone.addEventListener("input", () => {
+  elements.manualLeadError.textContent = "";
+});
 elements.addAgentButton.addEventListener("click", openAgentModal);
 elements.agentForm.addEventListener("submit", addAgent);
 elements.agentPasswordForm.addEventListener("submit", updateAgentPassword);
@@ -1723,6 +1887,10 @@ document.querySelectorAll("[data-close-modal]").forEach((button) => {
 
 elements.agentModal.addEventListener("click", (event) => {
   if (event.target === elements.agentModal) closeModal(elements.agentModal);
+});
+
+elements.manualLeadModal.addEventListener("click", (event) => {
+  if (event.target === elements.manualLeadModal) closeModal(elements.manualLeadModal);
 });
 
 elements.resetPasswordModal.addEventListener("click", (event) => {
@@ -1752,6 +1920,7 @@ elements.contactsTableBody.addEventListener("click", (event) => {
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     closeModal(elements.agentModal);
+    closeModal(elements.manualLeadModal);
     closeModal(elements.resetPasswordModal);
     closeModal(elements.agentPasswordModal);
     closeModal(elements.contactModal);

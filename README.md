@@ -20,7 +20,7 @@ Kemudian buka `http://localhost:8000`.
 Dashboard hanya boleh dibuka selepas login. Sesi disimpan pada peranti selama
 365 hari atau sehingga pengguna menekan **Log keluar**.
 
-- Admin demo: `azlan@leadlaju.my` / `Admin123!`
+- Admin demo: `admin@leadlaju.my` / `Admin123!`
 - Ejen demo: `aina@leadlaju.my` / `Agent123!`
 
 Admin boleh mendaftarkan ejen dan menukar kata laluan mereka melalui menu

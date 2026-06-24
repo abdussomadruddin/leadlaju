@@ -15,9 +15,9 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260613-5" />
+    <link rel="stylesheet" href="styles.css?v=20260624-manual-lead" />
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260613-5" defer></script>
+    <script src="app.js?v=20260624-manual-sync" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -259,11 +259,11 @@
               <span class="section-kicker">Ringkasan hari ini</span>
               <h2>Respon pantas, peluang lebih tinggi.</h2>
             </div>
-            <button class="secondary-button" id="demo-lead-button" type="button">
+            <button class="secondary-button" id="manual-lead-button" type="button">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M12 5v14M5 12h14" />
               </svg>
-              Simulasi lead baru
+              Manual lead baru
             </button>
           </div>
 
@@ -365,7 +365,7 @@
               <h2>Semua Leads</h2>
               <p>Jejak setiap lead dan tindakan pasukan anda.</p>
             </div>
-            <button class="secondary-button" id="demo-lead-button-2" type="button">+ Tambah lead demo</button>
+            <button class="secondary-button" id="manual-lead-button-2" type="button">+ Manual lead baru</button>
           </div>
           <div class="table-card">
             <div class="table-toolbar">
@@ -526,13 +526,16 @@
             <section class="panel setup-guide">
               <span class="section-kicker">Format diperlukan</span>
               <h3>Kolum Google Sheet</h3>
-              <p>Pastikan baris pertama menggunakan tajuk ini. Susunan kolum tidak penting.</p>
+              <p>
+                Lead boleh masuk melalui manual dashboard, Meta dari Google Sheet, atau TikTok dari Google Sheet.
+                Susunan kolum tidak penting.
+              </p>
               <div class="column-list">
                 <span><b>name</b><small>Nama lead</small></span>
                 <span><b>phone</b><small>Nombor telefon</small></span>
                 <span><b>email</b><small>Emel lead</small></span>
                 <span><b>project</b><small>Nama projek</small></span>
-                <span><b>source</b><small>Meta / TikTok</small></span>
+                <span><b>source</b><small>Manual / Meta / TikTok</small></span>
                 <span><b>created_at</b><small>Tarikh & masa</small></span>
               </div>
               <div class="guide-note">
@@ -549,6 +552,36 @@
           </div>
         </section>
       </main>
+    </div>
+
+    <div class="modal-backdrop" id="manual-lead-modal" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="manual-lead-title">
+        <div class="modal-heading">
+          <div>
+            <span class="section-kicker">Tambah dari dashboard</span>
+            <h2 id="manual-lead-title">Manual Lead Baru</h2>
+          </div>
+          <button class="modal-close" data-close-modal="manual-lead-modal" type="button" aria-label="Tutup">×</button>
+        </div>
+        <form id="manual-lead-form">
+          <label for="manual-lead-name">Nama</label>
+          <input id="manual-lead-name" type="text" placeholder="Contoh: Aishah" required />
+          <label for="manual-lead-phone">Nombor telefon</label>
+          <input id="manual-lead-phone" type="tel" placeholder="+60123456789" required />
+          <label for="manual-lead-email">Emel</label>
+          <input id="manual-lead-email" type="email" placeholder="aishah@gmail.com" />
+          <label for="manual-lead-project">Projek</label>
+          <input id="manual-lead-project" type="text" placeholder="DSTH Puncak Awani, Sungai Buloh" required />
+          <label for="manual-lead-source">Sumber</label>
+          <select id="manual-lead-source">
+            <option value="Manual Lead">Manual Lead</option>
+            <option value="Meta Ads">Meta Ads</option>
+            <option value="TikTok Ads">TikTok Ads</option>
+          </select>
+          <p class="reset-error" id="manual-lead-error" role="alert"></p>
+          <button class="primary-button full" type="submit">Masukkan ke New Leads</button>
+        </form>
+      </div>
     </div>
 
     <div class="modal-backdrop" id="agent-modal" aria-hidden="true">
