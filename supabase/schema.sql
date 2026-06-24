@@ -176,6 +176,15 @@ on public.leads for insert
 to authenticated
 with check (public.is_admin());
 
+drop policy if exists "leads_read_visible" on public.leads;
+create policy "leads_read_visible"
+on public.leads for select
+to authenticated
+using (
+  public.is_admin()
+  or assigned_agent_id = auth.uid()
+);
+
 drop policy if exists "leads_owner_update_contacted" on public.leads;
 create policy "leads_owner_update_contacted"
 on public.leads for update
@@ -310,8 +319,8 @@ declare
   agent_name text;
 begin
   select * into target
-  from public.leads
-  where leads.id = p_lead_id
+  from public.leads as l
+  where l.id = p_lead_id
   for update;
 
   if target.id is null
@@ -322,17 +331,17 @@ begin
     return;
   end if;
 
-  update public.leads
+  update public.leads as l
   set
     status = 'contacted',
     contacted_at = now(),
     response_ms = floor(extract(epoch from (now() - target.received_at)) * 1000)::integer
-  where leads.id = p_lead_id;
+  where l.id = p_lead_id;
 
-  update public.profiles
-  set leads_handled = leads_handled + 1
-  where profiles.id = target.assigned_agent_id
-  returning name into agent_name;
+  update public.profiles as p
+  set leads_handled = p.leads_handled + 1
+  where p.id = target.assigned_agent_id
+  returning p.name into agent_name;
 
   insert into public.activities (type, lead_id, lead_name, message)
   values (
@@ -411,7 +420,7 @@ grant execute on function public.delete_leads_not_in_dedupe_keys(text[]) to auth
 grant usage on schema public to authenticated;
 grant select on public.profiles to authenticated;
 grant update on public.profiles to authenticated;
-grant insert, update, delete on public.leads to authenticated;
+grant select, insert, update, delete on public.leads to authenticated;
 grant select, insert on public.activities to authenticated;
 grant select, insert, update on public.app_settings to authenticated;
 
