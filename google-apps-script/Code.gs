@@ -1,5 +1,6 @@
 const SPREADSHEET_ID = "1ySHeB12lL2y4AxqpSx8dDniyujSaz2-9hoRzPlCv6TM";
 const SHEET_NAME = "Sheet1";
+const AGENTS_SHEET_NAME = "Agents";
 const DEFAULT_SOURCE = "Google Sheet";
 
 const FIELD_ALIASES = {
@@ -26,18 +27,44 @@ const REQUIRED_HEADERS = [
   { field: "id", label: "ID" },
 ];
 
+const AGENT_FIELD_ALIASES = {
+  id: ["id", "agent id", "agent_id", "user id", "user_id"],
+  name: ["nama", "name", "full name", "full_name"],
+  phone: ["no phone", "phone", "phone number", "phone_number", "nombor telefon", "telefon", "mobile", "whatsapp"],
+  email: ["emel", "email", "e-mail", "email address", "email_address"],
+  role: ["role", "peranan"],
+  active: ["status", "active", "aktif"],
+  leadsHandled: ["leads handled", "lead dikendalikan", "leads_handled"],
+  createdAt: ["created at", "created_at", "tarikh daftar", "tarikh & masa"],
+};
+
+const AGENT_HEADERS = [
+  { field: "id", label: "ID" },
+  { field: "name", label: "Nama" },
+  { field: "phone", label: "No Phone" },
+  { field: "email", label: "Emel" },
+  { field: "role", label: "Role" },
+  { field: "active", label: "Status" },
+  { field: "leadsHandled", label: "Leads Handled" },
+  { field: "createdAt", label: "Tarikh Daftar" },
+];
+
 function doGet() {
   try {
     const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
     const sheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
+    const agentsSheet = getOrCreateSheet_(spreadsheet, AGENTS_SHEET_NAME);
     const headers = ensureRequiredHeaders_(sheet);
+    const agentHeaders = ensureRequiredHeadersBySpec_(agentsSheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
     ensureLeadIds_(sheet, headers);
     const leads = readLeads_(sheet);
+    const agents = readAgents_(agentsSheet, agentHeaders);
     return jsonResponse({
       ok: true,
       spreadsheet: spreadsheet.getName(),
       sheet: sheet.getName(),
       leads,
+      agents,
     });
   } catch (error) {
     return jsonResponse({ ok: false, error: String(error), leads: [] });
@@ -52,6 +79,15 @@ function doPost(event) {
     }
     if (payload.action === "delete_lead") {
       return jsonResponse(deleteLead_(payload.lead || payload));
+    }
+    if (payload.action === "add_agent") {
+      return jsonResponse(upsertAgent_(payload.agent || payload));
+    }
+    if (payload.action === "delete_agent") {
+      return jsonResponse(deleteAgent_(payload.agent || payload));
+    }
+    if (payload.action === "replace_agents") {
+      return jsonResponse(replaceAgents_(payload.agents || []));
     }
     if (payload.action === "send_reset_code") {
       return jsonResponse(sendResetCode_(payload));
@@ -133,6 +169,151 @@ function deleteLead_(input) {
   return { ok: true, deleted };
 }
 
+function replaceAgents_(agentsInput) {
+  if (!Array.isArray(agentsInput)) {
+    return { ok: false, error: "Senarai ejen tidak sah." };
+  }
+
+  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = getOrCreateSheet_(spreadsheet, AGENTS_SHEET_NAME);
+  const headers = ensureRequiredHeadersBySpec_(sheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
+  const lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).clearContent();
+  }
+
+  const rows = agentsInput
+    .map((input) => ({
+      id: String(input.id || input.user_id || input.agent_id || "").trim(),
+      name: String(input.name || input.nama || input.full_name || "").trim(),
+      phone: String(input.phone || input.phone_number || input.mobile || "").trim(),
+      email: String(input.email || input.emel || input.email_address || "").trim(),
+      role: String(input.role || "agent").trim(),
+      active: normalizeAgentActive_(input.active ?? input.status ?? "active"),
+      leadsHandled: String(input.leads_handled ?? input.leadsHandled ?? 0).trim(),
+      createdAt: String(input.created_at || input.createdAt || new Date().toISOString()).trim(),
+    }))
+    .filter((agent) => agent.id && agent.name && agent.email)
+    .map((agent) => buildAgentRow_(headers, agent));
+
+  if (rows.length) {
+    sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
+  }
+
+  return { ok: true, count: rows.length };
+}
+
+function upsertAgent_(input) {
+  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = getOrCreateSheet_(spreadsheet, AGENTS_SHEET_NAME);
+  const headers = ensureRequiredHeadersBySpec_(sheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
+  const agent = {
+    id: String(input.id || input.user_id || input.agent_id || "").trim(),
+    name: String(input.name || input.nama || input.full_name || "").trim(),
+    phone: String(input.phone || input.phone_number || input.mobile || "").trim(),
+    email: String(input.email || input.emel || input.email_address || "").trim(),
+    role: String(input.role || "agent").trim(),
+    active: normalizeAgentActive_(input.active ?? input.status ?? "active"),
+    leadsHandled: String(input.leads_handled ?? input.leadsHandled ?? 0).trim(),
+    createdAt: String(input.created_at || input.createdAt || new Date().toISOString()).trim(),
+  };
+
+  if (!agent.id || !agent.name || !agent.email) {
+    return { ok: false, error: "ID, nama dan emel ejen diperlukan." };
+  }
+
+  const values = sheet.getDataRange().getDisplayValues();
+  const idIndex = headers.findIndex((header) => AGENT_FIELD_ALIASES.id.includes(header));
+  const emailIndex = headers.findIndex((header) => AGENT_FIELD_ALIASES.email.includes(header));
+  let rowNumber = 0;
+
+  for (let index = 1; index < values.length; index += 1) {
+    const row = values[index];
+    const rowId = idIndex >= 0 ? String(row[idIndex] || "").trim() : "";
+    const rowEmail = emailIndex >= 0 ? String(row[emailIndex] || "").trim().toLowerCase() : "";
+    if (rowId === agent.id || rowEmail === agent.email.toLowerCase()) {
+      rowNumber = index + 1;
+      break;
+    }
+  }
+
+  const row = buildAgentRow_(headers, agent);
+  if (rowNumber) {
+    sheet.getRange(rowNumber, 1, 1, row.length).setValues([row]);
+    return { ok: true, updated: true, agent };
+  }
+
+  sheet.appendRow(row);
+  return { ok: true, agent };
+}
+
+function deleteAgent_(input) {
+  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = getOrCreateSheet_(spreadsheet, AGENTS_SHEET_NAME);
+  const headers = ensureRequiredHeadersBySpec_(sheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
+  const values = sheet.getDataRange().getDisplayValues();
+  if (values.length < 2) return { ok: true, deleted: 0 };
+
+  const id = String(input.id || input.user_id || input.agent_id || "").trim();
+  const email = String(input.email || input.emel || "").trim().toLowerCase();
+  const idIndex = headers.findIndex((header) => AGENT_FIELD_ALIASES.id.includes(header));
+  const emailIndex = headers.findIndex((header) => AGENT_FIELD_ALIASES.email.includes(header));
+  let deleted = 0;
+
+  for (let rowNumber = values.length; rowNumber >= 2; rowNumber -= 1) {
+    const row = values[rowNumber - 1];
+    const rowId = idIndex >= 0 ? String(row[idIndex] || "").trim() : "";
+    const rowEmail = emailIndex >= 0 ? String(row[emailIndex] || "").trim().toLowerCase() : "";
+    if ((id && rowId === id) || (email && rowEmail === email)) {
+      sheet.deleteRow(rowNumber);
+      deleted += 1;
+    }
+  }
+
+  return { ok: true, deleted };
+}
+
+function buildAgentRow_(headers, agent) {
+  const row = new Array(headers.length).fill("");
+  setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "id", agent.id);
+  setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "name", agent.name);
+  setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "phone", agent.phone);
+  setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "email", agent.email);
+  setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "role", agent.role || "agent");
+  setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "active", agent.active);
+  setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "leadsHandled", agent.leadsHandled || "0");
+  setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "createdAt", agent.createdAt);
+  return row;
+}
+
+function readAgents_(sheet, headers) {
+  if (!sheet) return [];
+
+  const values = sheet.getDataRange().getDisplayValues();
+  if (values.length < 2) return [];
+
+  return values.slice(1)
+    .map((row) => ({
+      id: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "id"),
+      name: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "name"),
+      phone: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "phone"),
+      email: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "email"),
+      role: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "role") || "agent",
+      active: normalizeAgentActive_(getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "active")),
+      leads_handled: Number(getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "leadsHandled")) || 0,
+      created_at: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "createdAt"),
+    }))
+    .filter((agent) => agent.id && agent.name && agent.email);
+}
+
+function normalizeAgentActive_(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["inactive", "tidak aktif", "false", "0", "off", "disabled"].includes(normalized)) {
+    return "inactive";
+  }
+  return "active";
+}
+
 function sendResetCode_(payload) {
   const email = String(payload.email || "").trim();
   const name = String(payload.name || "Ejen").trim();
@@ -195,20 +376,24 @@ function setRowValue_(headers, row, field, value) {
 }
 
 function ensureRequiredHeaders_(sheet) {
+  return ensureRequiredHeadersBySpec_(sheet, REQUIRED_HEADERS, FIELD_ALIASES);
+}
+
+function ensureRequiredHeadersBySpec_(sheet, requiredHeaders, aliasesByField) {
   const lastColumn = Math.max(sheet.getLastColumn(), 1);
   let headerValues = sheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0];
   const hasAnyHeader = headerValues.some((value) => String(value || "").trim());
 
   if (!hasAnyHeader) {
-    headerValues = REQUIRED_HEADERS.map((header) => header.label);
+    headerValues = requiredHeaders.map((header) => header.label);
     sheet.getRange(1, 1, 1, headerValues.length).setValues([headerValues]);
     return headerValues.map(normalizeHeader_);
   }
 
   const missingHeaders = [];
   let normalizedHeaders = headerValues.map(normalizeHeader_);
-  REQUIRED_HEADERS.forEach(({ field, label }) => {
-    const aliases = FIELD_ALIASES[field] || [];
+  requiredHeaders.forEach(({ field, label }) => {
+    const aliases = aliasesByField[field] || [];
     const exists = normalizedHeaders.some((header) => aliases.includes(header));
     if (!exists) {
       missingHeaders.push(label);
@@ -224,6 +409,22 @@ function ensureRequiredHeaders_(sheet) {
   }
 
   return headerValues.map(normalizeHeader_);
+}
+
+function getOrCreateSheet_(spreadsheet, sheetName) {
+  return spreadsheet.getSheetByName(sheetName) || spreadsheet.insertSheet(sheetName);
+}
+
+function getCellBySpec_(headers, row, aliasesByField, field) {
+  const aliases = aliasesByField[field] || [];
+  const index = headers.findIndex((header) => aliases.includes(header));
+  return index >= 0 ? String(row[index] || "").trim() : "";
+}
+
+function setRowValueBySpec_(headers, row, aliasesByField, field, value) {
+  const aliases = aliasesByField[field] || [];
+  const index = headers.findIndex((header) => aliases.includes(header));
+  if (index >= 0) row[index] = value;
 }
 
 function ensureLeadIds_(sheet, headers) {

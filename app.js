@@ -250,6 +250,7 @@ function mapProfile(row) {
     role: row.role || "agent",
     active: row.active !== false,
     leadsHandled: row.leads_handled || 0,
+    createdAt: row.created_at ? new Date(row.created_at).getTime() : null,
   };
 }
 
@@ -1102,6 +1103,63 @@ async function deleteLeadFromSheet(lead) {
   }
 }
 
+async function postGoogleSheetAction(payload, errorLabel) {
+  const endpoint = elements.sheetEndpoint.value.trim() || state.integration.endpoint;
+  if (!endpoint) return false;
+
+  const body = JSON.stringify(payload);
+  try {
+    if (navigator.sendBeacon) {
+      const queued = navigator.sendBeacon(
+        endpoint,
+        new Blob([body], { type: "text/plain;charset=UTF-8" }),
+      );
+      if (queued) {
+        state.integration.connected = true;
+        state.integration.lastSyncAt = Date.now();
+        saveState();
+        return true;
+      }
+    }
+
+    await fetch(endpoint, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "text/plain;charset=UTF-8" },
+      body,
+      keepalive: true,
+    });
+    state.integration.connected = true;
+    state.integration.lastSyncAt = Date.now();
+    saveState();
+    return true;
+  } catch (error) {
+    console.error(errorLabel, error);
+    return false;
+  }
+}
+
+async function pushAgentsSnapshotToSheet() {
+  const agents = state.agents.map((agent) => ({
+    id: agent.id,
+    name: agent.name,
+    phone: agent.phone || "",
+    email: agent.email,
+    role: agent.role || "agent",
+    active: agent.active ? "active" : "inactive",
+    leadsHandled: agent.leadsHandled || 0,
+    created_at: agent.createdAt ? new Date(agent.createdAt).toISOString() : new Date().toISOString(),
+  }));
+
+  return postGoogleSheetAction(
+    {
+      action: "replace_agents",
+      agents,
+    },
+    "Agent sheet snapshot failed",
+  );
+}
+
 async function sendSystemNotification(lead) {
   if (!("Notification" in window) || Notification.permission !== "granted") return;
   const agent = getAgent(lead.assignedAgentId);
@@ -1629,9 +1687,16 @@ async function addAgent(event) {
     });
     saveState();
   }
+  const agentsPushed = await pushAgentsSnapshotToSheet();
   elements.agentForm.reset();
   closeModal(elements.agentModal);
-  showToast("Ejen didaftarkan", `${name} kini termasuk dalam giliran lead.`);
+  showToast(
+    agentsPushed ? "Ejen didaftarkan" : "Ejen masuk dashboard",
+    agentsPushed
+      ? `${name} kini termasuk dalam dashboard, Supabase dan Google Sheet.`
+      : "Google Sheet belum dapat dikemas kini. Semak Web App URL.",
+    agentsPushed ? "success" : "error",
+  );
   renderAll();
 }
 
@@ -1666,9 +1731,15 @@ async function toggleAgent(agentId) {
     console.error(error);
     showToast("Perubahan belum disimpan", "Semak polisi database Supabase.", "error");
   }
+  const agentsPushed = await pushAgentsSnapshotToSheet();
   showToast(
-    agent.active ? "Ejen diaktifkan" : "Ejen dinyahaktifkan",
-    agent.active ? `${agent.name} akan menerima giliran lead.` : `${agent.name} dikeluarkan daripada giliran.`,
+    agentsPushed ? (agent.active ? "Ejen diaktifkan" : "Ejen dinyahaktifkan") : "Status ejen belum sync",
+    agentsPushed
+      ? agent.active
+        ? `${agent.name} akan menerima giliran lead.`
+        : `${agent.name} dikeluarkan daripada giliran.`
+      : "Google Sheet belum dapat dikemas kini. Semak Web App URL.",
+    agentsPushed ? "success" : "error",
   );
   renderAll();
 }
@@ -1685,7 +1756,14 @@ async function removeAgent(agentId) {
       return;
     }
     await loadRemoteState(state.currentUserId);
-    showToast("Ejen dibuang", `${agent.name} telah dikeluarkan daripada sistem.`);
+    const agentsPushed = await pushAgentsSnapshotToSheet();
+    showToast(
+      agentsPushed ? "Ejen dibuang" : "Ejen dibuang dari dashboard",
+      agentsPushed
+        ? `${agent.name} telah dikeluarkan daripada dashboard, Supabase dan Google Sheet.`
+        : "Google Sheet belum dapat dikemas kini. Semak Web App URL.",
+      agentsPushed ? "success" : "error",
+    );
     renderAll();
     return;
   }
@@ -1700,7 +1778,14 @@ async function removeAgent(agentId) {
     });
   state.agents = state.agents.filter((item) => item.id !== agentId);
   saveState();
-  showToast("Ejen dibuang", `${agent.name} telah dikeluarkan daripada sistem.`);
+  const agentsPushed = await pushAgentsSnapshotToSheet();
+  showToast(
+    agentsPushed ? "Ejen dibuang" : "Ejen dibuang dari dashboard",
+    agentsPushed
+      ? `${agent.name} telah dikeluarkan daripada dashboard, Supabase dan Google Sheet.`
+      : "Google Sheet belum dapat dikemas kini. Semak Web App URL.",
+    agentsPushed ? "success" : "error",
+  );
   renderAll();
 }
 
@@ -1884,6 +1969,7 @@ async function syncGoogleSheet(options = {}) {
         round_robin_index: state.roundRobinIndex,
       });
     }
+    await pushAgentsSnapshotToSheet();
     scheduleSync();
     renderAll();
     if (!options.silent || added || updated || removed) {
