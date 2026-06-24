@@ -2,6 +2,7 @@ const STORAGE_KEY = "leadlaju-state-v1";
 const AUTH_KEY = "leadlaju-auth-v1";
 const SUPABASE_CONFIG_KEY = "leadlaju-supabase-config-v1";
 const SUPABASE_DISABLED_KEY = "leadlaju-supabase-disabled-v1";
+const NOTIFIED_LEADS_KEY = "leadlaju-notified-leads-v1";
 const DEFAULT_SUPABASE_CONFIG = Object.freeze({
   url: "https://rfqwyhafvfvafiqrcmxa.supabase.co",
   key: "sb_publishable_or7DVUc_la79KiBz4kR5uw_EIGyN3-l",
@@ -9,6 +10,8 @@ const DEFAULT_SUPABASE_CONFIG = Object.freeze({
 const SESSION_DURATION_MS = 365 * 24 * 60 * 60 * 1000;
 const RESPONSE_WINDOW_MS = 5 * 60 * 1000;
 const DEFAULT_AGENT_PASSWORD = "Agent123!";
+const NOTIFICATION_ICON = "/assets/icon-192.png";
+const NOTIFICATION_BADGE = "/assets/badge-96.png";
 
 const defaultState = {
   currentUserId: "agent-aina",
@@ -79,6 +82,10 @@ let supabaseChannel = null;
 let supabaseMode = false;
 let remoteReloadTimer = null;
 let claimingLeadId = null;
+let remoteStateLoadedOnce = false;
+let serviceWorkerRegistrationPromise = null;
+let notificationAudioContext = null;
+let notifiedLeadKeys = loadNotifiedLeadKeys();
 
 const elements = {
   sidebar: document.querySelector("#sidebar"),
@@ -290,6 +297,8 @@ function mapActivity(row) {
 
 async function loadRemoteState(userId) {
   if (!supabaseClient) return false;
+  const previousLeadKeys = new Set(state.leads.map(leadNotificationKey));
+  const shouldDetectNewLeads = remoteStateLoadedOnce;
   try {
     const [profilesResult, leadsResult, activitiesResult, settingsResult] = await Promise.all([
       supabaseClient.from("profiles").select("*").order("created_at"),
@@ -326,6 +335,12 @@ async function loadRemoteState(userId) {
     supabaseMode = true;
     saveState();
     subscribeToSupabase();
+    if (shouldDetectNewLeads) {
+      await notifyForNewVisibleLeads(previousLeadKeys);
+    } else {
+      markCurrentLeadNotificationsSeen();
+    }
+    remoteStateLoadedOnce = true;
     return true;
   } catch (error) {
     console.error("Supabase load failed", error);
@@ -484,6 +499,8 @@ function startAuthenticatedApp(user) {
     processExpiredLeads();
     updateCountdown();
   }, 1000);
+  registerServiceWorker();
+  markCurrentLeadNotificationsSeen();
   scheduleSync();
   renderAll();
 }
@@ -562,6 +579,7 @@ async function logout() {
   }
   localStorage.removeItem(AUTH_KEY);
   supabaseMode = false;
+  remoteStateLoadedOnce = false;
   showLogin();
 }
 
@@ -787,6 +805,104 @@ function showToast(title, message, tone = "success") {
   toastTimer = window.setTimeout(() => elements.toast.classList.remove("visible"), 3200);
 }
 
+function loadNotifiedLeadKeys() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(NOTIFIED_LEADS_KEY) || "[]");
+    return new Set(Array.isArray(saved) ? saved : []);
+  } catch {
+    localStorage.removeItem(NOTIFIED_LEADS_KEY);
+    return new Set();
+  }
+}
+
+function saveNotifiedLeadKeys() {
+  const compacted = [...notifiedLeadKeys].slice(-250);
+  notifiedLeadKeys = new Set(compacted);
+  localStorage.setItem(NOTIFIED_LEADS_KEY, JSON.stringify(compacted));
+}
+
+function leadNotificationKey(lead) {
+  return [lead.id || lead.dedupeKey, lead.assignedAgentId || "unassigned", lead.passCount || 0, lead.status].join(":");
+}
+
+function shouldNotifyForLead(lead) {
+  if (!lead || lead.status !== "new") return false;
+  if (Number(lead.expiresAt) && lead.expiresAt <= Date.now()) return false;
+  return isAdmin() || lead.assignedAgentId === state.currentUserId;
+}
+
+function markLeadNotificationSeen(lead) {
+  notifiedLeadKeys.add(leadNotificationKey(lead));
+}
+
+function markCurrentLeadNotificationsSeen() {
+  state.leads.filter(shouldNotifyForLead).forEach(markLeadNotificationSeen);
+  saveNotifiedLeadKeys();
+}
+
+function getNotificationStartUrl() {
+  return `${window.location.origin}${window.location.pathname || "/"}`;
+}
+
+async function registerServiceWorker() {
+  if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
+  if (!serviceWorkerRegistrationPromise) {
+    serviceWorkerRegistrationPromise = navigator.serviceWorker
+      .register("/sw.js")
+      .then((registration) => navigator.serviceWorker.ready.then(() => registration))
+      .catch((error) => {
+        console.warn("Service worker registration failed", error);
+        serviceWorkerRegistrationPromise = null;
+        return null;
+      });
+  }
+  return serviceWorkerRegistrationPromise;
+}
+
+async function playNotificationSound() {
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) return false;
+
+  try {
+    if (!notificationAudioContext) notificationAudioContext = new AudioContext();
+    if (notificationAudioContext.state === "suspended") await notificationAudioContext.resume();
+
+    const context = notificationAudioContext;
+    const start = context.currentTime;
+    [784, 988].forEach((frequency, index) => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      const offset = index * 0.18;
+
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(frequency, start + offset);
+      gain.gain.setValueAtTime(0.0001, start + offset);
+      gain.gain.exponentialRampToValueAtTime(0.18, start + offset + 0.025);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + offset + 0.15);
+
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start(start + offset);
+      oscillator.stop(start + offset + 0.16);
+    });
+    return true;
+  } catch (error) {
+    console.warn("Notification sound blocked", error);
+    return false;
+  }
+}
+
+async function notifyForNewVisibleLeads(previousKeys = new Set()) {
+  const freshLeads = state.leads.filter((lead) => {
+    const key = leadNotificationKey(lead);
+    return shouldNotifyForLead(lead) && !previousKeys.has(key) && !notifiedLeadKeys.has(key);
+  });
+
+  for (const lead of freshLeads) {
+    await sendSystemNotification(lead, { force: true, toast: true });
+  }
+}
+
 function addActivity(type, lead, message) {
   const activity = {
     id: crypto.randomUUID?.() || makeId("activity"),
@@ -981,8 +1097,8 @@ async function addLead(input, options = {}) {
 
   if (!options.silent) {
     showToast("Lead baru masuk", `${lead.name} telah diberikan kepada ${assignedAgent.name}.`);
-    sendSystemNotification(lead);
   }
+  if (!options.silent || options.notify) sendSystemNotification(lead);
   return "added";
 }
 
@@ -1035,7 +1151,7 @@ async function addManualLead(event) {
     return;
   }
 
-  const result = await addLead(leadInput, { silent: true, updateExisting: true });
+  const result = await addLead(leadInput, { silent: true, updateExisting: true, notify: true });
   if (!result) {
     elements.manualLeadError.textContent = "Lead sudah masuk Google Sheet, tetapi dashboard belum dapat sync. Semak ejen aktif.";
     return;
@@ -1043,8 +1159,6 @@ async function addManualLead(event) {
 
   closeModal(elements.manualLeadModal);
   showToast("Manual lead disimpan", "Google Sheet, dashboard dan Supabase telah diselaraskan.", "success");
-  const savedLead = state.leads.find((lead) => lead.dedupeKey === leadInput.id);
-  if (savedLead) sendSystemNotification(savedLead);
   renderAll();
 }
 
@@ -1343,13 +1457,55 @@ async function syncAgentsFromSheet(sheetAgentRows) {
   return result;
 }
 
-async function sendSystemNotification(lead) {
+async function sendSystemNotification(lead, options = {}) {
+  if (!options.force && !shouldNotifyForLead(lead)) return;
+  const key = leadNotificationKey(lead);
+  if (!options.force && notifiedLeadKeys.has(key)) return;
+
+  markLeadNotificationSeen(lead);
+  saveNotifiedLeadKeys();
+  if (options.toast) {
+    showToast("Lead baru masuk", `${lead.name} menunggu tindakan dalam 5 minit.`);
+  }
+  await playNotificationSound();
+
   if (!("Notification" in window) || Notification.permission !== "granted") return;
+
   const agent = getAgent(lead.assignedAgentId);
-  new Notification("Lead baru perlu dihubungi", {
-    body: `${lead.project} • ${lead.name}\nNombor dibuka selepas CALL NOW. Diberikan kepada ${agent?.name || "ejen"}.`,
-    tag: lead.id,
-  });
+  const title = `Lead baru: ${lead.project || "Projek baru"}`;
+  const notificationOptions = {
+    body: `${lead.name}\nNombor dibuka selepas CALL NOW. Diberikan kepada ${agent?.name || "ejen"}.`,
+    tag: key,
+    renotify: true,
+    requireInteraction: true,
+    icon: NOTIFICATION_ICON,
+    badge: NOTIFICATION_BADGE,
+    data: {
+      leadId: lead.id,
+      url: getNotificationStartUrl(),
+    },
+  };
+
+  try {
+    const registration = await registerServiceWorker();
+    if (registration?.showNotification) {
+      await registration.showNotification(title, notificationOptions);
+      return;
+    }
+  } catch (error) {
+    console.warn("Service worker notification failed", error);
+  }
+
+  try {
+    const notification = new Notification(title, notificationOptions);
+    notification.onclick = () => {
+      window.focus();
+      switchView("dashboard");
+      notification.close();
+    };
+  } catch (error) {
+    console.warn("Browser notification failed", error);
+  }
 }
 
 async function requestNotifications() {
@@ -1357,15 +1513,18 @@ async function requestNotifications() {
     showToast("Tidak disokong", "Pelayar ini tidak menyokong notifikasi sistem.", "error");
     return;
   }
+  await registerServiceWorker();
+  await playNotificationSound();
   if (Notification.permission === "granted") {
-    showToast("Notifikasi aktif", "Anda akan dimaklumkan apabila lead baru masuk.");
+    showToast("Notifikasi aktif", "Lead baru akan keluar notifikasi sistem dan bunyi dalam app.");
     return;
   }
   const permission = await Notification.requestPermission();
+  if (permission === "granted") await playNotificationSound();
   showToast(
     permission === "granted" ? "Notifikasi diaktifkan" : "Notifikasi belum aktif",
     permission === "granted"
-      ? "Lead baru akan muncul sebagai notifikasi sistem."
+      ? "Lead baru akan muncul sebagai notifikasi sistem dan bunyi dalam app."
       : "Benarkan notifikasi melalui tetapan pelayar untuk mengaktifkannya.",
     permission === "granted" ? "success" : "error",
   );
@@ -2166,11 +2325,12 @@ async function syncGoogleSheet(options = {}) {
     if (!Array.isArray(rows)) throw new Error("Format JSON tidak sah");
 
     const agentSync = Array.isArray(payload) ? { added: 0, updated: 0, removed: 0 } : await syncAgentsFromSheet(payload.agents);
+    const shouldNotifyNewLeads = options.notifyNewLeads ?? Boolean(state.integration.lastSyncAt);
     let added = 0;
     let updated = 0;
     const sheetKeys = new Set(rows.map(sheetDedupeKey).filter(Boolean));
     for (const row of rows) {
-      const result = await addLead(row, { silent: true, updateExisting: true });
+      const result = await addLead(row, { silent: true, updateExisting: true, notify: shouldNotifyNewLeads });
       if (result === "added") added += 1;
       if (result === "updated") updated += 1;
     }
@@ -2346,6 +2506,12 @@ elements.integrationForm.addEventListener("submit", saveIntegration);
 elements.syncNowButton.addEventListener("click", () => syncGoogleSheet());
 elements.supabaseForm.addEventListener("submit", saveSupabaseConfig);
 elements.supabaseDisconnect.addEventListener("click", disconnectSupabase);
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.data?.type === "OPEN_DASHBOARD") switchView("dashboard");
+  });
+}
 
 document.querySelectorAll("[data-close-modal]").forEach((button) => {
   button.addEventListener("click", () => closeModal(document.querySelector(`#${button.dataset.closeModal}`)));
