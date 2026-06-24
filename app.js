@@ -770,6 +770,10 @@ function getAgent(agentId) {
   return state.agents.find((agent) => agent.id === agentId);
 }
 
+function canAccessLead(lead) {
+  return Boolean(lead) && (isAdmin() || lead.assignedAgentId === state.currentUserId);
+}
+
 function formatDateTime(value) {
   return new Intl.DateTimeFormat("ms-MY", {
     day: "2-digit",
