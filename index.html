@@ -17,7 +17,7 @@
     />
     <link rel="stylesheet" href="styles.css?v=20260624-manual-lead" />
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260624-manual-sync" defer></script>
+    <script src="app.js?v=20260624-three-way-sync" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -393,6 +393,7 @@
                     <th>Ejen</th>
                     <th>Masa masuk</th>
                     <th>Status</th>
+                    <th>Tindakan</th>
                   </tr>
                 </thead>
                 <tbody id="leads-table-body"></tbody>
@@ -735,6 +736,7 @@
           <textarea id="contact-notes" rows="4" placeholder="Contoh: Berminat untuk site visit hujung minggu"></textarea>
           <p class="reset-error" id="contact-form-error" role="alert"></p>
           <button class="primary-button full" type="submit">Simpan perubahan</button>
+          <button class="danger-button full" id="contact-delete-button" type="button">Padam lead</button>
         </form>
       </div>
     </div>

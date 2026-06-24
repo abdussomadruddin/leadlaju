@@ -128,6 +128,30 @@ as $$
   );
 $$;
 
+create or replace function public.delete_leads_not_in_dedupe_keys(p_dedupe_keys text[])
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  deleted_count integer;
+begin
+  if not public.is_admin() then
+    raise exception 'Only admins can mirror Google Sheet deletions.';
+  end if;
+
+  delete from public.leads
+  where not coalesce(
+    dedupe_key = any(coalesce(p_dedupe_keys, array[]::text[])),
+    false
+  );
+
+  get diagnostics deleted_count = row_count;
+  return deleted_count;
+end;
+$$;
+
 alter table public.profiles enable row level security;
 alter table public.leads enable row level security;
 alter table public.activities enable row level security;
@@ -161,6 +185,15 @@ using (
   or (assigned_agent_id = auth.uid() and status = 'contacted')
 )
 with check (
+  public.is_admin()
+  or (assigned_agent_id = auth.uid() and status = 'contacted')
+);
+
+drop policy if exists "leads_admin_delete" on public.leads;
+create policy "leads_admin_delete"
+on public.leads for delete
+to authenticated
+using (
   public.is_admin()
   or (assigned_agent_id = auth.uid() and status = 'contacted')
 );
@@ -369,14 +402,16 @@ $$;
 revoke all on function public.get_visible_leads() from public;
 revoke all on function public.claim_lead(uuid) from public;
 revoke all on function public.pass_expired_lead(uuid, uuid) from public;
+revoke all on function public.delete_leads_not_in_dedupe_keys(text[]) from public;
 grant execute on function public.get_visible_leads() to authenticated;
 grant execute on function public.claim_lead(uuid) to authenticated;
 grant execute on function public.pass_expired_lead(uuid, uuid) to authenticated;
+grant execute on function public.delete_leads_not_in_dedupe_keys(text[]) to authenticated;
 
 grant usage on schema public to authenticated;
 grant select on public.profiles to authenticated;
 grant update on public.profiles to authenticated;
-grant insert, update on public.leads to authenticated;
+grant insert, update, delete on public.leads to authenticated;
 grant select, insert on public.activities to authenticated;
 grant select, insert, update on public.app_settings to authenticated;
 

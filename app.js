@@ -144,6 +144,7 @@ const elements = {
   contactProject: document.querySelector("#contact-project"),
   contactNotes: document.querySelector("#contact-notes"),
   contactFormError: document.querySelector("#contact-form-error"),
+  contactDeleteButton: document.querySelector("#contact-delete-button"),
   agentsGrid: document.querySelector("#agents-grid"),
   addAgentButton: document.querySelector("#add-agent-button"),
   agentModal: document.querySelector("#agent-modal"),
@@ -421,6 +422,21 @@ async function persistActivity(activity) {
     created_at: new Date(activity.createdAt).toISOString(),
   });
   if (error) throw error;
+  return true;
+}
+
+async function deleteLeads(leadIds) {
+  const ids = [...new Set(leadIds)].filter(Boolean);
+  if (!ids.length) return true;
+
+  if (supabaseMode) {
+    const { error } = await supabaseClient.from("leads").delete().in("id", ids);
+    if (error) throw error;
+  }
+
+  state.leads = state.leads.filter((lead) => !ids.includes(lead.id));
+  state.activities = state.activities.filter((activity) => !ids.includes(activity.leadId));
+  saveState();
   return true;
 }
 
@@ -821,6 +837,20 @@ function normalizeSheetStatus(value) {
   return "new";
 }
 
+function sheetDedupeKey(input) {
+  const sourceId = String(input.id || input.lead_id || "").trim();
+  if (sourceId) return sourceId;
+  const phone = input.phone || input.phone_number || input.mobile || "";
+  const project =
+    input.project ||
+    input.projek ||
+    input.project_name ||
+    input.projectName ||
+    input.campaign_name ||
+    "Tidak dinyatakan";
+  return `${normalizePhone(phone)}-${String(project).trim()}-${input.created_at || input.createdAt || ""}`;
+}
+
 async function addLead(input, options = {}) {
   const name = String(input.name || input.full_name || input.fullName || "").trim();
   const phone = String(input.phone || input.phone_number || input.mobile || "").trim();
@@ -835,9 +865,7 @@ async function addLead(input, options = {}) {
   ).trim();
   if (!name || !phone) return false;
 
-  const sourceId = String(input.id || input.lead_id || "").trim();
-  const dedupeKey =
-    sourceId || `${normalizePhone(phone)}-${project}-${input.created_at || input.createdAt || ""}`;
+  const dedupeKey = sheetDedupeKey(input);
   const existingLead = state.leads.find((lead) => lead.dedupeKey === dedupeKey);
   const source = normalizeLeadSource(input.source || input.sumber || input.platform, options.source || "Google Sheet");
   const createdAtValue = input.created_at || input.createdAt;
@@ -1024,6 +1052,52 @@ async function pushManualLeadToSheet(leadInput) {
     return true;
   } catch (error) {
     console.error("Manual lead push failed", error);
+    return false;
+  }
+}
+
+async function deleteLeadFromSheet(lead) {
+  const endpoint = elements.sheetEndpoint.value.trim() || state.integration.endpoint;
+  if (!endpoint) return false;
+
+  const payload = {
+    action: "delete_lead",
+    lead: {
+      id: lead.dedupeKey || lead.id,
+      phone: lead.phone,
+      project: lead.project,
+      name: lead.name,
+    },
+  };
+  const body = JSON.stringify(payload);
+
+  try {
+    if (navigator.sendBeacon) {
+      const queued = navigator.sendBeacon(
+        endpoint,
+        new Blob([body], { type: "text/plain;charset=UTF-8" }),
+      );
+      if (queued) {
+        state.integration.connected = true;
+        state.integration.lastSyncAt = Date.now();
+        saveState();
+        return true;
+      }
+    }
+
+    await fetch(endpoint, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "text/plain;charset=UTF-8" },
+      body,
+      keepalive: true,
+    });
+    state.integration.connected = true;
+    state.integration.lastSyncAt = Date.now();
+    saveState();
+    return true;
+  } catch (error) {
+    console.error("Lead sheet delete failed", error);
     return false;
   }
 }
@@ -1308,6 +1382,9 @@ function renderLeadsTable() {
           const visualStatus = lead.status === "new" && lead.passCount > 0 ? "passed" : lead.status;
           const statusLabel =
             visualStatus === "contacted" ? "Contacted" : visualStatus === "passed" ? "Passed" : "New";
+          const deleteButton = isAdmin()
+            ? `<button class="contact-edit-button danger" type="button" data-lead-delete="${lead.id}">Padam</button>`
+            : "-";
           return `
             <tr>
               <td><strong>${escapeHtml(lead.name)}</strong><small>${escapeHtml(displayLeadPhone(lead))}</small></td>
@@ -1316,10 +1393,11 @@ function renderLeadsTable() {
               <td>${escapeHtml(getAgent(lead.assignedAgentId)?.name || "Tiada ejen")}</td>
               <td>${formatDateTime(lead.receivedAt)}</td>
               <td><span class="status-badge ${visualStatus}">${statusLabel}</span></td>
+              <td><span class="lead-actions">${deleteButton}</span></td>
             </tr>`;
         })
         .join("")
-    : `<tr><td class="table-empty" colspan="6">Tiada lead ditemui.</td></tr>`;
+    : `<tr><td class="table-empty" colspan="7">Tiada lead ditemui.</td></tr>`;
 }
 
 function getContactedLeads() {
@@ -1351,7 +1429,12 @@ function renderContacts() {
               <td>${escapeHtml(lead.email || "-")}</td>
               <td><strong>${escapeHtml(lead.project || "Tidak dinyatakan")}</strong></td>
               <td>${lead.contactedAt ? formatDateTime(lead.contactedAt) : "-"}</td>
-              <td><button class="contact-edit-button" type="button" data-contact-edit="${lead.id}">Edit</button></td>
+              <td>
+                <span class="lead-actions">
+                  <button class="contact-edit-button" type="button" data-contact-edit="${lead.id}">Edit</button>
+                  <button class="contact-edit-button danger" type="button" data-contact-delete="${lead.id}">Padam</button>
+                </span>
+              </td>
             </tr>`,
         )
         .join("")
@@ -1676,6 +1759,7 @@ function openContactModal(leadId) {
   elements.contactProject.value = lead.project || "";
   elements.contactNotes.value = lead.notes || "";
   elements.contactFormError.textContent = "";
+  elements.contactDeleteButton.dataset.contactDelete = lead.id;
   elements.contactModal.classList.add("open");
   elements.contactModal.setAttribute("aria-hidden", "false");
   window.setTimeout(() => elements.contactName.focus(), 80);
@@ -1709,6 +1793,35 @@ async function updateContact(event) {
   }
 }
 
+async function deleteLeadEverywhere(leadId) {
+  const lead = state.leads.find((item) => item.id === leadId);
+  if (!lead) return;
+
+  const confirmed = window.confirm(
+    `Padam lead ${lead.name}? Tindakan ini akan buang lead daripada Google Sheet, dashboard dan Supabase.`,
+  );
+  if (!confirmed) return;
+
+  const sheetDeleted = await deleteLeadFromSheet(lead);
+  if (!sheetDeleted) {
+    showToast("Lead tidak dipadam", "Google Sheet belum dapat dikemas kini. Semak Web App URL.", "error");
+    return;
+  }
+
+  try {
+    await deleteLeads([lead.id]);
+    if (selectedContactId === lead.id) {
+      selectedContactId = null;
+      closeModal(elements.contactModal);
+    }
+    showToast("Lead dipadam", "Google Sheet, dashboard dan Supabase telah diselaraskan.");
+    renderAll();
+  } catch (error) {
+    console.error(error);
+    showToast("Lead tidak dipadam", "Semak sambungan dan polisi Supabase.", "error");
+  }
+}
+
 async function syncGoogleSheet(options = {}) {
   const endpoint = elements.sheetEndpoint.value.trim() || state.integration.endpoint;
   if (!endpoint) {
@@ -1726,14 +1839,35 @@ async function syncGoogleSheet(options = {}) {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const payload = await response.json();
     const rows = Array.isArray(payload) ? payload : payload.leads || payload.data || [];
+    if (!Array.isArray(payload) && payload?.ok === false) {
+      throw new Error(payload.error || "Google Sheet tidak dapat dibaca");
+    }
     if (!Array.isArray(rows)) throw new Error("Format JSON tidak sah");
 
     let added = 0;
     let updated = 0;
+    const sheetKeys = new Set(rows.map(sheetDedupeKey).filter(Boolean));
     for (const row of rows) {
       const result = await addLead(row, { silent: true, updateExisting: true });
       if (result === "added") added += 1;
       if (result === "updated") updated += 1;
+    }
+    const removedLeads = state.leads.filter((lead) => !sheetKeys.has(lead.dedupeKey));
+    let removed = removedLeads.length;
+    if (supabaseMode && isAdmin()) {
+      const { data, error } = await supabaseClient.rpc("delete_leads_not_in_dedupe_keys", {
+        p_dedupe_keys: [...sheetKeys],
+      });
+      if (error) throw error;
+      removed = Number(data) || 0;
+      if (removedLeads.length) {
+        const removedIds = removedLeads.map((lead) => lead.id);
+        state.leads = state.leads.filter((lead) => sheetKeys.has(lead.dedupeKey));
+        state.activities = state.activities.filter((activity) => !removedIds.includes(activity.leadId));
+        saveState();
+      }
+    } else if (removedLeads.length) {
+      await deleteLeads(removedLeads.map((lead) => lead.id));
     }
 
     state.integration.endpoint = endpoint;
@@ -1752,19 +1886,20 @@ async function syncGoogleSheet(options = {}) {
     }
     scheduleSync();
     renderAll();
-    if (!options.silent || added || updated) {
+    if (!options.silent || added || updated || removed) {
       const title =
-        added && updated
-          ? `${added} lead baru, ${updated} dikemas kini`
-          : added
-            ? `${added} lead baru`
-            : updated
-              ? `${updated} lead dikemas kini`
-              : "Sync selesai";
+        [
+          added ? `${added} lead baru` : "",
+          updated ? `${updated} dikemas kini` : "",
+          removed ? `${removed} dibuang` : "",
+        ]
+          .filter(Boolean)
+          .join(", ") ||
+        "Sync selesai";
       showToast(
         title,
-        added || updated
-          ? "Dashboard telah diselaraskan dengan Google Sheet."
+        added || updated || removed
+          ? "Dashboard dan Supabase telah diselaraskan dengan Google Sheet."
           : "Tiada perubahan baru ditemui.",
       );
     }
@@ -1779,6 +1914,7 @@ async function syncGoogleSheet(options = {}) {
     if (!options.silent) {
       showToast("Sync gagal", "Pastikan Web App URL boleh diakses oleh sesiapa sahaja.", "error");
     }
+    console.error("Google Sheet sync failed", error);
     return false;
   }
 }
@@ -1867,6 +2003,10 @@ elements.sidebarSettings.addEventListener("click", logout);
 elements.logoutButton.addEventListener("click", logout);
 elements.leadSearch.addEventListener("input", renderLeadsTable);
 elements.leadFilter.addEventListener("change", renderLeadsTable);
+elements.leadsTableBody.addEventListener("click", (event) => {
+  const remove = event.target.closest("[data-lead-delete]");
+  if (remove) deleteLeadEverywhere(remove.dataset.leadDelete);
+});
 elements.contactSearch.addEventListener("input", renderContacts);
 elements.manualLeadForm.addEventListener("submit", addManualLead);
 elements.manualLeadPhone.addEventListener("input", () => {
@@ -1914,7 +2054,13 @@ elements.agentsGrid.addEventListener("click", (event) => {
 
 elements.contactsTableBody.addEventListener("click", (event) => {
   const edit = event.target.closest("[data-contact-edit]");
+  const remove = event.target.closest("[data-contact-delete]");
   if (edit) openContactModal(edit.dataset.contactEdit);
+  if (remove) deleteLeadEverywhere(remove.dataset.contactDelete);
+});
+elements.contactDeleteButton.addEventListener("click", () => {
+  const leadId = elements.contactDeleteButton.dataset.contactDelete || selectedContactId;
+  if (leadId) deleteLeadEverywhere(leadId);
 });
 
 document.addEventListener("keydown", (event) => {

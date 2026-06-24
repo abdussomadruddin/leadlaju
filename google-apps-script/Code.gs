@@ -30,6 +30,8 @@ function doGet() {
   try {
     const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
     const sheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
+    const headers = ensureRequiredHeaders_(sheet);
+    ensureLeadIds_(sheet, headers);
     const leads = readLeads_(sheet);
     return jsonResponse({
       ok: true,
@@ -47,6 +49,9 @@ function doPost(event) {
     const payload = JSON.parse(event.postData.contents || "{}");
     if (payload.action === "add_lead") {
       return jsonResponse(appendLead_(payload.lead || payload));
+    }
+    if (payload.action === "delete_lead") {
+      return jsonResponse(deleteLead_(payload.lead || payload));
     }
     if (payload.action === "send_reset_code") {
       return jsonResponse(sendResetCode_(payload));
@@ -94,6 +99,38 @@ function appendLead_(input) {
   sheet.appendRow(row);
 
   return { ok: true, lead };
+}
+
+function deleteLead_(input) {
+  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
+  const headers = ensureRequiredHeaders_(sheet);
+  const values = sheet.getDataRange().getDisplayValues();
+  if (values.length < 2) return { ok: true, deleted: 0 };
+
+  const id = String(input.id || input.lead_id || "").trim();
+  const phone = String(input.phone || input.phone_number || "").trim();
+  const project = String(input.project || input.projek || "").trim();
+  const idIndex = headers.findIndex((header) => FIELD_ALIASES.id.includes(header));
+  const phoneIndex = headers.findIndex((header) => FIELD_ALIASES.phone.includes(header));
+  const projectIndex = headers.findIndex((header) => FIELD_ALIASES.project.includes(header));
+  let deleted = 0;
+
+  for (let rowNumber = values.length; rowNumber >= 2; rowNumber -= 1) {
+    const row = values[rowNumber - 1];
+    const rowId = idIndex >= 0 ? String(row[idIndex] || "").trim() : "";
+    const rowPhone = phoneIndex >= 0 ? String(row[phoneIndex] || "").trim() : "";
+    const rowProject = projectIndex >= 0 ? String(row[projectIndex] || "").trim() : "";
+    const idMatches = id && rowId === id;
+    const fallbackMatches = !id && phone && project && rowPhone === phone && rowProject === project;
+
+    if (idMatches || fallbackMatches) {
+      sheet.deleteRow(rowNumber);
+      deleted += 1;
+    }
+  }
+
+  return { ok: true, deleted };
 }
 
 function sendResetCode_(payload) {
@@ -187,6 +224,34 @@ function ensureRequiredHeaders_(sheet) {
   }
 
   return headerValues.map(normalizeHeader_);
+}
+
+function ensureLeadIds_(sheet, headers) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+
+  const idIndex = headers.findIndex((header) => FIELD_ALIASES.id.includes(header));
+  const nameIndex = headers.findIndex((header) => FIELD_ALIASES.name.includes(header));
+  const phoneIndex = headers.findIndex((header) => FIELD_ALIASES.phone.includes(header));
+  if (idIndex < 0 || nameIndex < 0 || phoneIndex < 0) return;
+
+  const values = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).getDisplayValues();
+  const ids = [];
+  let changed = false;
+
+  values.forEach((row) => {
+    const hasLead = String(row[nameIndex] || "").trim() && String(row[phoneIndex] || "").trim();
+    let id = String(row[idIndex] || "").trim();
+    if (hasLead && !id) {
+      id = `sheet-${Utilities.getUuid()}`;
+      changed = true;
+    }
+    ids.push([id]);
+  });
+
+  if (changed) {
+    sheet.getRange(2, idIndex + 1, ids.length, 1).setValues(ids);
+  }
 }
 
 function normalizeHeader_(value) {

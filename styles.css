@@ -2093,6 +2093,39 @@ td small {
   background: #e4eeff;
 }
 
+.lead-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.contact-edit-button.danger {
+  border-color: #ffd2d2;
+  color: var(--red-dark);
+  background: #fff0f0;
+}
+
+.contact-edit-button.danger:hover {
+  border-color: #f2a6a6;
+  background: #ffe4e4;
+}
+
+.danger-button {
+  min-height: 42px;
+  margin-top: 8px;
+  border: 1px solid #ffd2d2;
+  border-radius: 10px;
+  color: var(--red-dark);
+  background: #fff0f0;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.danger-button:hover {
+  border-color: #f2a6a6;
+  background: #ffe4e4;
+}
+
 .reset-password-modal {
   width: min(460px, 100%);
 }
