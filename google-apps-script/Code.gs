@@ -581,6 +581,31 @@ function authorizeSupabaseSync() {
   return response.getResponseCode();
 }
 
+function syncSupabaseFromSpreadsheet() {
+  return safeSyncCurrentSheet_(true);
+}
+
+function onSheetCoreEdit() {
+  return safeSyncCurrentSheet_(true);
+}
+
+function onSheetCoreChange() {
+  return safeSyncCurrentSheet_(true);
+}
+
+function installSheetCoreTriggers() {
+  const handlers = ["onSheetCoreEdit", "onSheetCoreChange", "syncSupabaseFromSpreadsheet"];
+  ScriptApp.getProjectTriggers().forEach((trigger) => {
+    if (handlers.includes(trigger.getHandlerFunction())) {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+  ScriptApp.newTrigger("onSheetCoreEdit").forSpreadsheet(SPREADSHEET_ID).onEdit().create();
+  ScriptApp.newTrigger("onSheetCoreChange").forSpreadsheet(SPREADSHEET_ID).onChange().create();
+  ScriptApp.newTrigger("syncSupabaseFromSpreadsheet").timeBased().everyMinutes(5).create();
+  return { ok: true, installed: handlers };
+}
+
 function getSupabaseAccessToken_() {
   const properties = PropertiesService.getScriptProperties();
   const existingToken = properties.getProperty(SUPABASE_ACCESS_TOKEN_PROPERTY);
