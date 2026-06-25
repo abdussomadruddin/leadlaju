@@ -3,6 +3,7 @@ const SHEET_NAME = "Sheet1";
 const AGENTS_SHEET_NAME = "Agents";
 const DEFAULT_SOURCE = "Manual Lead";
 const DEFAULT_AGENT_PASSWORD = "Agent123!";
+const MALAYSIA_TIME_ZONE = "Asia/Kuala_Lumpur";
 
 const FIELD_ALIASES = {
   id: ["id", "lead id", "lead_id", "tiktok lead id", "meta lead id"],
@@ -60,6 +61,7 @@ function doGet() {
     const headers = ensureRequiredHeaders_(sheet);
     const agentHeaders = ensureRequiredHeadersBySpec_(agentsSheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
     ensureLeadIds_(sheet, headers);
+    ensureLeadTimestamps_(sheet, headers);
     ensureLeadSources_(sheet, headers);
     const leads = readLeads_(sheet);
     const agents = readAgents_(agentsSheet, agentHeaders);
@@ -112,7 +114,7 @@ function appendLead_(input) {
   const headers = ensureRequiredHeaders_(sheet);
   const lead = {
     id: String(input.id || input.lead_id || Utilities.getUuid()).trim(),
-    createdAt: String(input.created_at || input.createdAt || new Date().toISOString()).trim(),
+    createdAt: canonicalLeadTimestamp_(input.created_at || input.createdAt || new Date()),
     name: String(input.name || input.nama || input.full_name || "").trim(),
     phone: String(input.phone || input.phone_number || input.mobile || "").trim(),
     email: String(input.email || input.emel || input.email_address || "").trim(),
@@ -390,6 +392,38 @@ function canonicalLeadSource_(value) {
   return source || DEFAULT_SOURCE;
 }
 
+function canonicalLeadTimestamp_(value) {
+  const parsed = parseLeadTimestamp_(value);
+  return Utilities.formatDate(parsed || new Date(), MALAYSIA_TIME_ZONE, "yyyy-MM-dd HH:mm:ss");
+}
+
+function parseLeadTimestamp_(value) {
+  if (value instanceof Date && !isNaN(value.getTime())) return value;
+
+  const raw = String(value || "").trim();
+  if (!raw) return new Date();
+
+  const numeric = Number(raw.replace(/,/g, ""));
+  if (isFinite(numeric) && /^-?\d+(\.\d+)?$/.test(raw.replace(/,/g, ""))) {
+    const milliseconds = Math.abs(numeric) >= 1000000000000 ? numeric : numeric * 1000;
+    return new Date(milliseconds);
+  }
+
+  const malaysiaMatch = raw.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (malaysiaMatch) {
+    const year = Number(malaysiaMatch[1]);
+    const month = Number(malaysiaMatch[2]) - 1;
+    const day = Number(malaysiaMatch[3]);
+    const hour = Number(malaysiaMatch[4] || 0);
+    const minute = Number(malaysiaMatch[5] || 0);
+    const second = Number(malaysiaMatch[6] || 0);
+    return new Date(Date.UTC(year, month, day, hour - 8, minute, second));
+  }
+
+  const parsed = new Date(raw);
+  return isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
 function authorizeSheetTemplate() {
   return refreshSheetTemplate_();
 }
@@ -425,6 +459,7 @@ function refreshSheetTemplate_() {
   const headers = ensureRequiredHeaders_(sheet);
   ensureRequiredHeadersBySpec_(agentsSheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
   ensureLeadIds_(sheet, headers);
+  ensureLeadTimestamps_(sheet, headers);
   ensureLeadSources_(sheet, headers);
   return { ok: true, refreshed_at: new Date().toISOString() };
 }
@@ -472,7 +507,7 @@ function mapRow_(headers, row, rowNumber) {
     project: getCell_(headers, row, "project"),
     source: canonicalLeadSource_(getCell_(headers, row, "source") || DEFAULT_SOURCE),
     status: getCell_(headers, row, "status") || "new",
-    created_at: getCell_(headers, row, "createdAt"),
+    created_at: canonicalLeadTimestamp_(getCell_(headers, row, "createdAt")),
   };
 
   return lead;
@@ -567,6 +602,33 @@ function ensureLeadIds_(sheet, headers) {
 
   if (changed) {
     sheet.getRange(2, idIndex + 1, ids.length, 1).setValues(ids);
+  }
+}
+
+function ensureLeadTimestamps_(sheet, headers) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+
+  const timestampIndex = headers.findIndex((header) => FIELD_ALIASES.createdAt.includes(header));
+  const nameIndex = headers.findIndex((header) => FIELD_ALIASES.name.includes(header));
+  const phoneIndex = headers.findIndex((header) => FIELD_ALIASES.phone.includes(header));
+  if (timestampIndex < 0 || nameIndex < 0 || phoneIndex < 0) return;
+
+  const range = sheet.getRange(2, timestampIndex + 1, lastRow - 1, 1);
+  const timestampValues = range.getDisplayValues();
+  const rowValues = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).getDisplayValues();
+  let changed = false;
+  const nextValues = timestampValues.map((value, index) => {
+    const row = rowValues[index];
+    const hasLead = String(row[nameIndex] || "").trim() && String(row[phoneIndex] || "").trim();
+    if (!hasLead) return [value[0]];
+    const canonical = canonicalLeadTimestamp_(value[0]);
+    if (canonical !== String(value[0] || "").trim()) changed = true;
+    return [canonical];
+  });
+
+  if (changed) {
+    range.setValues(nextValues);
   }
 }
 

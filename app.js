@@ -6,6 +6,7 @@ const RESPONSE_WINDOW_MS = 5 * 60 * 1000;
 const DEFAULT_AGENT_PASSWORD = "Agent123!";
 const NOTIFICATION_ICON = "/assets/icon-192.png";
 const NOTIFICATION_BADGE = "/assets/badge-96.png";
+const MALAYSIA_TIME_ZONE = "Asia/Kuala_Lumpur";
 
 const defaultState = {
   currentUserId: "agent-aina",
@@ -214,6 +215,19 @@ function loadState() {
       email: lead.email || "",
       project: lead.project || "Tidak dinyatakan",
       notes: lead.notes || "",
+      status: lead.status === "queued" ? "queued" : lead.status || "new",
+      createdAt: parseLeadTimestamp(lead.createdAt || lead.created_at, Date.now()),
+      receivedAt: lead.receivedAt ? parseLeadTimestamp(lead.receivedAt, lead.createdAt || Date.now()) : null,
+      expiresAt: lead.expiresAt
+        ? parseLeadTimestamp(lead.expiresAt, Date.now() + RESPONSE_WINDOW_MS)
+        : lead.status === "new"
+          ? Date.now() + RESPONSE_WINDOW_MS
+          : null,
+      queuedAt:
+        lead.queuedAt || lead.status === "queued"
+          ? parseLeadTimestamp(lead.queuedAt || lead.createdAt || Date.now(), Date.now())
+          : null,
+      passCount: lead.passCount || 0,
     }));
     return merged;
   } catch {
@@ -426,6 +440,7 @@ async function deleteLeads(leadIds) {
 
   state.leads = state.leads.filter((lead) => !ids.includes(lead.id));
   state.activities = state.activities.filter((activity) => !ids.includes(activity.leadId));
+  activateQueuedLeads({ notify: true });
   await syncLeadHandledCountsToSheet();
   saveState();
   return true;
@@ -851,17 +866,88 @@ function canAccessLead(lead) {
   return Boolean(lead) && (isAdmin() || lead.assignedAgentId === state.currentUserId);
 }
 
-function formatDateTime(value) {
-  return new Intl.DateTimeFormat("ms-MY", {
+function normalizeUnixTimestamp(value, fallback = Date.now()) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  const absolute = Math.abs(numeric);
+  if (absolute >= 1000000000000) return numeric;
+  if (absolute >= 1000000000) return numeric * 1000;
+  return fallback;
+}
+
+function parseMalaysiaDateTime(value) {
+  const match = String(value || "")
+    .trim()
+    .match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (!match) return null;
+  const [, year, month, day, hour = "0", minute = "0", second = "0"] = match;
+  return Date.UTC(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour) - 8,
+    Number(minute),
+    Number(second),
+  );
+}
+
+function parseLeadTimestamp(value, fallback = Date.now()) {
+  if (value instanceof Date) {
+    const time = value.getTime();
+    return Number.isFinite(time) ? time : fallback;
+  }
+  if (typeof value === "number") return normalizeUnixTimestamp(value, fallback);
+
+  const raw = String(value || "").trim();
+  if (!raw) return fallback;
+
+  const numeric = raw.replace(/,/g, "");
+  if (/^-?\d+(\.\d+)?$/.test(numeric)) return normalizeUnixTimestamp(numeric, fallback);
+
+  const malaysiaTime = parseMalaysiaDateTime(raw);
+  if (Number.isFinite(malaysiaTime)) return malaysiaTime;
+
+  const parsed = new Date(raw).getTime();
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function malaysiaDateParts(value) {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: MALAYSIA_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
     day: "2-digit",
-    month: "short",
     hour: "2-digit",
     minute: "2-digit",
-  }).format(new Date(value));
+    second: "2-digit",
+    hour12: false,
+    hourCycle: "h23",
+  })
+    .formatToParts(new Date(parseLeadTimestamp(value)))
+    .reduce((parts, part) => {
+      if (part.type !== "literal") parts[part.type] = part.value;
+      return parts;
+    }, {});
+}
+
+function formatSheetTimestamp(value = Date.now()) {
+  const parts = malaysiaDateParts(value);
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+}
+
+function formatDateTime(value) {
+  return new Intl.DateTimeFormat("ms-MY", {
+    timeZone: MALAYSIA_TIME_ZONE,
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(parseLeadTimestamp(value)));
 }
 
 function relativeTime(value) {
-  const seconds = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
+  const seconds = Math.max(0, Math.floor((Date.now() - parseLeadTimestamp(value)) / 1000));
   if (seconds < 10) return "baru sahaja";
   if (seconds < 60) return `${seconds} saat lalu`;
   const minutes = Math.floor(seconds / 60);
@@ -871,8 +957,8 @@ function relativeTime(value) {
 }
 
 function todayKey(value = Date.now()) {
-  const date = new Date(value);
-  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+  const parts = malaysiaDateParts(value);
+  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 function showToast(title, message, tone = "success") {
@@ -1042,6 +1128,91 @@ function selectNextAgent(excludeId = null) {
   return activeAgents[0];
 }
 
+function isPendingLead(lead) {
+  return lead?.status === "new" || lead?.status === "queued";
+}
+
+function hasActiveLeadForAgent(agentId, excludeLeadId = null) {
+  return state.leads.some(
+    (lead) => lead.status === "new" && lead.assignedAgentId === agentId && lead.id !== excludeLeadId,
+  );
+}
+
+function selectNextAvailableAgent(options = {}) {
+  const activeAgents = getActiveAgents();
+  if (!activeAgents.length) return null;
+
+  for (let offset = 0; offset < activeAgents.length; offset += 1) {
+    const index = (state.roundRobinIndex + offset) % activeAgents.length;
+    const agent = activeAgents[index];
+    const isPreviousAgent = options.excludeAgentId && agent.id === options.excludeAgentId;
+    if (isPreviousAgent && activeAgents.length > 1) continue;
+    if (hasActiveLeadForAgent(agent.id, options.ignoreLeadId || null)) continue;
+
+    state.roundRobinIndex = (index + 1) % activeAgents.length;
+    return agent;
+  }
+
+  return null;
+}
+
+function queueLead(lead, now = Date.now(), options = {}) {
+  lead.status = "queued";
+  lead.assignedAgentId = null;
+  lead.expiresAt = null;
+  lead.receivedAt = null;
+  lead.queuedAt = now;
+  lead.lastAgentId = options.previousAgentId || lead.lastAgentId || null;
+  if (options.resetPassCount !== false) lead.passCount = 0;
+  lead.statusLockedUntil = null;
+}
+
+function activateLead(lead, options = {}) {
+  const now = options.now || Date.now();
+  const agent = selectNextAvailableAgent({
+    excludeAgentId: options.excludeAgentId || lead.lastAgentId || null,
+    ignoreLeadId: lead.id,
+  });
+  if (!agent) return null;
+
+  lead.status = "new";
+  lead.assignedAgentId = agent.id;
+  lead.receivedAt = now;
+  lead.expiresAt = now + RESPONSE_WINDOW_MS;
+  lead.queuedAt = null;
+  lead.lastAgentId = null;
+  lead.statusLockedUntil = null;
+  if (options.resetPassCount) lead.passCount = 0;
+  return agent;
+}
+
+function activateQueuedLeads(options = {}) {
+  const activated = [];
+  while (true) {
+    const queuedLead = state.leads
+      .filter((lead) => lead.status === "queued")
+      .sort((a, b) => (a.queuedAt || a.createdAt || 0) - (b.queuedAt || b.createdAt || 0))[0];
+    if (!queuedLead) break;
+
+    const agent = activateLead(queuedLead, {
+      now: options.now || Date.now(),
+      resetPassCount: false,
+    });
+    if (!agent) break;
+
+    addActivity("new", queuedLead, `${queuedLead.project} diberikan kepada ${agent.name}`);
+    if (options.notify && shouldNotifyForLead(queuedLead)) {
+      sendSystemNotification(queuedLead);
+    }
+    activated.push(queuedLead);
+  }
+  return activated;
+}
+
+function activateNextQueuedLead(options = {}) {
+  return activateQueuedLeads(options)[0] || null;
+}
+
 function normalizePhone(value) {
   return String(value || "").replace(/[^\d+]/g, "");
 }
@@ -1085,7 +1256,8 @@ function normalizeSheetStatus(value) {
 
 function getLeadVisualStatus(lead) {
   if (!lead) return "new";
-  return lead.status === "new" && (lead.passCount || 0) > 0 ? "passed" : lead.status || "new";
+  if (lead.status === "queued") return "new";
+  return lead.status || "new";
 }
 
 function formatSheetStatus(status) {
@@ -1113,6 +1285,13 @@ function applySheetStatusToLead(lead, sheetStatus, now = Date.now()) {
     lead.contactedAt = null;
     lead.responseMs = null;
     lead.statusLockedUntil = null;
+  } else if (lead.status === "queued") {
+    lead.passCount = 0;
+    lead.contactedAt = null;
+    lead.responseMs = null;
+    lead.statusLockedUntil = null;
+  } else if (lead.status === "new") {
+    return false;
   } else {
     lead.status = "new";
     lead.passCount = 0;
@@ -1188,13 +1367,13 @@ async function addLead(input, options = {}) {
   const existingLead = state.leads.find((lead) => lead.dedupeKey === dedupeKey);
   const source = normalizeLeadSource(input.source || input.sumber || input.platform, options.source || "Manual Lead");
   const createdAtValue = input.created_at || input.createdAt;
-  const parsedCreatedAt = createdAtValue ? new Date(createdAtValue).getTime() : Date.now();
+  const parsedCreatedAt = parseLeadTimestamp(createdAtValue, existingLead?.createdAt || Date.now());
 
   if (existingLead) {
     if (!options.updateExisting) return false;
 
     let changed = false;
-    const updates = { name, phone, email, project, source };
+    const updates = { name, phone, email, project, source, createdAt: parsedCreatedAt };
     Object.entries(updates).forEach(([key, value]) => {
       if (existingLead[key] !== value) {
         existingLead[key] = value;
@@ -1216,14 +1395,17 @@ async function addLead(input, options = {}) {
     return "updated";
   }
 
-  const assignedAgent = selectNextAgent();
-  if (!assignedAgent) {
+  const initialStatus = normalizeSheetStatus(input.status);
+  const now = Date.now();
+  if (options.queueIfBlocked) activateQueuedLeads({ now, notify: options.notify });
+  const assignedAgent =
+    initialStatus === "contacted" ? null : selectNextAvailableAgent();
+  const shouldQueue = options.queueIfBlocked && initialStatus === "new" && !assignedAgent;
+  if (!assignedAgent && !shouldQueue && initialStatus !== "contacted") {
     showToast("Tiada ejen aktif", "Aktifkan sekurang-kurangnya seorang ejen dahulu.", "error");
     return false;
   }
 
-  const now = Date.now();
-  const initialStatus = normalizeSheetStatus(input.status);
   const initialPassCount = initialStatus === "passed" ? 1 : 0;
   const lead = {
     id: crypto.randomUUID?.() || makeId("lead"),
@@ -1234,13 +1416,14 @@ async function addLead(input, options = {}) {
     project,
     source,
     createdAt: Number.isFinite(parsedCreatedAt) ? parsedCreatedAt : now,
-    receivedAt: now,
-    assignedAgentId: assignedAgent.id,
-    expiresAt: now + RESPONSE_WINDOW_MS,
-    status: initialStatus === "contacted" ? "contacted" : "new",
+    receivedAt: shouldQueue ? null : now,
+    assignedAgentId: assignedAgent?.id || null,
+    expiresAt: shouldQueue ? null : now + RESPONSE_WINDOW_MS,
+    status: shouldQueue ? "queued" : initialStatus === "contacted" ? "contacted" : "new",
     passCount: initialPassCount,
     responseMs: initialStatus === "contacted" ? 0 : null,
     contactedAt: initialStatus === "contacted" ? now : null,
+    queuedAt: shouldQueue ? now : null,
     notes: "",
   };
 
@@ -1255,13 +1438,22 @@ async function addLead(input, options = {}) {
     console.error(error);
     return false;
   }
-  addActivity("new", lead, `${lead.project} diberikan kepada ${assignedAgent.name}`);
+  if (shouldQueue) {
+    addActivity("new", lead, `${lead.project} disimpan dalam queue menunggu lead aktif selesai`);
+  } else {
+    addActivity("new", lead, `${lead.project} diberikan kepada ${assignedAgent?.name || "ejen"}`);
+  }
   saveState();
 
   if (!options.silent) {
-    showToast("Lead baru masuk", `${lead.name} telah diberikan kepada ${assignedAgent.name}.`);
+    showToast(
+      shouldQueue ? "Lead disimpan dalam queue" : "Lead baru masuk",
+      shouldQueue
+        ? `${lead.name} akan dihantar selepas lead aktif selesai.`
+        : `${lead.name} telah diberikan kepada ${assignedAgent?.name || "ejen"}.`,
+    );
   }
-  if (!options.silent || options.notify) sendSystemNotification(lead);
+  if (!shouldQueue && (!options.silent || options.notify)) sendSystemNotification(lead);
   return "added";
 }
 
@@ -1295,7 +1487,7 @@ async function addManualLead(event) {
     return;
   }
 
-  const createdAt = new Date().toISOString();
+  const createdAt = formatSheetTimestamp();
   const leadInput = {
     id: `manual-${Date.now()}-${normalizePhone(phone)}`,
     name,
@@ -1314,7 +1506,7 @@ async function addManualLead(event) {
     return;
   }
 
-  const result = await addLead(leadInput, { silent: true, updateExisting: true, notify: true });
+  const result = await addLead(leadInput, { silent: true, updateExisting: true, notify: true, queueIfBlocked: true });
   if (!result) {
     elements.manualLeadError.textContent = "Lead sudah masuk Google Sheet, tetapi dashboard belum dapat sync. Semak ejen aktif.";
     return;
@@ -1725,42 +1917,25 @@ async function requestNotifications() {
 async function processExpiredLeads() {
   const now = Date.now();
   let changed = false;
-  state.leads
-    .filter((lead) => lead.status === "new" && lead.expiresAt <= now)
-    .forEach((lead) => {
-      const previousAgent = getAgent(lead.assignedAgentId);
-      const nextAgent = selectNextAgent(lead.assignedAgentId);
-      if (!nextAgent || nextAgent.id === lead.assignedAgentId) {
-        lead.expiresAt = now + RESPONSE_WINDOW_MS;
-        return;
-      }
-
-      lead.assignedAgentId = nextAgent.id;
-      lead.expiresAt = now + RESPONSE_WINDOW_MS;
-      lead.passCount += 1;
-      addActivity(
-        "passed",
-        lead,
-        `Masa ${previousAgent?.name || "ejen"} tamat, dipindahkan kepada ${nextAgent.name}`,
-      );
-      changed = true;
-      if (remoteDatabaseMode) {
-        remoteDatabaseClient
-          .rpc("pass_expired_lead", {
-            p_lead_id: lead.id,
-            p_next_agent_id: nextAgent.id,
-          })
-          .then(({ error }) => {
-            if (error) console.error("Lead pass save failed", error);
-          });
-      }
-      updateLeadStatusInSheet(lead, "Passed");
-
-      if (nextAgent.id === state.currentUserId) {
-        showToast("Lead dipindahkan kepada anda", `${lead.name} menunggu tindakan dalam 5 minit.`);
-        sendSystemNotification(lead);
-      }
+  const expiredLeads = state.leads.filter((lead) => lead.status === "new" && lead.expiresAt <= now);
+  expiredLeads.forEach((lead) => {
+    const previousAgent = getAgent(lead.assignedAgentId);
+    lead.passCount = (lead.passCount || 0) + 1;
+    queueLead(lead, now, {
+      previousAgentId: previousAgent?.id || null,
+      resetPassCount: false,
     });
+    addActivity(
+      "passed",
+      lead,
+      `Masa ${previousAgent?.name || "ejen"} tamat, ${lead.project} masuk queue semula`,
+    );
+    updateLeadStatusInSheet(lead, "New");
+    changed = true;
+  });
+
+  const activatedLeads = activateQueuedLeads({ now, notify: true });
+  if (activatedLeads.length) changed = true;
 
   if (changed) {
     saveState();
@@ -1840,6 +2015,8 @@ async function handleCall(leadId) {
     saveState();
     await updateLeadStatusInSheet(claimedLead || lead, "Contacted");
     if (agent) await upsertAgentToSheet(agent);
+    activateQueuedLeads({ notify: true });
+    saveState();
     showToast(
       "Lead berjaya dikunci",
       `${lead.name} untuk projek ${lead.project} kini milik ${agent?.name || "ejen ini"}.`,
@@ -1881,7 +2058,7 @@ function displayLeadPhone(lead) {
 
 function renderActiveLead() {
   const lead = getVisibleActiveLead();
-  const newLeadCount = state.leads.filter((item) => item.status === "new").length;
+  const newLeadCount = state.leads.filter(isPendingLead).length;
   elements.queueLabel.textContent = `${newLeadCount} lead menunggu`;
   elements.navLeadCount.textContent = newLeadCount;
   elements.notificationCount.textContent = newLeadCount;
@@ -1949,7 +2126,7 @@ function updateCountdown() {
 
 function renderStats() {
   const today = todayKey();
-  const todayLeads = state.leads.filter((lead) => todayKey(lead.receivedAt) === today);
+  const todayLeads = state.leads.filter((lead) => todayKey(lead.createdAt || lead.receivedAt) === today);
   const contacted = todayLeads.filter((lead) => lead.status === "contacted");
   const responseValues = contacted.map((lead) => lead.responseMs).filter(Number.isFinite);
   const averageResponse = responseValues.length
@@ -2051,6 +2228,12 @@ function renderLeadsTable() {
             ? `<button class="contact-edit-button danger" type="button" data-lead-delete="${lead.id}">Padam</button>`
             : "";
           const actionButtons = [editButton, deleteButton].filter(Boolean).join("");
+          const assignedAgentLabel = lead.assignedAgentId
+            ? getAgent(lead.assignedAgentId)?.name || "Tiada ejen"
+            : "Belum diagih";
+          const activeTime = lead.receivedAt
+            ? `<small>Aktif ${formatDateTime(lead.receivedAt)}</small>`
+            : "<small>Menunggu giliran</small>";
           return `
             <tr data-lead-row="${lead.id}">
               <td data-label="Lead">
@@ -2063,8 +2246,8 @@ function renderLeadsTable() {
                 <strong>${escapeHtml(lead.project || "Tidak dinyatakan")}</strong>
                 <small>${escapeHtml(lead.source)}</small>
               </td>
-              <td data-label="Ejen">${escapeHtml(getAgent(lead.assignedAgentId)?.name || "Tiada ejen")}</td>
-              <td data-label="Masa"><strong>Masuk ${formatDateTime(lead.receivedAt)}</strong>${contactedTime}</td>
+              <td data-label="Ejen">${escapeHtml(assignedAgentLabel)}</td>
+              <td data-label="Masa"><strong>Tarikh ${formatDateTime(lead.createdAt || lead.receivedAt)}</strong>${activeTime}${contactedTime}</td>
               <td data-label="Status"><span class="status-badge ${visualStatus}">${statusLabel}</span></td>
               <td class="lead-note-cell" data-label="Nota">
                 <textarea
@@ -2640,7 +2823,12 @@ async function syncGoogleSheet(options = {}) {
     let updated = 0;
     const sheetKeys = new Set(rows.map(sheetDedupeKey).filter(Boolean));
     for (const row of rows) {
-      const result = await addLead(row, { silent: true, updateExisting: true, notify: shouldNotifyNewLeads });
+      const result = await addLead(row, {
+        silent: true,
+        updateExisting: true,
+        notify: shouldNotifyNewLeads,
+        queueIfBlocked: true,
+      });
       if (result === "added") added += 1;
       if (result === "updated") updated += 1;
     }
@@ -2661,6 +2849,7 @@ async function syncGoogleSheet(options = {}) {
     } else if (removedLeads.length) {
       await deleteLeads(removedLeads.map((lead) => lead.id));
     }
+    const activatedQueuedLeads = activateQueuedLeads({ notify: shouldNotifyNewLeads });
     const handledSync = await syncLeadHandledCountsToSheet();
 
     state.integration.endpoint = endpoint;
@@ -2690,6 +2879,7 @@ async function syncGoogleSheet(options = {}) {
           added ? `${added} lead baru` : "",
           updated ? `${updated} dikemas kini` : "",
           removed ? `${removed} dibuang` : "",
+          activatedQueuedLeads.length ? `${activatedQueuedLeads.length} lead queue dilepaskan` : "",
           agentSync.added ? `${agentSync.added} ejen baru` : "",
           agentSync.updated ? `${agentSync.updated} ejen dikemas kini` : "",
           agentSync.removed ? `${agentSync.removed} ejen dibuang` : "",

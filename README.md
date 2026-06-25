@@ -30,13 +30,17 @@ Google Sheet.
 ## Aliran utama
 
 1. Lead baru dikesan daripada Google Sheet atau butang manual lead.
-2. Lead diberikan kepada ejen aktif secara round-robin.
-3. Ejen mempunyai lima minit untuk menekan `CALL NOW`.
-4. Nombor telefon tidak dihantar atau dipaparkan sebelum lead berjaya di-claim.
-5. Selepas `CALL NOW`, nombor telefon dibuka dan lead masuk ke **Log Lead**.
-6. Jika masa tamat, lead dipindahkan kepada ejen aktif seterusnya dan mendapat
+2. Jika banyak lead masuk serentak, dashboard mengagihkan satu active lead
+   kepada setiap ejen aktif mengikut round-robin.
+3. Lead selebihnya disimpan dalam queue sehingga ada slot ejen kosong.
+4. Ejen mempunyai lima minit untuk menekan `CALL NOW`.
+5. Jika tiada ejen claim, lead tersebut masuk semula ke belakang queue dan
+   akan rotate ke ejen seterusnya sehingga ada yang claim.
+6. Nombor telefon tidak dihantar atau dipaparkan sebelum lead berjaya di-claim.
+7. Selepas `CALL NOW`, nombor telefon dibuka dan lead masuk ke **Log Lead**.
+8. Jika masa tamat, lead dipindahkan kepada ejen aktif seterusnya dan mendapat
    tempoh lima minit yang baru.
-7. Admin boleh daftar ejen, aktif atau nyahaktifkan ejen, dan sambungkan Google
+9. Admin boleh daftar ejen, aktif atau nyahaktifkan ejen, dan sambungkan Google
    Apps Script Web App URL.
 
 ## Sambungan Google Sheets
@@ -45,6 +49,9 @@ Google Sheet.
 2. Untuk lead, gunakan tajuk `name`, `phone`, `email`, `project`, `source`,
    `status`, `created_at`, dan `id` pada baris pertama. Nilai `source` yang
    disokong ialah `Manual Lead`, `Tiktok Ads`, dan `Meta Ads`.
+   Kolum `created_at` atau `Tarikh & Masa` boleh diisi format
+   `YYYY-MM-DD HH:mm:ss` waktu Malaysia, atau Unix timestamp dalam saat seperti
+   `1780964631`.
 3. Untuk ejen, Apps Script akan sediakan tajuk `ID`, `Nama`, `No Phone`,
    `Emel`, `Role`, `Status`, `Leads Handled`, `Tarikh Daftar`, dan `Password`.
 4. Buka **Extensions > Apps Script** dalam Google Sheet.
