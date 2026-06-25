@@ -7,6 +7,8 @@ const DEFAULT_AGENT_PASSWORD = "Agent123!";
 const NOTIFICATION_ICON = "/assets/icon-192.png";
 const NOTIFICATION_BADGE = "/assets/badge-96.png";
 const MALAYSIA_TIME_ZONE = "Asia/Kuala_Lumpur";
+const DEFAULT_GOOGLE_SHEET_ENDPOINT =
+  "https://script.google.com/macros/s/AKfycbyXEPXT-m6YETnvOZEy0CxF82CMmMGDmgpVmDIv-a7XTEdJp92mYkOQhaBSRTPnNH7K/exec";
 
 const defaultState = {
   currentUserId: "agent-aina",
@@ -56,7 +58,7 @@ const defaultState = {
   activities: [],
   roundRobinIndex: 0,
   integration: {
-    endpoint: "https://script.google.com/macros/s/AKfycbyXEPXT-m6YETnvOZEy0CxF82CMmMGDmgpVmDIv-a7XTEdJp92mYkOQhaBSRTPnNH7K/exec",
+    endpoint: DEFAULT_GOOGLE_SHEET_ENDPOINT,
     interval: 15,
     lastSyncAt: null,
     connected: true,
@@ -190,6 +192,25 @@ const elements = {
   contactRate: document.querySelector("#contact-rate"),
 };
 
+function normalizeIntegration(input = {}) {
+  const endpoint = String(input.endpoint || DEFAULT_GOOGLE_SHEET_ENDPOINT).trim() || DEFAULT_GOOGLE_SHEET_ENDPOINT;
+  return {
+    ...defaultState.integration,
+    ...input,
+    endpoint,
+    interval: Number(input.interval) || defaultState.integration.interval,
+    connected: input.connected !== false || endpoint === DEFAULT_GOOGLE_SHEET_ENDPOINT,
+  };
+}
+
+function getSheetEndpoint() {
+  return (
+    elements.sheetEndpoint?.value?.trim() ||
+    state.integration.endpoint ||
+    DEFAULT_GOOGLE_SHEET_ENDPOINT
+  );
+}
+
 function loadState() {
   if (new URLSearchParams(window.location.search).has("demo")) return structuredClone(defaultState);
   try {
@@ -201,10 +222,7 @@ function loadState() {
     const merged = {
       ...structuredClone(defaultState),
       ...saved,
-      integration: {
-        ...defaultState.integration,
-        ...(saved.integration || {}),
-      },
+      integration: normalizeIntegration(saved.integration || {}),
     };
     merged.agents = merged.agents.map((agent) => ({
       ...agent,
@@ -321,15 +339,14 @@ async function loadRemoteState(userId) {
       leads: leadsResult.data.map(mapLead),
       activities: activitiesResult.data.map(mapActivity),
       roundRobinIndex: settingsResult.data?.round_robin_index || 0,
-      integration: {
-        ...defaultState.integration,
-        endpoint: settingsResult.data?.google_sheet_endpoint || "",
-        interval: settingsResult.data?.poll_interval || 15,
-        connected: Boolean(settingsResult.data?.google_sheet_endpoint),
+      integration: normalizeIntegration({
+        endpoint: settingsResult.data?.google_sheet_endpoint || DEFAULT_GOOGLE_SHEET_ENDPOINT,
+        interval: settingsResult.data?.poll_interval || defaultState.integration.interval,
+        connected: true,
         lastSyncAt: settingsResult.data?.last_sync_at
           ? new Date(settingsResult.data.last_sync_at).getTime()
           : null,
-      },
+      }),
     };
     remoteDatabaseMode = true;
     saveState();
@@ -491,7 +508,7 @@ function startAuthenticatedApp(user) {
   markCurrentLeadNotificationsSeen();
   scheduleSync();
   renderAll();
-  if (state.integration.endpoint) {
+  if (getSheetEndpoint()) {
     syncGoogleSheet({ silent: true, notifyNewLeads: true });
   }
 }
@@ -722,8 +739,8 @@ function openRemoteRecoveryModal() {
 }
 
 async function sendPasswordResetEmail(agent, code) {
-  const endpoint = state.integration.endpoint.trim();
-  if (!endpoint || !state.integration.connected) return false;
+  const endpoint = getSheetEndpoint();
+  if (!endpoint) return false;
 
   try {
     await fetch(endpoint, {
@@ -1601,7 +1618,7 @@ async function addManualLead(event) {
 }
 
 async function pushManualLeadToSheet(leadInput) {
-  const endpoint = elements.sheetEndpoint.value.trim() || state.integration.endpoint;
+  const endpoint = getSheetEndpoint();
   if (!endpoint) return false;
 
   const payload = {
@@ -1652,7 +1669,7 @@ async function pushManualLeadToSheet(leadInput) {
 }
 
 async function deleteLeadFromSheet(lead) {
-  const endpoint = elements.sheetEndpoint.value.trim() || state.integration.endpoint;
+  const endpoint = getSheetEndpoint();
   if (!endpoint) return false;
 
   const payload = {
@@ -1698,7 +1715,7 @@ async function deleteLeadFromSheet(lead) {
 }
 
 async function postGoogleSheetAction(payload, errorLabel) {
-  const endpoint = elements.sheetEndpoint.value.trim() || state.integration.endpoint;
+  const endpoint = getSheetEndpoint();
   if (!endpoint) return false;
 
   const body = JSON.stringify(payload);
@@ -2466,8 +2483,9 @@ function renderUser() {
 }
 
 function renderIntegration() {
+  state.integration = normalizeIntegration(state.integration);
   const integration = state.integration;
-  elements.sheetEndpoint.value = integration.endpoint;
+  elements.sheetEndpoint.value = integration.endpoint || DEFAULT_GOOGLE_SHEET_ENDPOINT;
   elements.pollInterval.value = String(integration.interval);
   elements.sidebarSyncText.textContent = integration.connected ? "Disambungkan" : "Belum disambungkan";
   elements.sidebarSyncStatus.textContent = integration.connected
@@ -2911,7 +2929,7 @@ async function deleteLeadEverywhere(leadId) {
 }
 
 async function syncGoogleSheet(options = {}) {
-  const endpoint = elements.sheetEndpoint.value.trim() || state.integration.endpoint;
+  const endpoint = getSheetEndpoint();
   if (!endpoint) {
     showToast("URL diperlukan", "Masukkan Google Apps Script Web App URL.", "error");
     return false;
@@ -3037,7 +3055,7 @@ async function syncGoogleSheet(options = {}) {
 
 function scheduleSync() {
   window.clearInterval(syncTimer);
-  if (!state.integration.endpoint) return;
+  if (!getSheetEndpoint()) return;
   syncTimer = window.setInterval(
     () => syncGoogleSheet({ silent: true }),
     Math.max(15, Number(state.integration.interval) || 15) * 1000,
@@ -3046,26 +3064,9 @@ function scheduleSync() {
 
 async function saveIntegration(event) {
   event.preventDefault();
-  state.integration.endpoint = elements.sheetEndpoint.value.trim();
+  state.integration.endpoint = elements.sheetEndpoint.value.trim() || DEFAULT_GOOGLE_SHEET_ENDPOINT;
   state.integration.interval = Number(elements.pollInterval.value) || 15;
-  if (!state.integration.endpoint) {
-    state.integration.connected = false;
-    state.integration.lastSyncAt = null;
-    saveState();
-    if (remoteDatabaseMode) {
-      await remoteDatabaseClient.from("app_settings").upsert({
-        id: 1,
-        google_sheet_endpoint: null,
-        poll_interval: state.integration.interval,
-        last_sync_at: null,
-        round_robin_index: state.roundRobinIndex,
-      });
-    }
-    scheduleSync();
-    renderIntegration();
-    showToast("Sambungan dipadam", "Google Sheet sync belum disambungkan.");
-    return;
-  }
+  state.integration.connected = true;
   saveState();
   syncGoogleSheet();
 }
@@ -3186,11 +3187,10 @@ document.addEventListener("keydown", (event) => {
 });
 
 async function bootstrap() {
+  state.integration = normalizeIntegration(state.integration);
   saveState();
   initRemoteDatabase();
-  if (state.integration.endpoint) {
-    await syncGoogleSheet({ silent: true, agentsOnly: true });
-  }
+  await syncGoogleSheet({ silent: true, agentsOnly: true });
 
   const sessionUser = getSessionUser();
   if (sessionUser) {
