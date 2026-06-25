@@ -22,9 +22,9 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260625-pwa-notifications" />
+    <link rel="stylesheet" href="styles.css?v=20260625-lead-log-notes" />
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260625-call-now-fix" defer></script>
+    <script src="app.js?v=20260625-lead-log-notes" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -161,20 +161,11 @@
           </button>
           <button class="nav-item" data-view="leads" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-              <circle cx="9" cy="7" r="4" />
-              <path d="M19 8v6M22 11h-6" />
+              <path d="M7 3h10a2 2 0 0 1 2 2v16l-4-2-3 2-3-2-4 2V5a2 2 0 0 1 2-2Z" />
+              <path d="M9 8h6M9 12h6M9 16h4" />
             </svg>
-            Semua Leads
+            Lead Log
             <span class="nav-count" id="nav-lead-count">0</span>
-          </button>
-          <button class="nav-item" data-view="contacts" type="button">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <rect x="4" y="3" width="16" height="18" rx="2" />
-              <circle cx="12" cy="9" r="3" />
-              <path d="M7.5 18a4.5 4.5 0 0 1 9 0" />
-            </svg>
-            Pelanggan Saya
           </button>
           <button class="nav-item admin-only" data-view="agents" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -369,8 +360,8 @@
           <div class="content-heading">
             <div>
               <span class="section-kicker">Rekod pusat</span>
-              <h2>Semua Leads</h2>
-              <p>Jejak setiap lead dan tindakan pasukan anda.</p>
+              <h2>Lead Log</h2>
+              <p>Semua lead dan pelanggan yang telah dihubungi dalam satu tempat, lengkap dengan nota.</p>
             </div>
             <button class="secondary-button admin-only" id="manual-lead-button-2" type="button">+ Manual lead baru</button>
           </div>
@@ -381,7 +372,7 @@
                   <circle cx="11" cy="11" r="7" />
                   <path d="m20 20-4-4" />
                 </svg>
-                <input id="lead-search" type="search" placeholder="Cari nama, telefon atau projek" />
+                <input id="lead-search" type="search" placeholder="Cari nama, telefon, emel, projek atau nota" />
               </label>
               <select id="lead-filter" aria-label="Tapis status lead">
                 <option value="all">Semua status</option>
@@ -389,17 +380,18 @@
                 <option value="contacted">Contacted</option>
                 <option value="passed">Passed</option>
               </select>
+              <span class="queue-label" id="lead-log-count">0 lead</span>
             </div>
             <div class="table-wrap">
               <table>
                 <thead>
                   <tr>
                     <th>Lead</th>
-                    <th>Projek</th>
-                    <th>Sumber</th>
+                    <th>Projek / Sumber</th>
                     <th>Ejen</th>
-                    <th>Masa masuk</th>
+                    <th>Masa</th>
                     <th>Status</th>
+                    <th>Nota</th>
                     <th>Tindakan</th>
                   </tr>
                 </thead>

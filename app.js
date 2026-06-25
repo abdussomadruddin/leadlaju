@@ -142,6 +142,7 @@ const elements = {
   leadsTableBody: document.querySelector("#leads-table-body"),
   leadSearch: document.querySelector("#lead-search"),
   leadFilter: document.querySelector("#lead-filter"),
+  leadLogCount: document.querySelector("#lead-log-count"),
   contactSearch: document.querySelector("#contact-search"),
   contactCount: document.querySelector("#contact-count"),
   contactsTableBody: document.querySelector("#contacts-table-body"),
@@ -1821,35 +1822,64 @@ function renderTeam() {
 function renderLeadsTable() {
   const search = elements.leadSearch.value.trim().toLowerCase();
   const filter = elements.leadFilter.value;
-  const rows = state.leads.filter((lead) => {
-    if (!isAdmin() && lead.assignedAgentId !== state.currentUserId) return false;
-    const matchesSearch =
-      lead.name.toLowerCase().includes(search) ||
-      (canViewLeadPhone(lead) && lead.phone.toLowerCase().includes(search)) ||
-      String(lead.email || "").toLowerCase().includes(search) ||
-      String(lead.project || "").toLowerCase().includes(search);
-    const visualStatus = lead.status === "new" && lead.passCount > 0 ? "passed" : lead.status;
-    return matchesSearch && (filter === "all" || visualStatus === filter);
-  });
+  const rows = state.leads
+    .filter((lead) => {
+      if (!isAdmin() && lead.assignedAgentId !== state.currentUserId) return false;
+      const matchesSearch =
+        lead.name.toLowerCase().includes(search) ||
+        displayLeadPhone(lead).toLowerCase().includes(search) ||
+        String(lead.email || "").toLowerCase().includes(search) ||
+        String(lead.project || "").toLowerCase().includes(search) ||
+        String(lead.source || "").toLowerCase().includes(search) ||
+        String(lead.notes || "").toLowerCase().includes(search);
+      const visualStatus = lead.status === "new" && lead.passCount > 0 ? "passed" : lead.status;
+      return matchesSearch && (filter === "all" || visualStatus === filter);
+    })
+    .sort((a, b) => (b.receivedAt || 0) - (a.receivedAt || 0));
 
+  if (elements.leadLogCount) {
+    elements.leadLogCount.textContent = `${rows.length} lead`;
+  }
   elements.leadsTableBody.innerHTML = rows.length
     ? rows
         .map((lead) => {
           const visualStatus = lead.status === "new" && lead.passCount > 0 ? "passed" : lead.status;
           const statusLabel =
             visualStatus === "contacted" ? "Contacted" : visualStatus === "passed" ? "Passed" : "New";
+          const contactedTime = lead.contactedAt ? `<small>Dihubungi ${formatDateTime(lead.contactedAt)}</small>` : "";
+          const editButton = canViewLeadPhone(lead)
+            ? `<button class="contact-edit-button" type="button" data-lead-edit="${lead.id}">Edit</button>`
+            : "";
           const deleteButton = isAdmin()
             ? `<button class="contact-edit-button danger" type="button" data-lead-delete="${lead.id}">Padam</button>`
-            : "-";
+            : "";
+          const actionButtons = [editButton, deleteButton].filter(Boolean).join("");
           return `
-            <tr>
-              <td><strong>${escapeHtml(lead.name)}</strong><small>${escapeHtml(displayLeadPhone(lead))}</small></td>
-              <td><strong>${escapeHtml(lead.project || "Tidak dinyatakan")}</strong></td>
-              <td>${escapeHtml(lead.source)}</td>
+            <tr data-lead-row="${lead.id}">
+              <td>
+                <strong>${escapeHtml(lead.name)}</strong>
+                <small>${escapeHtml(displayLeadPhone(lead))}</small>
+                <small>${canViewLeadPhone(lead) && lead.email ? escapeHtml(lead.email) : "Emel dibuka selepas CALL NOW"}</small>
+              </td>
+              <td>
+                <strong>${escapeHtml(lead.project || "Tidak dinyatakan")}</strong>
+                <small>${escapeHtml(lead.source)}</small>
+              </td>
               <td>${escapeHtml(getAgent(lead.assignedAgentId)?.name || "Tiada ejen")}</td>
-              <td>${formatDateTime(lead.receivedAt)}</td>
+              <td><strong>Masuk ${formatDateTime(lead.receivedAt)}</strong>${contactedTime}</td>
               <td><span class="status-badge ${visualStatus}">${statusLabel}</span></td>
-              <td><span class="lead-actions">${deleteButton}</span></td>
+              <td class="lead-note-cell">
+                <textarea
+                  class="lead-note-field"
+                  data-lead-note="${lead.id}"
+                  rows="3"
+                  placeholder="Tambah nota follow-up, minat projek, bajet atau temujanji"
+                >${escapeHtml(lead.notes || "")}</textarea>
+                <div class="lead-note-actions">
+                  <button class="lead-note-save" type="button" data-lead-note-save="${lead.id}">Simpan nota</button>
+                </div>
+              </td>
+              <td><span class="lead-actions">${actionButtons || "-"}</span></td>
             </tr>`;
         })
         .join("")
@@ -2009,8 +2039,7 @@ function renderAll() {
 }
 
 const viewTitles = {
-  leads: "Semua Leads",
-  contacts: "Pelanggan Saya",
+  leads: "Lead Log",
   agents: "Pengurusan Ejen",
   integration: "Google Sheets Sync",
 };
@@ -2277,6 +2306,50 @@ async function updateContact(event) {
   }
 }
 
+async function saveLeadNote(leadId, button = null) {
+  const lead = state.leads.find((item) => item.id === leadId);
+  const field = [...elements.leadsTableBody.querySelectorAll("[data-lead-note]")].find(
+    (item) => item.dataset.leadNote === leadId,
+  );
+  if (!lead || !field) return;
+
+  const nextNotes = field.value.trim();
+  if (nextNotes === String(lead.notes || "").trim()) {
+    showToast("Nota tiada perubahan", "Tiada nota baru untuk disimpan.");
+    return;
+  }
+
+  const previousNotes = lead.notes || "";
+  lead.notes = nextNotes;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Menyimpan...";
+  }
+
+  try {
+    if (supabaseMode) {
+      const { data, error } = await supabaseClient.rpc("update_lead_notes", {
+        p_lead_id: lead.id,
+        p_notes: nextNotes,
+      });
+      if (error) throw error;
+      if (data === false) throw new Error("Anda hanya boleh edit nota lead yang boleh dilihat oleh akaun ini.");
+    }
+    saveState();
+    showToast("Nota disimpan", `Nota untuk ${lead.name} telah dikemas kini.`);
+  } catch (error) {
+    lead.notes = previousNotes;
+    field.value = previousNotes;
+    console.error(error);
+    showToast("Nota gagal disimpan", error?.message || "Semak sambungan Supabase dan cuba lagi.", "error");
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = "Simpan nota";
+    }
+  }
+}
+
 async function deleteLeadEverywhere(leadId) {
   const lead = state.leads.find((item) => item.id === leadId);
   if (!lead) return;
@@ -2494,8 +2567,12 @@ elements.logoutButton.addEventListener("click", logout);
 elements.leadSearch.addEventListener("input", renderLeadsTable);
 elements.leadFilter.addEventListener("change", renderLeadsTable);
 elements.leadsTableBody.addEventListener("click", (event) => {
+  const edit = event.target.closest("[data-lead-edit]");
   const remove = event.target.closest("[data-lead-delete]");
+  const saveNote = event.target.closest("[data-lead-note-save]");
+  if (edit) openContactModal(edit.dataset.leadEdit);
   if (remove) deleteLeadEverywhere(remove.dataset.leadDelete);
+  if (saveNote) saveLeadNote(saveNote.dataset.leadNoteSave, saveNote);
 });
 elements.contactSearch.addEventListener("input", renderContacts);
 elements.manualLeadForm.addEventListener("submit", addManualLead);

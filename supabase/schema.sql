@@ -278,12 +278,7 @@ as $$
     l.pass_count,
     l.response_ms,
     l.contacted_at,
-    case
-      when l.status = 'contacted'
-        and (l.assigned_agent_id = auth.uid() or public.is_admin())
-      then l.notes
-      else ''
-    end,
+    l.notes,
     l.created_at,
     l.received_at
   from public.leads l
@@ -374,6 +369,31 @@ begin
 end;
 $$;
 
+create or replace function public.update_lead_notes(
+  p_lead_id uuid,
+  p_notes text
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  updated_count integer;
+begin
+  if not public.can_access_lead(p_lead_id) then
+    return false;
+  end if;
+
+  update public.leads
+  set notes = coalesce(p_notes, '')
+  where id = p_lead_id;
+
+  get diagnostics updated_count = row_count;
+  return updated_count = 1;
+end;
+$$;
+
 create or replace function public.pass_expired_lead(
   p_lead_id uuid,
   p_next_agent_id uuid
@@ -410,10 +430,12 @@ $$;
 
 revoke all on function public.get_visible_leads() from public;
 revoke all on function public.claim_lead(uuid) from public;
+revoke all on function public.update_lead_notes(uuid, text) from public;
 revoke all on function public.pass_expired_lead(uuid, uuid) from public;
 revoke all on function public.delete_leads_not_in_dedupe_keys(text[]) from public;
 grant execute on function public.get_visible_leads() to authenticated;
 grant execute on function public.claim_lead(uuid) to authenticated;
+grant execute on function public.update_lead_notes(uuid, text) to authenticated;
 grant execute on function public.pass_expired_lead(uuid, uuid) to authenticated;
 grant execute on function public.delete_leads_not_in_dedupe_keys(text[]) to authenticated;
 

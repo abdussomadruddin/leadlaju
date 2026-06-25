@@ -1,9 +1,9 @@
-const CACHE_NAME = "leadlaju-pwa-v20260625-call-now-fix";
+const CACHE_NAME = "leadlaju-pwa-v20260625-lead-log-notes";
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20260625-pwa-notifications",
-  "/app.js?v=20260625-call-now-fix",
+  "/styles.css?v=20260625-lead-log-notes",
+  "/app.js?v=20260625-lead-log-notes",
   "/manifest.webmanifest?v=20260625-pwa-notifications",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",
