@@ -2211,7 +2211,7 @@ function renderAll() {
 }
 
 const viewTitles = {
-  leads: "Lead Log",
+  leads: "Log Lead",
   agents: "Pengurusan Ejen",
   integration: "Google Sheets Sync",
 };
@@ -2479,7 +2479,12 @@ function openContactModal(leadId) {
   elements.contactProject.value = lead.project || "";
   elements.contactNotes.value = lead.notes || "";
   elements.contactFormError.textContent = "";
-  elements.contactDeleteButton.dataset.contactDelete = lead.id;
+  elements.contactDeleteButton.hidden = !isAdmin();
+  if (isAdmin()) {
+    elements.contactDeleteButton.dataset.contactDelete = lead.id;
+  } else {
+    delete elements.contactDeleteButton.dataset.contactDelete;
+  }
   elements.contactModal.classList.add("open");
   elements.contactModal.setAttribute("aria-hidden", "false");
   window.setTimeout(() => elements.contactName.focus(), 80);
@@ -2558,6 +2563,10 @@ async function saveLeadNote(leadId, button = null) {
 }
 
 async function deleteLeadEverywhere(leadId) {
+  if (!isAdmin()) {
+    showToast("Admin sahaja", "Hanya admin boleh padam lead daripada dashboard.", "error");
+    return;
+  }
   const lead = state.leads.find((item) => item.id === leadId);
   if (!lead) return;
 
@@ -2787,7 +2796,7 @@ elements.leadsTableBody.addEventListener("click", (event) => {
   const remove = event.target.closest("[data-lead-delete]");
   const saveNote = event.target.closest("[data-lead-note-save]");
   if (edit) openContactModal(edit.dataset.leadEdit);
-  if (remove) deleteLeadEverywhere(remove.dataset.leadDelete);
+  if (remove && isAdmin()) deleteLeadEverywhere(remove.dataset.leadDelete);
   if (saveNote) saveLeadNote(saveNote.dataset.leadNoteSave, saveNote);
 });
 elements.manualLeadForm.addEventListener("submit", addManualLead);
@@ -2845,6 +2854,7 @@ elements.agentsGrid.addEventListener("click", (event) => {
 });
 
 elements.contactDeleteButton.addEventListener("click", () => {
+  if (!isAdmin()) return;
   const leadId = elements.contactDeleteButton.dataset.contactDelete || selectedContactId;
   if (leadId) deleteLeadEverywhere(leadId);
 });
