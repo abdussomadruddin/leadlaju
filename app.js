@@ -952,10 +952,59 @@ function normalizeLeadSource(value, fallback = "Google Sheet") {
 function normalizeSheetStatus(value) {
   const status = String(value || "").trim().toLowerCase();
   if (!status || status === "new" || status === "baru") return "new";
-  if (["done", "completed", "complete", "contacted", "called", "call", "telah dihubungi"].includes(status)) {
+  if (
+    [
+      "done",
+      "completed",
+      "complete",
+      "contacted",
+      "called",
+      "call",
+      "dihubungi",
+      "telah dihubungi",
+    ].includes(status)
+  ) {
     return "contacted";
   }
+  if (["passed", "pass", "expired", "missed", "tamat", "terlepas", "dipindahkan"].includes(status)) {
+    return "passed";
+  }
   return "new";
+}
+
+function getLeadVisualStatus(lead) {
+  if (!lead) return "new";
+  return lead.status === "new" && (lead.passCount || 0) > 0 ? "passed" : lead.status || "new";
+}
+
+function formatSheetStatus(status) {
+  if (status === "contacted") return "Contacted";
+  if (status === "passed") return "Passed";
+  return "New";
+}
+
+function applySheetStatusToLead(lead, sheetStatus, now = Date.now()) {
+  const nextStatus = normalizeSheetStatus(sheetStatus);
+  const previousVisualStatus = getLeadVisualStatus(lead);
+
+  if (nextStatus === "contacted") {
+    lead.status = "contacted";
+    lead.passCount = lead.passCount || 0;
+    lead.contactedAt = lead.contactedAt || now;
+    lead.responseMs = lead.responseMs || Math.max(0, lead.contactedAt - lead.receivedAt);
+  } else if (nextStatus === "passed") {
+    lead.status = "new";
+    lead.passCount = Math.max(lead.passCount || 0, 1);
+    lead.contactedAt = null;
+    lead.responseMs = null;
+  } else {
+    lead.status = "new";
+    lead.passCount = 0;
+    lead.contactedAt = null;
+    lead.responseMs = null;
+  }
+
+  return previousVisualStatus !== getLeadVisualStatus(lead);
 }
 
 function normalizeAgentActive(value) {
@@ -1036,13 +1085,7 @@ async function addLead(input, options = {}) {
       }
     });
 
-    const incomingStatus = normalizeSheetStatus(input.status);
-    if (incomingStatus === "contacted" && existingLead.status !== "contacted") {
-      existingLead.status = "contacted";
-      existingLead.contactedAt = existingLead.contactedAt || Date.now();
-      existingLead.responseMs = existingLead.responseMs || existingLead.contactedAt - existingLead.receivedAt;
-      changed = true;
-    }
+    if (applySheetStatusToLead(existingLead, input.status)) changed = true;
 
     if (!changed) return false;
     saveState();
@@ -1064,6 +1107,7 @@ async function addLead(input, options = {}) {
 
   const now = Date.now();
   const initialStatus = normalizeSheetStatus(input.status);
+  const initialPassCount = initialStatus === "passed" ? 1 : 0;
   const lead = {
     id: crypto.randomUUID?.() || makeId("lead"),
     dedupeKey,
@@ -1076,8 +1120,8 @@ async function addLead(input, options = {}) {
     receivedAt: now,
     assignedAgentId: assignedAgent.id,
     expiresAt: now + RESPONSE_WINDOW_MS,
-    status: initialStatus,
-    passCount: 0,
+    status: initialStatus === "contacted" ? "contacted" : "new",
+    passCount: initialPassCount,
     responseMs: initialStatus === "contacted" ? 0 : null,
     contactedAt: initialStatus === "contacted" ? now : null,
     notes: "",
@@ -1295,6 +1339,24 @@ async function postGoogleSheetAction(payload, errorLabel) {
     console.error(errorLabel, error);
     return false;
   }
+}
+
+async function updateLeadStatusInSheet(lead, status) {
+  if (!lead) return false;
+  const sheetStatus = formatSheetStatus(normalizeSheetStatus(status));
+  return postGoogleSheetAction(
+    {
+      action: "update_lead_status",
+      lead: {
+        id: lead.dedupeKey || lead.id,
+        phone: lead.phone,
+        project: lead.project,
+        name: lead.name,
+        status: sheetStatus,
+      },
+    },
+    "Lead sheet status update failed",
+  );
 }
 
 function agentSheetPayload(agent) {
@@ -1564,6 +1626,7 @@ async function processExpiredLeads() {
             if (error) console.error("Lead pass save failed", error);
           });
       }
+      updateLeadStatusInSheet(lead, "Passed");
 
       if (nextAgent.id === state.currentUserId) {
         showToast("Lead dipindahkan kepada anda", `${lead.name} menunggu tindakan dalam 5 minit.`);
@@ -1651,6 +1714,7 @@ async function handleCall(leadId) {
       `${lead.name} untuk projek ${lead.project} kini milik ${agent?.name || "ejen ini"}.`,
     );
     renderAll();
+    updateLeadStatusInSheet(claimedLead || lead, "Contacted");
 
     if (!dialLeadPhone(phoneToCall)) {
       showToast("Nombor telefon tiada", "Lead ini belum ada nombor telefon yang boleh dipanggil.", "error");
@@ -1829,7 +1893,7 @@ function renderLeadsTable() {
         String(lead.project || "").toLowerCase().includes(search) ||
         String(lead.source || "").toLowerCase().includes(search) ||
         String(lead.notes || "").toLowerCase().includes(search);
-      const visualStatus = lead.status === "new" && lead.passCount > 0 ? "passed" : lead.status;
+      const visualStatus = getLeadVisualStatus(lead);
       return matchesSearch && (filter === "all" || visualStatus === filter);
     })
     .sort((a, b) => (b.receivedAt || 0) - (a.receivedAt || 0));
@@ -1840,9 +1904,8 @@ function renderLeadsTable() {
   elements.leadsTableBody.innerHTML = rows.length
     ? rows
         .map((lead) => {
-          const visualStatus = lead.status === "new" && lead.passCount > 0 ? "passed" : lead.status;
-          const statusLabel =
-            visualStatus === "contacted" ? "Contacted" : visualStatus === "passed" ? "Passed" : "New";
+          const visualStatus = getLeadVisualStatus(lead);
+          const statusLabel = formatSheetStatus(visualStatus);
           const contactedTime = lead.contactedAt ? `<small>Dihubungi ${formatDateTime(lead.contactedAt)}</small>` : "";
           const editButton = canViewLeadPhone(lead)
             ? `<button class="contact-edit-button" type="button" data-lead-edit="${lead.id}">Edit</button>`
@@ -2099,6 +2162,7 @@ async function toggleAgent(agentId) {
         lead.expiresAt = Date.now() + RESPONSE_WINDOW_MS;
         lead.passCount += 1;
         addActivity("passed", lead, `${agent.name} dinyahaktifkan, dipindahkan kepada ${nextAgent.name}`);
+        updateLeadStatusInSheet(lead, "Passed");
       }
     });
   }

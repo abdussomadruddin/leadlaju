@@ -95,6 +95,9 @@ function doPost(event) {
     if (payload.action === "delete_lead") {
       return jsonResponse(withSupabaseSync_(deleteLead_(payload.lead || payload), true));
     }
+    if (payload.action === "update_lead_status") {
+      return jsonResponse(withSupabaseSync_(updateLeadStatus_(payload.lead || payload), true));
+    }
     if (payload.action === "add_agent") {
       return jsonResponse(withSupabaseSync_(upsertAgent_(payload.agent || payload), true));
     }
@@ -126,7 +129,7 @@ function appendLead_(input) {
     email: String(input.email || input.emel || input.email_address || "").trim(),
     city: String(input.city || input.bandar || "").trim(),
     project: String(input.project || input.projek || input.project_name || "Tidak dinyatakan").trim(),
-    status: String(input.status || "new").trim(),
+    status: canonicalSheetStatus_(input.status || "new"),
     source: String(input.source || input.sumber || input.platform || "Manual Lead").trim(),
   };
 
@@ -182,6 +185,41 @@ function deleteLead_(input) {
   }
 
   return { ok: true, deleted };
+}
+
+function updateLeadStatus_(input) {
+  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
+  const headers = ensureRequiredHeaders_(sheet);
+  const values = sheet.getDataRange().getDisplayValues();
+  if (values.length < 2) return { ok: true, updated: 0 };
+
+  const status = canonicalSheetStatus_(input.status || "new");
+  const id = String(input.id || input.lead_id || "").trim();
+  const phone = String(input.phone || input.phone_number || "").trim();
+  const project = String(input.project || input.projek || "").trim();
+  const idIndex = headers.findIndex((header) => FIELD_ALIASES.id.includes(header));
+  const phoneIndex = headers.findIndex((header) => FIELD_ALIASES.phone.includes(header));
+  const projectIndex = headers.findIndex((header) => FIELD_ALIASES.project.includes(header));
+  const statusIndex = headers.findIndex((header) => FIELD_ALIASES.status.includes(header));
+  if (statusIndex < 0) return { ok: false, error: "Kolum Status tidak dijumpai." };
+
+  let updated = 0;
+  for (let rowNumber = 2; rowNumber <= values.length; rowNumber += 1) {
+    const row = values[rowNumber - 1];
+    const rowId = idIndex >= 0 ? String(row[idIndex] || "").trim() : "";
+    const rowPhone = phoneIndex >= 0 ? String(row[phoneIndex] || "").trim() : "";
+    const rowProject = projectIndex >= 0 ? String(row[projectIndex] || "").trim() : "";
+    const idMatches = id && rowId === id;
+    const fallbackMatches = phone && project && rowPhone === phone && rowProject === project;
+
+    if (idMatches || fallbackMatches) {
+      sheet.getRange(rowNumber, statusIndex + 1).setValue(status);
+      updated += 1;
+    }
+  }
+
+  return { ok: true, updated, status };
 }
 
 function replaceAgents_(agentsInput) {
@@ -505,6 +543,7 @@ function syncSupabaseLeads_(sheetLeads, profiles, token) {
 
   sheetLeads.forEach((lead) => {
     const existing = existingByKey[lead.dedupeKey];
+    const leadStage = normalizeLeadStageForSupabase_(lead.status);
     if (existing) {
       const payload = {
         name: lead.name,
@@ -513,8 +552,17 @@ function syncSupabaseLeads_(sheetLeads, profiles, token) {
         project: lead.project,
         source: lead.source,
       };
-      if (existing.status !== "contacted" && lead.status === "contacted") {
+      const existingStage =
+        existing.status === "contacted" ? "contacted" : Number(existing.pass_count || 0) > 0 ? "passed" : "new";
+      if (existingStage !== leadStage) {
+        payload.status = leadStage === "contacted" ? "contacted" : "new";
+        payload.pass_count = leadStage === "passed" ? Math.max(Number(existing.pass_count || 0), 1) : 0;
+        payload.contacted_at = null;
+        payload.response_ms = null;
+      }
+      if (leadStage === "contacted") {
         payload.status = "contacted";
+        payload.pass_count = Number(existing.pass_count || 0);
         payload.contacted_at = existing.contacted_at || new Date().toISOString();
         payload.response_ms = Number(existing.response_ms || 0);
       }
@@ -529,7 +577,8 @@ function syncSupabaseLeads_(sheetLeads, profiles, token) {
 
     const assignedAgent = activeAgents.length ? activeAgents[roundRobinIndex % activeAgents.length] : null;
     if (assignedAgent) roundRobinIndex += 1;
-    const isContacted = lead.status === "contacted";
+    const isContacted = leadStage === "contacted";
+    const isPassed = leadStage === "passed";
     supabaseFetch_("/rest/v1/leads", {
       method: "post",
       payload: {
@@ -539,10 +588,10 @@ function syncSupabaseLeads_(sheetLeads, profiles, token) {
         email: lead.email,
         project: lead.project,
         source: lead.source,
-        status: lead.status,
+        status: isContacted ? "contacted" : "new",
         assigned_agent_id: assignedAgent ? assignedAgent.id : null,
         expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
-        pass_count: 0,
+        pass_count: isPassed ? 1 : 0,
         response_ms: isContacted ? 0 : null,
         contacted_at: isContacted ? new Date().toISOString() : null,
         notes: "",
@@ -656,7 +705,7 @@ function fetchExistingSupabaseLeads_(keys, token) {
   if (!keys.length) return [];
   const filter = `in.(${keys.map(postgrestQuote_).join(",")})`;
   return supabaseFetch_(
-    `/rest/v1/leads?select=dedupe_key,status,assigned_agent_id,contacted_at,response_ms&dedupe_key=${encodeURIComponent(filter)}`,
+    `/rest/v1/leads?select=dedupe_key,status,assigned_agent_id,contacted_at,response_ms,pass_count&dedupe_key=${encodeURIComponent(filter)}`,
     { method: "get" },
     token,
   ) || [];
@@ -719,7 +768,7 @@ function normalizeSupabaseLead_(input) {
     email: String(input.email || input.emel || input.email_address || "").trim(),
     project,
     source: normalizeLeadSourceForSupabase_(input.source || input.sumber || input.platform),
-    status: normalizeLeadStatusForSupabase_(input.status),
+    status: normalizeLeadStageForSupabase_(input.status),
     createdAt,
   };
 }
@@ -756,11 +805,36 @@ function normalizeLeadSourceForSupabase_(value) {
 }
 
 function normalizeLeadStatusForSupabase_(value) {
+  return normalizeLeadStageForSupabase_(value) === "contacted" ? "contacted" : "new";
+}
+
+function normalizeLeadStageForSupabase_(value) {
   const status = String(value || "").trim().toLowerCase();
-  if (["done", "completed", "complete", "contacted", "called", "call", "telah dihubungi"].includes(status)) {
+  if (
+    [
+      "done",
+      "completed",
+      "complete",
+      "contacted",
+      "called",
+      "call",
+      "dihubungi",
+      "telah dihubungi",
+    ].includes(status)
+  ) {
     return "contacted";
   }
+  if (["passed", "pass", "expired", "missed", "tamat", "terlepas", "dipindahkan"].includes(status)) {
+    return "passed";
+  }
   return "new";
+}
+
+function canonicalSheetStatus_(value) {
+  const stage = normalizeLeadStageForSupabase_(value);
+  if (stage === "contacted") return "Contacted";
+  if (stage === "passed") return "Passed";
+  return "New";
 }
 
 function normalizeDateIso_(value) {
