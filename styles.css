@@ -2112,6 +2112,13 @@ td small {
   gap: 6px;
 }
 
+.lead-contact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 9px;
+}
+
 .lead-note-cell {
   min-width: 280px;
   white-space: normal;

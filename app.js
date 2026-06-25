@@ -1939,19 +1939,23 @@ function renderLeadsTable() {
           const whatsappButton = whatsappUrl
             ? `<a class="contact-edit-button whatsapp" href="${whatsappUrl}" target="_blank" rel="noopener">WhatsApp</a>`
             : "";
+          const leadContactActions = whatsappButton
+            ? `<span class="lead-contact-actions">${whatsappButton}</span>`
+            : "";
           const editButton = canViewLeadPhone(lead)
             ? `<button class="contact-edit-button" type="button" data-lead-edit="${lead.id}">Edit</button>`
             : "";
           const deleteButton = isAdmin()
             ? `<button class="contact-edit-button danger" type="button" data-lead-delete="${lead.id}">Padam</button>`
             : "";
-          const actionButtons = [whatsappButton, editButton, deleteButton].filter(Boolean).join("");
+          const actionButtons = [editButton, deleteButton].filter(Boolean).join("");
           return `
             <tr data-lead-row="${lead.id}">
               <td data-label="Lead">
                 <strong>${escapeHtml(lead.name)}</strong>
                 <small>${escapeHtml(displayLeadPhone(lead))}</small>
                 <small>${canViewLeadPhone(lead) && lead.email ? escapeHtml(lead.email) : "Emel dibuka selepas CALL NOW"}</small>
+                ${leadContactActions}
               </td>
               <td data-label="Projek / Sumber">
                 <strong>${escapeHtml(lead.project || "Tidak dinyatakan")}</strong>

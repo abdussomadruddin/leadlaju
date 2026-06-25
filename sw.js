@@ -1,9 +1,9 @@
-const CACHE_NAME = "leadlaju-pwa-v20260625-lead-log-notes";
+const CACHE_NAME = "leadlaju-pwa-v20260625-mobile-lead-log-whatsapp-v2";
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20260625-lead-log-notes",
-  "/app.js?v=20260625-lead-log-notes",
+  "/styles.css?v=20260625-mobile-lead-log-whatsapp-v2",
+  "/app.js?v=20260625-mobile-lead-log-whatsapp-v2",
   "/manifest.webmanifest?v=20260625-pwa-notifications",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",
@@ -36,6 +36,20 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET") return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+
+  if (request.mode === "navigate" || ["script", "style"].includes(request.destination)) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (!response || response.status !== 200 || response.type !== "basic") return response;
+          const responseClone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, responseClone));
+          return response;
+        })
+        .catch(() => caches.match(request).then((cached) => cached || caches.match("/index.html"))),
+    );
+    return;
+  }
 
   event.respondWith(
     caches.match(request).then((cached) => {
