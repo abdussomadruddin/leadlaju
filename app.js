@@ -426,6 +426,7 @@ async function deleteLeads(leadIds) {
 
   state.leads = state.leads.filter((lead) => !ids.includes(lead.id));
   state.activities = state.activities.filter((activity) => !ids.includes(activity.leadId));
+  await syncLeadHandledCountsToSheet();
   saveState();
   return true;
 }
@@ -1512,6 +1513,36 @@ async function deleteAgentFromSheet(agent) {
     },
     "Agent sheet delete failed",
   );
+}
+
+function recalculateLeadHandledCounts() {
+  const handledCounts = new Map();
+  state.leads.forEach((lead) => {
+    if (lead.status !== "contacted" || !lead.assignedAgentId) return;
+    handledCounts.set(lead.assignedAgentId, (handledCounts.get(lead.assignedAgentId) || 0) + 1);
+  });
+
+  const changedAgents = [];
+  state.agents.forEach((agent) => {
+    const nextCount = handledCounts.get(agent.id) || 0;
+    if ((agent.leadsHandled || 0) !== nextCount) {
+      agent.leadsHandled = nextCount;
+      changedAgents.push(agent);
+    }
+  });
+  return changedAgents;
+}
+
+async function syncLeadHandledCountsToSheet() {
+  const changedAgents = recalculateLeadHandledCounts();
+  if (!changedAgents.length) return { updated: 0, pushed: 0 };
+
+  saveState();
+  const results = await Promise.all(changedAgents.map((agent) => upsertAgentToSheet(agent)));
+  return {
+    updated: changedAgents.length,
+    pushed: results.filter(Boolean).length,
+  };
 }
 
 async function syncAgentsFromSheet(sheetAgentRows) {
@@ -2630,6 +2661,7 @@ async function syncGoogleSheet(options = {}) {
     } else if (removedLeads.length) {
       await deleteLeads(removedLeads.map((lead) => lead.id));
     }
+    const handledSync = await syncLeadHandledCountsToSheet();
 
     state.integration.endpoint = endpoint;
     state.integration.interval = Number(elements.pollInterval.value) || 15;
@@ -2647,7 +2679,11 @@ async function syncGoogleSheet(options = {}) {
     }
     scheduleSync();
     renderAll();
-    const agentChanges = (agentSync.added || 0) + (agentSync.updated || 0) + (agentSync.removed || 0);
+    const agentChanges =
+      (agentSync.added || 0) +
+      (agentSync.updated || 0) +
+      (agentSync.removed || 0) +
+      (handledSync.updated || 0);
     if (!options.silent || added || updated || removed || agentChanges) {
       const title =
         [
@@ -2657,6 +2693,7 @@ async function syncGoogleSheet(options = {}) {
           agentSync.added ? `${agentSync.added} ejen baru` : "",
           agentSync.updated ? `${agentSync.updated} ejen dikemas kini` : "",
           agentSync.removed ? `${agentSync.removed} ejen dibuang` : "",
+          handledSync.updated ? `${handledSync.updated} kiraan ejen sync` : "",
         ]
           .filter(Boolean)
           .join(", ") ||
