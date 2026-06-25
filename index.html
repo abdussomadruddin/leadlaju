@@ -25,9 +25,9 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260625-mobile-safe-topbar-v3" />
+    <link rel="stylesheet" href="styles.css?v=20260625-signup-approval-v4" />
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260625-mobile-safe-topbar-v3" defer></script>
+    <script src="app.js?v=20260625-signup-approval-v4" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -131,6 +131,63 @@
             </button>
           </form>
 
+          <form id="signup-form" class="signup-form" novalidate hidden>
+            <label for="signup-name">Nama penuh</label>
+            <div class="login-input">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="8" r="4" />
+                <path d="M4 21a8 8 0 0 1 16 0" />
+              </svg>
+              <input id="signup-name" type="text" autocomplete="name" placeholder="Nama penuh anda" required />
+            </div>
+
+            <label for="signup-phone">Nombor telefon</label>
+            <div class="login-input">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.4 19.4 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.7.6 2.5a2 2 0 0 1-.4 2.1L8.1 9.5a16 16 0 0 0 6.4 6.4l1.2-1.2a2 2 0 0 1 2.1-.4c.8.3 1.6.5 2.5.6A2 2 0 0 1 22 16.9Z" />
+              </svg>
+              <input id="signup-phone" type="tel" autocomplete="tel" placeholder="+60 12-345 6789" required />
+            </div>
+
+            <label for="signup-email">Alamat emel</label>
+            <div class="login-input">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 4h16v16H4V4Z" />
+                <path d="m4 6 8 6 8-6" />
+              </svg>
+              <input id="signup-email" type="email" autocomplete="email" placeholder="nama@agency.com" required />
+            </div>
+
+            <label for="signup-password">Kata laluan</label>
+            <div class="login-input">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="5" y="10" width="14" height="11" rx="2" />
+                <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+              </svg>
+              <input id="signup-password" type="password" autocomplete="new-password" placeholder="Minimum 8 aksara" required />
+            </div>
+
+            <label for="signup-confirm-password">Sahkan kata laluan</label>
+            <div class="login-input">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m5 12 4 4L19 6" />
+              </svg>
+              <input id="signup-confirm-password" type="password" autocomplete="new-password" placeholder="Ulang kata laluan" required />
+            </div>
+
+            <p class="login-error signup-error" id="signup-error" role="alert"></p>
+            <button class="login-button" type="submit">
+              Hantar permohonan
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 12h14M14 7l5 5-5 5" />
+              </svg>
+            </button>
+          </form>
+
+          <button class="signup-toggle" id="signup-toggle" type="button">
+            Agent baru? Sign up untuk minta approval admin
+          </button>
+
           <p class="session-note">
             Sesi kekal aktif selama 365 hari pada peranti ini, sehingga anda log keluar.
           </p>
@@ -198,7 +255,7 @@
             </span>
             <span>
               <strong>Google Sheets</strong>
-              <small id="sidebar-sync-text">Mod demo</small>
+              <small id="sidebar-sync-text">Belum disambungkan</small>
             </span>
           </div>
           <div class="sync-status">
@@ -485,7 +542,7 @@
               </form>
               <div class="connection-result" id="connection-result">
                 <span class="status-dot"></span>
-                <span>Belum disambungkan. Mod demo sedang aktif.</span>
+                <span>Belum disambungkan. Masukkan Google Apps Script Web App URL untuk aktifkan sync.</span>
               </div>
             </section>
 

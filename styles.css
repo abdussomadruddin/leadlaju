@@ -281,6 +281,10 @@ svg {
   font-weight: 800;
 }
 
+.signup-form {
+  margin-top: 4px;
+}
+
 .login-input {
   display: flex;
   min-height: 52px;
@@ -378,6 +382,23 @@ svg {
 .forgot-password-button:hover {
   color: var(--blue-dark);
   text-decoration: underline;
+}
+
+.signup-toggle {
+  width: 100%;
+  margin-top: 13px;
+  padding: 11px 12px;
+  border: 1px solid #dce6f8;
+  border-radius: 10px;
+  color: var(--blue-dark);
+  background: #f6f9ff;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.signup-toggle:hover {
+  border-color: #c9dcff;
+  background: #edf4ff;
 }
 
 .login-button {
@@ -1698,6 +1719,11 @@ td small {
   box-shadow: var(--shadow-sm);
 }
 
+.agent-card.pending {
+  border-color: #ffe0a6;
+  background: linear-gradient(180deg, #fffaf0, #fff);
+}
+
 .agent-card-top {
   display: flex;
   align-items: center;
@@ -1723,6 +1749,13 @@ td small {
   margin-top: 3px;
   color: var(--ink-500);
   font-size: 8px;
+}
+
+.agent-card.pending .agent-card-name small {
+  color: #a36b11;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .agent-card-details {
@@ -1770,6 +1803,18 @@ td small {
   color: var(--blue-dark);
   background: var(--blue-soft);
   border-color: #d6e3fb;
+}
+
+.agent-card-actions .approve-agent {
+  color: #0f7a4d;
+  background: var(--green-soft);
+  border-color: #b9eed4;
+}
+
+.agent-card-actions .reject-agent {
+  color: var(--red-dark);
+  background: #fff0f0;
+  border-color: #ffd2d2;
 }
 
 .agent-card-actions .remove-agent {

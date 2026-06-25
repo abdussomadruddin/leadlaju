@@ -1,9 +1,9 @@
-const CACHE_NAME = "leadlaju-pwa-v20260625-mobile-safe-topbar-v3";
+const CACHE_NAME = "leadlaju-pwa-v20260625-signup-approval-v4";
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20260625-mobile-safe-topbar-v3",
-  "/app.js?v=20260625-mobile-safe-topbar-v3",
+  "/styles.css?v=20260625-signup-approval-v4",
+  "/app.js?v=20260625-signup-approval-v4",
   "/manifest.webmanifest?v=20260625-pwa-notifications",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",

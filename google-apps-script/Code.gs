@@ -509,6 +509,7 @@ function syncSupabaseAgents_(sheetAgents, profiles, token, options) {
       phone: agent.phone,
       email: agent.email,
       password: agent.password.length >= 8 ? agent.password : DEFAULT_AGENT_PASSWORD,
+      active: agent.active,
     }, token);
     const createdProfile = fetchSupabaseProfileByEmail_(agent.email, token);
     if (createdProfile?.id && writeAgentIdByEmail_(options.agentSheet, options.agentHeaders, agent.email, createdProfile.id)) {

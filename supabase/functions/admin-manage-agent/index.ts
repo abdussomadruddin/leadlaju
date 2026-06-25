@@ -40,6 +40,8 @@ Deno.serve(async (request) => {
       if (!payload.email || !payload.password || !payload.name) {
         throw new Error("Nama, emel dan kata laluan diperlukan.");
       }
+      const shouldActivate =
+        payload.active === false || String(payload.active || "").toLowerCase() === "inactive" ? false : true;
       const { data, error } = await adminClient.auth.admin.createUser({
         email: String(payload.email).trim().toLowerCase(),
         password: String(payload.password),
@@ -58,7 +60,7 @@ Deno.serve(async (request) => {
         phone: String(payload.phone || "").trim(),
         email: String(payload.email).trim().toLowerCase(),
         role: "agent",
-        active: true,
+        active: shouldActivate,
       });
     } else if (payload.action === "update_password") {
       if (!payload.userId || String(payload.password || "").length < 8) {

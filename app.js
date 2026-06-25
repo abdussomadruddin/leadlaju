@@ -97,6 +97,14 @@ const elements = {
   loginError: document.querySelector("#login-error"),
   passwordToggle: document.querySelector("#password-toggle"),
   forgotPasswordButton: document.querySelector("#forgot-password-button"),
+  signupForm: document.querySelector("#signup-form"),
+  signupToggle: document.querySelector("#signup-toggle"),
+  signupName: document.querySelector("#signup-name"),
+  signupPhone: document.querySelector("#signup-phone"),
+  signupEmail: document.querySelector("#signup-email"),
+  signupPassword: document.querySelector("#signup-password"),
+  signupConfirmPassword: document.querySelector("#signup-confirm-password"),
+  signupError: document.querySelector("#signup-error"),
   resetPasswordModal: document.querySelector("#reset-password-modal"),
   resetRequestForm: document.querySelector("#reset-request-form"),
   resetVerifyForm: document.querySelector("#reset-verify-form"),
@@ -510,6 +518,7 @@ function showLogin() {
   elements.appShell.setAttribute("aria-hidden", "true");
   document.body.classList.remove("auth-pending", "authenticated");
   document.body.classList.add("logged-out");
+  showSignupForm(false);
   window.setTimeout(() => elements.loginEmail.focus(), 80);
 }
 
@@ -517,6 +526,27 @@ function setLoginError(message) {
   elements.loginError.textContent = message;
   elements.loginEmail.closest(".login-input").classList.toggle("invalid", Boolean(message));
   elements.loginPassword.closest(".login-input").classList.toggle("invalid", Boolean(message));
+}
+
+function setSignupError(message) {
+  elements.signupError.textContent = message;
+}
+
+function showSignupForm(show) {
+  elements.signupForm.hidden = !show;
+  elements.loginForm.hidden = show;
+  elements.forgotPasswordButton.hidden = show;
+  elements.signupToggle.textContent = show
+    ? "Sudah ada akaun? Log masuk"
+    : "Agent baru? Sign up untuk minta approval admin";
+  setLoginError("");
+  setSignupError("");
+  if (show) {
+    elements.signupForm.reset();
+    window.setTimeout(() => elements.signupName.focus(), 80);
+  } else {
+    window.setTimeout(() => elements.loginEmail.focus(), 80);
+  }
 }
 
 async function handleLogin(event) {
@@ -540,10 +570,16 @@ async function handleLogin(event) {
       setLoginError("Akaun berjaya disahkan tetapi data sistem tidak dapat dimuatkan.");
       return;
     }
+    const signedInUser = getCurrentUser();
+    if (!signedInUser?.active) {
+      await supabaseClient.auth.signOut();
+      setLoginError("Akaun anda sedang menunggu approval admin.");
+      return;
+    }
     setLoginError("");
     activeView = "dashboard";
     switchView("dashboard");
-    startAuthenticatedApp(getCurrentUser());
+    startAuthenticatedApp(signedInUser);
     return;
   }
 
@@ -553,7 +589,7 @@ async function handleLogin(event) {
     return;
   }
   if (!user.active) {
-    setLoginError("Akaun ini tidak aktif. Sila hubungi admin.");
+    setLoginError("Akaun anda sedang menunggu approval admin.");
     return;
   }
 
@@ -569,6 +605,68 @@ async function handleLogin(event) {
   activeView = "dashboard";
   switchView("dashboard");
   startAuthenticatedApp(user);
+}
+
+async function handleAgentSignup(event) {
+  event.preventDefault();
+  const name = elements.signupName.value.trim();
+  const phone = elements.signupPhone.value.trim();
+  const email = elements.signupEmail.value.trim().toLowerCase();
+  const password = elements.signupPassword.value;
+  const confirmation = elements.signupConfirmPassword.value;
+
+  if (!name || !phone || !email || !password) {
+    setSignupError("Lengkapkan semua maklumat pendaftaran.");
+    return;
+  }
+  if (password.length < 8) {
+    setSignupError("Kata laluan mesti sekurang-kurangnya 8 aksara.");
+    return;
+  }
+  if (password !== confirmation) {
+    setSignupError("Pengesahan kata laluan tidak sepadan.");
+    return;
+  }
+  if (state.agents.some((agent) => agent.email.toLowerCase() === email)) {
+    setSignupError("Emel ini sudah wujud dalam sistem.");
+    return;
+  }
+
+  if (supabaseClient) {
+    const { error } = await supabaseClient.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          name,
+          phone,
+          role: "agent",
+        },
+      },
+    });
+    if (error) {
+      setSignupError(error.message || "Permohonan tidak dapat dihantar.");
+      return;
+    }
+    await supabaseClient.auth.signOut();
+  } else {
+    state.agents.push({
+      id: makeId("agent"),
+      name,
+      phone,
+      email,
+      password,
+      role: "agent",
+      active: false,
+      leadsHandled: 0,
+      createdAt: Date.now(),
+    });
+    saveState();
+  }
+
+  elements.signupForm.reset();
+  showSignupForm(false);
+  setLoginError("Permohonan dihantar. Semak emel untuk pengesahan dan tunggu admin approve sebelum log masuk.");
 }
 
 async function logout() {
@@ -1484,6 +1582,7 @@ async function syncAgentsFromSheet(sheetAgentRows) {
           phone: sheetAgent.phone,
           email: sheetAgent.email,
           password: sheetAgent.password.length >= 8 ? sheetAgent.password : DEFAULT_AGENT_PASSWORD,
+          active: sheetAgent.active,
         },
       });
       if (error || !data?.ok) {
@@ -1509,6 +1608,7 @@ async function syncAgentsFromSheet(sheetAgentRows) {
   const removedAgents = state.agents.filter(
     (agent) =>
       agent.role === "agent" &&
+      agent.active &&
       agent.id !== state.currentUserId &&
       !sheetEmails.has(String(agent.email || "").toLowerCase()),
   );
@@ -1989,22 +2089,40 @@ function renderLeadsTable() {
 function renderAgents() {
   elements.agentsGrid.innerHTML = state.agents
     .map(
-      (agent) => `
-        <article class="agent-card">
+      (agent) => {
+        const isPendingAgent = agent.role === "agent" && !agent.active;
+        const roleLabel = agent.role === "admin" ? "Administrator" : isPendingAgent ? "Menunggu approval" : "Property Agent";
+        const actionButtons = isPendingAgent
+          ? `
+            <button class="approve-agent" type="button" data-agent-approve="${agent.id}">Approve</button>
+            <button class="reject-agent" type="button" data-agent-reject="${agent.id}">Reject</button>`
+          : `
+            <button class="edit-password" type="button" data-agent-password="${agent.id}">Edit password</button>
+            ${
+              agent.id !== state.currentUserId
+                ? `<button class="remove-agent" type="button" data-agent-remove="${agent.id}" aria-label="Buang ${escapeHtml(agent.name)}">×</button>`
+                : ""
+            }`;
+        return `
+        <article class="agent-card ${isPendingAgent ? "pending" : ""}">
           <div class="agent-card-top">
             <span class="agent-card-avatar">${initials(agent.name)}</span>
             <span class="agent-card-name">
               <strong>${escapeHtml(agent.name)}</strong>
-              <small>${agent.role === "admin" ? "Administrator" : "Property Agent"}</small>
+              <small>${roleLabel}</small>
             </span>
-            <span class="agent-status">
-              <button
-                class="switch ${agent.active ? "active" : ""}"
-                type="button"
-                data-agent-toggle="${agent.id}"
-                aria-label="${agent.active ? "Nyahaktifkan" : "Aktifkan"} ${escapeHtml(agent.name)}"
-              ></button>
-            </span>
+            ${
+              isPendingAgent
+                ? ""
+                : `<span class="agent-status">
+                    <button
+                      class="switch ${agent.active ? "active" : ""}"
+                      type="button"
+                      data-agent-toggle="${agent.id}"
+                      aria-label="${agent.active ? "Nyahaktifkan" : "Aktifkan"} ${escapeHtml(agent.name)}"
+                    ></button>
+                  </span>`
+            }
           </div>
           <div class="agent-card-details">
             <span>Telefon <b>${escapeHtml(agent.phone)}</b></span>
@@ -2012,14 +2130,10 @@ function renderAgents() {
             <span>Lead dikendalikan <b>${agent.leadsHandled || 0}</b></span>
           </div>
           <div class="agent-card-actions">
-            <button class="edit-password" type="button" data-agent-password="${agent.id}">Edit password</button>
-            ${
-              agent.id !== state.currentUserId
-                ? `<button class="remove-agent" type="button" data-agent-remove="${agent.id}" aria-label="Buang ${escapeHtml(agent.name)}">×</button>`
-                : ""
-            }
+            ${actionButtons}
           </div>
-        </article>`,
+        </article>`;
+      },
     )
     .join("");
 }
@@ -2070,18 +2184,18 @@ function renderIntegration() {
           ? "Konfigurasi disimpan tetapi sambungan belum aktif. Semak schema dan akaun Auth."
           : "Belum dikonfigurasi. Data tempatan sedang digunakan."
     }</span>`;
-  elements.sidebarSyncText.textContent = integration.connected ? "Disambungkan" : "Mod demo";
+  elements.sidebarSyncText.textContent = integration.connected ? "Disambungkan" : "Belum disambungkan";
   elements.sidebarSyncStatus.textContent = integration.connected
     ? `Sync ${integration.lastSyncAt ? relativeTime(integration.lastSyncAt) : "aktif"}`
     : "Sedia menerima lead";
-  elements.liveSyncLabel.textContent = integration.connected ? "Google Sheet live" : "Live sync demo";
+  elements.liveSyncLabel.textContent = integration.connected ? "Google Sheet live" : "Google Sheet belum sync";
   elements.connectionResult.classList.remove("error");
   elements.connectionResult.innerHTML = `
     <span class="status-dot"></span>
     <span>${
       integration.connected
         ? `Disambungkan${integration.lastSyncAt ? ` • sync ${relativeTime(integration.lastSyncAt)}` : ""}`
-        : "Belum disambungkan. Mod demo sedang aktif."
+        : "Belum disambungkan. Masukkan Google Apps Script Web App URL untuk aktifkan sync."
     }</span>`;
 }
 
@@ -2184,6 +2298,40 @@ async function addAgent(event) {
     agentsPushed ? "success" : "error",
   );
   renderAll();
+}
+
+async function approveAgent(agentId) {
+  const agent = getAgent(agentId);
+  if (!agent || agent.active) return;
+  agent.active = true;
+  saveState();
+  try {
+    await persistProfile(agent);
+  } catch (error) {
+    agent.active = false;
+    saveState();
+    console.error(error);
+    showToast("Approval gagal", "Semak sambungan dan polisi Supabase.", "error");
+    renderAll();
+    return;
+  }
+  const agentsPushed = await upsertAgentToSheet(agent);
+  showToast(
+    agentsPushed ? "Ejen approved" : "Ejen approved",
+    agentsPushed
+      ? `${agent.name} kini aktif dan telah dimasukkan ke Google Sheet.`
+      : `${agent.name} kini aktif. Google Sheet belum dapat dikemas kini.`,
+    agentsPushed ? "success" : "error",
+  );
+  renderAll();
+}
+
+async function rejectAgent(agentId) {
+  const agent = getAgent(agentId);
+  if (!agent) return;
+  const confirmed = window.confirm(`Reject permohonan ${agent.name}? Akaun ini akan dipadam.`);
+  if (!confirmed) return;
+  await removeAgent(agentId);
 }
 
 async function toggleAgent(agentId) {
@@ -2569,7 +2717,7 @@ async function saveIntegration(event) {
     }
     scheduleSync();
     renderIntegration();
-    showToast("Sambungan dipadam", "App kembali menggunakan mod demo.");
+    showToast("Sambungan dipadam", "Google Sheet sync belum disambungkan.");
     return;
   }
   saveState();
@@ -2616,6 +2764,15 @@ elements.mobileMenu.addEventListener("click", () => elements.sidebar.classList.t
 elements.loginForm.addEventListener("submit", handleLogin);
 elements.loginEmail.addEventListener("input", () => setLoginError(""));
 elements.loginPassword.addEventListener("input", () => setLoginError(""));
+elements.signupForm.addEventListener("submit", handleAgentSignup);
+elements.signupToggle.addEventListener("click", () => showSignupForm(elements.signupForm.hidden));
+[
+  elements.signupName,
+  elements.signupPhone,
+  elements.signupEmail,
+  elements.signupPassword,
+  elements.signupConfirmPassword,
+].forEach((input) => input.addEventListener("input", () => setSignupError("")));
 elements.passwordToggle.addEventListener("click", togglePasswordVisibility);
 elements.forgotPasswordButton.addEventListener("click", openResetPasswordModal);
 elements.resetRequestForm.addEventListener("submit", requestPasswordReset);
@@ -2676,9 +2833,13 @@ elements.resetPasswordModal.addEventListener("click", (event) => {
 
 elements.agentsGrid.addEventListener("click", (event) => {
   const toggle = event.target.closest("[data-agent-toggle]");
+  const approve = event.target.closest("[data-agent-approve]");
+  const reject = event.target.closest("[data-agent-reject]");
   const remove = event.target.closest("[data-agent-remove]");
   const password = event.target.closest("[data-agent-password]");
   if (toggle) toggleAgent(toggle.dataset.agentToggle);
+  if (approve) approveAgent(approve.dataset.agentApprove);
+  if (reject) rejectAgent(reject.dataset.agentReject);
   if (remove) removeAgent(remove.dataset.agentRemove);
   if (password) openAgentPasswordModal(password.dataset.agentPassword);
 });
@@ -2714,7 +2875,14 @@ async function bootstrap() {
     if (session?.user) {
       const loaded = await loadRemoteState(session.user.id);
       if (loaded) {
-        startAuthenticatedApp(getCurrentUser());
+        const signedInUser = getCurrentUser();
+        if (!signedInUser?.active) {
+          await supabaseClient.auth.signOut();
+          showLogin();
+          setLoginError("Akaun anda sedang menunggu approval admin.");
+          return;
+        }
+        startAuthenticatedApp(signedInUser);
         return;
       }
     }
