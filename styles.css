@@ -1688,7 +1688,32 @@ td small {
   text-transform: capitalize;
 }
 
+.lead-status-select {
+  min-height: 32px;
+  max-width: 170px;
+  padding: 0 27px 0 10px;
+  border: 1px solid #d6e3fb;
+  border-radius: 999px;
+  color: var(--blue);
+  background: var(--blue-soft);
+  font-size: 9px;
+  font-weight: 800;
+  outline: 0;
+}
+
+.lead-status-select:disabled,
+.lead-status-select.is-saving {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .status-badge.contacted {
+  color: var(--green);
+  background: var(--green-soft);
+}
+
+.lead-status-select.contacted {
+  border-color: #b9eed4;
   color: var(--green);
   background: var(--green-soft);
 }
@@ -1696,6 +1721,31 @@ td small {
 .status-badge.passed {
   color: #a36b11;
   background: var(--amber-soft);
+}
+
+.lead-status-select.passed,
+.lead-status-select.need_follow_up {
+  border-color: #f4d49d;
+  color: #a36b11;
+  background: var(--amber-soft);
+}
+
+.lead-status-select.rejected {
+  border-color: #ffd2d2;
+  color: var(--red-dark);
+  background: #fff0f0;
+}
+
+.lead-status-select.potential {
+  border-color: #d9ccff;
+  color: #5d41a8;
+  background: #f3efff;
+}
+
+.lead-status-select.client {
+  border-color: #b9eed4;
+  color: #0f7a4d;
+  background: #e7fbf0;
 }
 
 .table-empty {
@@ -2606,6 +2656,14 @@ td small {
   .lead-log-table td > strong {
     font-size: 15px;
     line-height: 1.25;
+  }
+
+  .lead-status-select {
+    width: 100%;
+    max-width: none;
+    min-height: 40px;
+    border-radius: 10px;
+    font-size: 12px;
   }
 
   .lead-log-table td::before {

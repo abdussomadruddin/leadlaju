@@ -9,6 +9,16 @@ const NOTIFICATION_BADGE = "/assets/badge-96.png";
 const MALAYSIA_TIME_ZONE = "Asia/Kuala_Lumpur";
 const DEFAULT_GOOGLE_SHEET_ENDPOINT =
   "https://script.google.com/macros/s/AKfycbyXEPXT-m6YETnvOZEy0CxF82CMmMGDmgpVmDIv-a7XTEdJp92mYkOQhaBSRTPnNH7K/exec";
+const LEAD_STATUS_OPTIONS = [
+  { value: "new", label: "New" },
+  { value: "contacted", label: "Contacted" },
+  { value: "passed", label: "Passed" },
+  { value: "rejected", label: "Rejected" },
+  { value: "need_follow_up", label: "Need Follow Up" },
+  { value: "potential", label: "Potential" },
+  { value: "client", label: "Client" },
+];
+const LEAD_STATUS_LABELS = Object.fromEntries(LEAD_STATUS_OPTIONS.map((status) => [status.value, status.label]));
 
 const defaultState = {
   currentUserId: "agent-aina",
@@ -1254,7 +1264,8 @@ function normalizeLeadSource(value, fallback = "Manual Lead") {
 
 function normalizeSheetStatus(value) {
   const status = String(value || "").trim().toLowerCase();
-  if (!status || status === "new" || status === "baru") return "new";
+  const compactStatus = status.replace(/[\s_-]+/g, " ");
+  if (!status || compactStatus === "new" || compactStatus === "baru") return "new";
   if (
     [
       "done",
@@ -1265,12 +1276,34 @@ function normalizeSheetStatus(value) {
       "call",
       "dihubungi",
       "telah dihubungi",
-    ].includes(status)
+    ].includes(compactStatus)
   ) {
     return "contacted";
   }
-  if (["passed", "pass", "expired", "missed", "tamat", "terlepas", "dipindahkan"].includes(status)) {
+  if (["passed", "pass", "expired", "missed", "tamat", "terlepas", "dipindahkan"].includes(compactStatus)) {
     return "passed";
+  }
+  if (["rejected", "reject", "tolak", "ditolak", "tak berminat", "tidak berminat"].includes(compactStatus)) {
+    return "rejected";
+  }
+  if (
+    [
+      "need follow up",
+      "follow up",
+      "followup",
+      "follow",
+      "perlu follow up",
+      "perlu followup",
+      "susulan",
+    ].includes(compactStatus)
+  ) {
+    return "need_follow_up";
+  }
+  if (["potential", "potensi", "prospect", "prospek", "hot lead"].includes(compactStatus)) {
+    return "potential";
+  }
+  if (["client", "customer", "pelanggan", "buyer", "pembeli"].includes(compactStatus)) {
+    return "client";
   }
   return "new";
 }
@@ -1282,9 +1315,18 @@ function getLeadVisualStatus(lead) {
 }
 
 function formatSheetStatus(status) {
-  if (status === "contacted") return "Contacted";
-  if (status === "passed") return "Passed";
-  return "New";
+  return LEAD_STATUS_LABELS[normalizeSheetStatus(status)] || "New";
+}
+
+function renderLeadStatusOptions(currentStatus) {
+  return LEAD_STATUS_OPTIONS.map(
+    (status) =>
+      `<option value="${status.value}"${status.value === currentStatus ? " selected" : ""}>${status.label}</option>`,
+  ).join("");
+}
+
+function isActiveLeadStatus(status) {
+  return status === "new" || status === "queued";
 }
 
 function applySheetStatusToLead(lead, sheetStatus, now = Date.now()) {
@@ -1294,31 +1336,38 @@ function applySheetStatusToLead(lead, sheetStatus, now = Date.now()) {
     return false;
   }
 
-  if (nextStatus === "contacted") {
-    lead.status = "contacted";
-    lead.passCount = lead.passCount || 0;
-    lead.contactedAt = lead.contactedAt || now;
-    lead.responseMs = lead.responseMs || Math.max(0, lead.contactedAt - lead.receivedAt);
-    lead.statusLockedUntil = null;
-  } else if (nextStatus === "passed") {
+  if (nextStatus === "new") {
+    if (lead.status === "new" || lead.status === "queued") return false;
     lead.status = "new";
-    lead.passCount = Math.max(lead.passCount || 0, 1);
-    lead.contactedAt = null;
-    lead.responseMs = null;
-    lead.statusLockedUntil = null;
-  } else if (lead.status === "queued") {
     lead.passCount = 0;
     lead.contactedAt = null;
     lead.responseMs = null;
     lead.statusLockedUntil = null;
-  } else if (lead.status === "new") {
-    return false;
+    const assignedAgent = selectNextAvailableAgent({ ignoreLeadId: lead.id });
+    if (assignedAgent) {
+      lead.assignedAgentId = assignedAgent.id;
+      lead.receivedAt = now;
+      lead.expiresAt = now + RESPONSE_WINDOW_MS;
+      lead.queuedAt = null;
+      lead.lastAgentId = null;
+    } else {
+      queueLead(lead, now, {
+        resetPassCount: false,
+        previousAgentId: lead.assignedAgentId || lead.lastAgentId || null,
+      });
+    }
   } else {
-    lead.status = "new";
-    lead.passCount = 0;
-    lead.contactedAt = null;
-    lead.responseMs = null;
+    lead.status = nextStatus;
     lead.statusLockedUntil = null;
+    lead.expiresAt = null;
+    lead.queuedAt = null;
+    if (nextStatus === "contacted") {
+      lead.passCount = lead.passCount || 0;
+      lead.contactedAt = lead.contactedAt || now;
+      lead.responseMs = lead.responseMs || Math.max(0, lead.contactedAt - (lead.receivedAt || now));
+    } else if (nextStatus === "passed") {
+      lead.passCount = Math.max(lead.passCount || 0, 1);
+    }
   }
 
   return previousVisualStatus !== getLeadVisualStatus(lead);
@@ -1371,7 +1420,7 @@ function readLeadRuntimeFromSheet(input) {
 }
 
 function applyLeadRuntimeFromSheet(lead, runtime, now = Date.now()) {
-  if (!runtime?.hasRuntime || lead.status === "contacted") return false;
+  if (!runtime?.hasRuntime || !isActiveLeadStatus(lead.status)) return false;
 
   const before = JSON.stringify({
     status: lead.status,
@@ -1494,12 +1543,13 @@ async function addLead(input, options = {}) {
   const now = Date.now();
   if (options.queueIfBlocked) activateQueuedLeads({ now, notify: options.notify });
   const hasSheetAssignment = Boolean(sheetRuntime.assignedAgentId || sheetRuntime.queueState === "queued");
+  const shouldDistribute = initialStatus === "new";
   const assignedAgent =
-    initialStatus === "contacted" || hasSheetAssignment ? null : selectNextAvailableAgent();
+    !shouldDistribute || hasSheetAssignment ? null : selectNextAvailableAgent();
   const shouldQueue =
     sheetRuntime.queueState === "queued" ||
-    (options.queueIfBlocked && initialStatus === "new" && !assignedAgent && !sheetRuntime.assignedAgentId);
-  if (!assignedAgent && !shouldQueue && initialStatus !== "contacted") {
+    (options.queueIfBlocked && shouldDistribute && !assignedAgent && !sheetRuntime.assignedAgentId);
+  if (!assignedAgent && !shouldQueue && shouldDistribute && !sheetRuntime.assignedAgentId) {
     showToast("Tiada ejen aktif", "Aktifkan sekurang-kurangnya seorang ejen dahulu.", "error");
     return false;
   }
@@ -1514,10 +1564,10 @@ async function addLead(input, options = {}) {
     project,
     source,
     createdAt: Number.isFinite(parsedCreatedAt) ? parsedCreatedAt : now,
-    receivedAt: shouldQueue ? null : now,
+    receivedAt: shouldDistribute && !shouldQueue ? now : null,
     assignedAgentId: assignedAgent?.id || null,
-    expiresAt: shouldQueue ? null : now + RESPONSE_WINDOW_MS,
-    status: shouldQueue ? "queued" : initialStatus === "contacted" ? "contacted" : "new",
+    expiresAt: shouldDistribute && !shouldQueue ? now + RESPONSE_WINDOW_MS : null,
+    status: shouldQueue ? "queued" : initialStatus,
     passCount: initialPassCount,
     responseMs: initialStatus === "contacted" ? 0 : null,
     contactedAt: initialStatus === "contacted" ? now : null,
@@ -1842,7 +1892,7 @@ async function deleteAgentFromSheet(agent) {
 function recalculateLeadHandledCounts() {
   const handledCounts = new Map();
   state.leads.forEach((lead) => {
-    if (lead.status !== "contacted" || !lead.assignedAgentId) return;
+    if (isActiveLeadStatus(lead.status) || !lead.assignedAgentId) return;
     handledCounts.set(lead.assignedAgentId, (handledCounts.get(lead.assignedAgentId) || 0) + 1);
   });
 
@@ -2180,7 +2230,7 @@ function getVisibleActiveLead() {
 }
 
 function canViewLeadPhone(lead) {
-  if (lead.status !== "contacted") return false;
+  if (isActiveLeadStatus(lead.status)) return false;
   return isAdmin() || lead.assignedAgentId === state.currentUserId;
 }
 
@@ -2331,6 +2381,7 @@ function renderLeadsTable() {
         String(lead.email || "").toLowerCase().includes(search) ||
         String(lead.project || "").toLowerCase().includes(search) ||
         String(lead.source || "").toLowerCase().includes(search) ||
+        formatSheetStatus(getLeadVisualStatus(lead)).toLowerCase().includes(search) ||
         String(lead.notes || "").toLowerCase().includes(search);
       const visualStatus = getLeadVisualStatus(lead);
       return matchesSearch && (filter === "all" || visualStatus === filter);
@@ -2344,7 +2395,7 @@ function renderLeadsTable() {
     ? rows
         .map((lead) => {
           const visualStatus = getLeadVisualStatus(lead);
-          const statusLabel = formatSheetStatus(visualStatus);
+          const statusOptions = renderLeadStatusOptions(visualStatus);
           const contactedTime = lead.contactedAt ? `<small>Dihubungi ${formatDateTime(lead.contactedAt)}</small>` : "";
           const whatsappUrl = canViewLeadPhone(lead) ? whatsappLeadUrl(lead.phone) : "";
           const whatsappButton = whatsappUrl
@@ -2380,7 +2431,15 @@ function renderLeadsTable() {
               </td>
               <td data-label="Ejen">${escapeHtml(assignedAgentLabel)}</td>
               <td data-label="Masa"><strong>Tarikh ${formatDateTime(lead.createdAt || lead.receivedAt)}</strong>${activeTime}${contactedTime}</td>
-              <td data-label="Status"><span class="status-badge ${visualStatus}">${statusLabel}</span></td>
+              <td data-label="Status">
+                <select
+                  class="lead-status-select ${visualStatus}"
+                  data-lead-status="${lead.id}"
+                  aria-label="Status ${escapeHtml(lead.name)}"
+                >
+                  ${statusOptions}
+                </select>
+              </td>
               <td class="lead-note-cell" data-label="Nota">
                 <textarea
                   class="lead-note-field"
@@ -2895,6 +2954,47 @@ async function saveLeadNote(leadId, button = null) {
   }
 }
 
+async function updateLeadStatusFromLog(leadId, nextStatus, field = null) {
+  const lead = state.leads.find((item) => item.id === leadId);
+  if (!lead) return;
+
+  const normalizedStatus = normalizeSheetStatus(nextStatus);
+  if (getLeadVisualStatus(lead) === normalizedStatus) return;
+
+  const previousLead = { ...lead };
+  if (field) {
+    field.disabled = true;
+    field.classList.add("is-saving");
+  }
+
+  try {
+    applySheetStatusToLead(lead, normalizedStatus);
+    activateQueuedLeads({ notify: true });
+    await persistLead(lead);
+    saveState();
+    renderAll();
+
+    const statusSynced = await updateLeadStatusInSheet(lead, normalizedStatus);
+    await updateLeadRuntimeInSheet(lead);
+    await syncLeadHandledCountsToSheet();
+    if (!statusSynced) throw new Error("Status tidak dapat disimpan ke Google Sheet.");
+
+    showToast("Status dikemas kini", `${lead.name} kini ${formatSheetStatus(normalizedStatus)}.`);
+  } catch (error) {
+    Object.assign(lead, previousLead);
+    saveState();
+    renderAll();
+    console.error(error);
+    showToast("Status gagal disimpan", error?.message || "Semak sambungan Google Sheet dan cuba lagi.", "error");
+  } finally {
+    if (field) {
+      field.disabled = false;
+      field.classList.remove("is-saving");
+      field.value = getLeadVisualStatus(lead);
+    }
+  }
+}
+
 async function deleteLeadEverywhere(leadId) {
   if (!isAdmin()) {
     showToast("Admin sahaja", "Hanya admin boleh padam lead daripada dashboard.", "error");
@@ -3110,6 +3210,10 @@ elements.leadsTableBody.addEventListener("click", (event) => {
   if (edit) openContactModal(edit.dataset.leadEdit);
   if (remove && isAdmin()) deleteLeadEverywhere(remove.dataset.leadDelete);
   if (saveNote) saveLeadNote(saveNote.dataset.leadNoteSave, saveNote);
+});
+elements.leadsTableBody.addEventListener("change", (event) => {
+  const statusField = event.target.closest("[data-lead-status]");
+  if (statusField) updateLeadStatusFromLog(statusField.dataset.leadStatus, statusField.value, statusField);
 });
 elements.manualLeadForm.addEventListener("submit", addManualLead);
 elements.manualLeadPhone.addEventListener("input", () => {

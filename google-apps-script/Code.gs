@@ -424,11 +424,34 @@ function normalizeAgentActive_(value) {
 
 function normalizeLeadStage_(value) {
   const status = String(value || "").trim().toLowerCase();
-  if (["done", "completed", "complete", "contacted", "called", "call", "dihubungi", "telah dihubungi"].includes(status)) {
+  const compactStatus = status.replace(/[\s_-]+/g, " ");
+  if (["done", "completed", "complete", "contacted", "called", "call", "dihubungi", "telah dihubungi"].includes(compactStatus)) {
     return "contacted";
   }
-  if (["passed", "pass", "expired", "missed", "tamat", "terlepas", "dipindahkan"].includes(status)) {
+  if (["passed", "pass", "expired", "missed", "tamat", "terlepas", "dipindahkan"].includes(compactStatus)) {
     return "passed";
+  }
+  if (["rejected", "reject", "tolak", "ditolak", "tak berminat", "tidak berminat"].includes(compactStatus)) {
+    return "rejected";
+  }
+  if (
+    [
+      "need follow up",
+      "follow up",
+      "followup",
+      "follow",
+      "perlu follow up",
+      "perlu followup",
+      "susulan",
+    ].includes(compactStatus)
+  ) {
+    return "need_follow_up";
+  }
+  if (["potential", "potensi", "prospect", "prospek", "hot lead"].includes(compactStatus)) {
+    return "potential";
+  }
+  if (["client", "customer", "pelanggan", "buyer", "pembeli"].includes(compactStatus)) {
+    return "client";
   }
   return "new";
 }
@@ -437,6 +460,10 @@ function canonicalSheetStatus_(value) {
   const stage = normalizeLeadStage_(value);
   if (stage === "contacted") return "Contacted";
   if (stage === "passed") return "Passed";
+  if (stage === "rejected") return "Rejected";
+  if (stage === "need_follow_up") return "Need Follow Up";
+  if (stage === "potential") return "Potential";
+  if (stage === "client") return "Client";
   return "New";
 }
 
