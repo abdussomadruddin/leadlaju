@@ -15,11 +15,74 @@ Deno.serve(async (request) => {
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const authorization = request.headers.get("Authorization") || "";
+    const payload = await request.json();
 
     const callerClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authorization } },
     });
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
+
+    if (payload.action === "signup_request") {
+      if (!payload.email || !payload.password || !payload.name) {
+        throw new Error("Nama, emel dan kata laluan diperlukan.");
+      }
+
+      const email = String(payload.email).trim().toLowerCase();
+      const password = String(payload.password);
+      const name = String(payload.name).trim();
+      const phone = String(payload.phone || "").trim();
+      if (password.length < 8) {
+        throw new Error("Kata laluan minimum 8 aksara diperlukan.");
+      }
+
+      const { data: existingProfile } = await adminClient
+        .from("profiles")
+        .select("id, active")
+        .eq("email", email)
+        .maybeSingle();
+
+      if (existingProfile?.active) {
+        throw new Error("Emel ini sudah aktif dalam sistem. Sila log masuk.");
+      }
+
+      if (existingProfile?.id) {
+        const { error: updateUserError } = await adminClient.auth.admin.updateUserById(existingProfile.id, {
+          password,
+          email_confirm: true,
+          user_metadata: { name, phone, role: "agent" },
+        });
+        if (updateUserError) throw updateUserError;
+
+        await adminClient.from("profiles").update({
+          name,
+          phone,
+          role: "agent",
+          active: false,
+        }).eq("id", existingProfile.id);
+
+        return Response.json({ ok: true, pending: true, userId: existingProfile.id }, { headers: corsHeaders });
+      }
+
+      const { data, error } = await adminClient.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: { name, phone, role: "agent" },
+      });
+      if (error) throw error;
+
+      await adminClient.from("profiles").upsert({
+        id: data.user.id,
+        name,
+        phone,
+        email,
+        role: "agent",
+        active: false,
+      });
+
+      return Response.json({ ok: true, pending: true, userId: data.user.id }, { headers: corsHeaders });
+    }
+
     const {
       data: { user },
       error: userError,
@@ -35,7 +98,6 @@ Deno.serve(async (request) => {
       throw new Error("Hanya admin aktif boleh mengurus akaun ejen.");
     }
 
-    const payload = await request.json();
     if (payload.action === "create") {
       if (!payload.email || !payload.password || !payload.name) {
         throw new Error("Nama, emel dan kata laluan diperlukan.");
@@ -62,6 +124,21 @@ Deno.serve(async (request) => {
         role: "agent",
         active: shouldActivate,
       });
+    } else if (payload.action === "approve") {
+      if (!payload.userId) {
+        throw new Error("User ID diperlukan untuk approve ejen.");
+      }
+      const { error: updateUserError } = await adminClient.auth.admin.updateUserById(payload.userId, {
+        email_confirm: true,
+      });
+      if (updateUserError) throw updateUserError;
+
+      const { error: profileUpdateError } = await adminClient
+        .from("profiles")
+        .update({ active: true })
+        .eq("id", payload.userId)
+        .eq("role", "agent");
+      if (profileUpdateError) throw profileUpdateError;
     } else if (payload.action === "update_password") {
       if (!payload.userId || String(payload.password || "").length < 8) {
         throw new Error("User ID dan kata laluan minimum 8 aksara diperlukan.");

@@ -633,22 +633,19 @@ async function handleAgentSignup(event) {
   }
 
   if (supabaseClient) {
-    const { error } = await supabaseClient.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          name,
-          phone,
-          role: "agent",
-        },
+    const { data, error } = await supabaseClient.functions.invoke("admin-manage-agent", {
+      body: {
+        action: "signup_request",
+        name,
+        phone,
+        email,
+        password,
       },
     });
-    if (error) {
-      setSignupError(error.message || "Permohonan tidak dapat dihantar.");
+    if (error || !data?.ok) {
+      setSignupError(data?.error || error?.message || "Permohonan tidak dapat dihantar.");
       return;
     }
-    await supabaseClient.auth.signOut();
   } else {
     state.agents.push({
       id: makeId("agent"),
@@ -666,7 +663,7 @@ async function handleAgentSignup(event) {
 
   elements.signupForm.reset();
   showSignupForm(false);
-  setLoginError("Permohonan dihantar. Semak emel untuk pengesahan dan tunggu admin approve sebelum log masuk.");
+  setLoginError("Permohonan dihantar. Tunggu admin approve, kemudian log masuk guna emel dan kata laluan ini.");
 }
 
 async function logout() {
@@ -2306,21 +2303,32 @@ async function approveAgent(agentId) {
   agent.active = true;
   saveState();
   try {
-    await persistProfile(agent);
+    if (supabaseMode) {
+      const { data, error } = await supabaseClient.functions.invoke("admin-manage-agent", {
+        body: { action: "approve", userId: agentId },
+      });
+      if (error || !data?.ok) {
+        throw new Error(data?.error || error?.message || "Akaun ejen tidak dapat diapprove.");
+      }
+      await loadRemoteState(state.currentUserId);
+    } else {
+      await persistProfile(agent);
+    }
   } catch (error) {
     agent.active = false;
     saveState();
     console.error(error);
-    showToast("Approval gagal", "Semak sambungan dan polisi Supabase.", "error");
+    showToast("Approval gagal", error.message || "Semak sambungan dan polisi Supabase.", "error");
     renderAll();
     return;
   }
-  const agentsPushed = await upsertAgentToSheet(agent);
+  const approvedAgent = getAgent(agentId) || agent;
+  const agentsPushed = await upsertAgentToSheet(approvedAgent);
   showToast(
     agentsPushed ? "Ejen approved" : "Ejen approved",
     agentsPushed
-      ? `${agent.name} kini aktif dan telah dimasukkan ke Google Sheet.`
-      : `${agent.name} kini aktif. Google Sheet belum dapat dikemas kini.`,
+      ? `${approvedAgent.name} kini aktif dan telah dimasukkan ke Google Sheet.`
+      : `${approvedAgent.name} kini aktif. Google Sheet belum dapat dikemas kini.`,
     agentsPushed ? "success" : "error",
   );
   renderAll();
