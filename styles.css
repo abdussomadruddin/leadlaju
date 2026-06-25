@@ -46,6 +46,10 @@ body {
   touch-action: manipulation;
 }
 
+body.authenticated {
+  overflow-x: hidden;
+}
+
 body.auth-pending .login-screen,
 body.auth-pending .app-shell,
 body.authenticated .login-screen,
@@ -461,6 +465,7 @@ svg {
 
 .app-shell {
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .sidebar {
@@ -2349,6 +2354,7 @@ td small {
   }
 
   .sidebar {
+    padding-top: calc(27px + env(safe-area-inset-top, 0px));
     transform: translateX(-100%);
     transition: transform 180ms ease;
   }
@@ -2360,6 +2366,7 @@ td small {
 
   .main-content {
     margin-left: 0;
+    padding-top: calc(84px + env(safe-area-inset-top, 0px));
   }
 
   .mobile-menu {
@@ -2372,6 +2379,12 @@ td small {
   }
 
   .topbar {
+    position: fixed;
+    right: 0;
+    left: 0;
+    top: 0;
+    min-height: calc(84px + env(safe-area-inset-top, 0px));
+    padding-top: calc(14px + env(safe-area-inset-top, 0px));
     padding-inline: 19px;
   }
 
@@ -2382,7 +2395,13 @@ td small {
 
 @media (max-width: 650px) {
   .topbar {
-    min-height: 71px;
+    min-height: calc(71px + env(safe-area-inset-top, 0px));
+    padding-top: calc(12px + env(safe-area-inset-top, 0px));
+    padding-bottom: 12px;
+  }
+
+  .main-content {
+    padding-top: calc(71px + env(safe-area-inset-top, 0px));
   }
 
   .page-title p,

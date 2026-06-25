@@ -874,7 +874,11 @@ async function registerServiceWorker() {
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
       .register("/sw.js")
-      .then((registration) => navigator.serviceWorker.ready.then(() => registration))
+      .then(async (registration) => {
+        await registration.update().catch(() => {});
+        if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
+        return navigator.serviceWorker.ready.then(() => registration);
+      })
       .catch((error) => {
         console.warn("Service worker registration failed", error);
         serviceWorkerRegistrationPromise = null;

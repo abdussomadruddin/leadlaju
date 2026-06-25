@@ -1,9 +1,9 @@
-const CACHE_NAME = "leadlaju-pwa-v20260625-mobile-lead-log-whatsapp-v2";
+const CACHE_NAME = "leadlaju-pwa-v20260625-mobile-safe-topbar-v3";
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20260625-mobile-lead-log-whatsapp-v2",
-  "/app.js?v=20260625-mobile-lead-log-whatsapp-v2",
+  "/styles.css?v=20260625-mobile-safe-topbar-v3",
+  "/app.js?v=20260625-mobile-safe-topbar-v3",
   "/manifest.webmanifest?v=20260625-pwa-notifications",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",
@@ -84,6 +84,10 @@ async function showLeadNotification(payload = {}) {
 }
 
 self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") {
+    event.waitUntil(self.skipWaiting());
+    return;
+  }
   if (event.data?.type === "LEAD_NOTIFICATION") {
     event.waitUntil(showLeadNotification(event.data.payload));
   }
