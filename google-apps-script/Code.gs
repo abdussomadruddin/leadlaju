@@ -15,6 +15,13 @@ const FIELD_ALIASES = {
   project: ["projek", "project", "nama projek", "project name", "project_name", "campaign", "campaign name"],
   status: ["status"],
   source: ["source", "sumber", "platform"],
+  assignedAgentId: ["assigned agent id", "assigned_agent_id", "agent id", "agent_id", "id ejen"],
+  assignedAgentEmail: ["assigned agent email", "assigned_agent_email", "agent email", "email ejen"],
+  assignedAgentName: ["assigned agent name", "assigned_agent_name", "agent name", "nama ejen"],
+  receivedAt: ["received at", "received_at", "assigned at", "assigned_at", "masa aktif"],
+  expiresAt: ["expires at", "expires_at", "tamat pada", "masa tamat"],
+  queueState: ["queue state", "queue_state", "runtime state", "runtime_state"],
+  passCount: ["pass count", "pass_count", "rotation count", "rotation_count"],
 };
 
 const REQUIRED_HEADERS = [
@@ -27,6 +34,13 @@ const REQUIRED_HEADERS = [
   { field: "status", label: "Status" },
   { field: "source", label: "Sumber" },
   { field: "id", label: "ID" },
+  { field: "assignedAgentId", label: "Assigned Agent ID" },
+  { field: "assignedAgentEmail", label: "Assigned Agent Email" },
+  { field: "assignedAgentName", label: "Assigned Agent Name" },
+  { field: "receivedAt", label: "Received At" },
+  { field: "expiresAt", label: "Expires At" },
+  { field: "queueState", label: "Queue State" },
+  { field: "passCount", label: "Pass Count" },
 ];
 
 const AGENT_FIELD_ALIASES = {
@@ -88,6 +102,9 @@ function doPost(event) {
     }
     if (payload.action === "update_lead_status") {
       return jsonResponse(updateLeadStatus_(payload.lead || payload));
+    }
+    if (payload.action === "update_lead_runtime") {
+      return jsonResponse(updateLeadRuntime_(payload.lead || payload));
     }
     if (payload.action === "add_agent") {
       return jsonResponse(upsertAgent_(payload.agent || payload));
@@ -211,6 +228,46 @@ function updateLeadStatus_(input) {
   }
 
   return { ok: true, updated, status };
+}
+
+function updateLeadRuntime_(input) {
+  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
+  const headers = ensureRequiredHeaders_(sheet);
+  const values = sheet.getDataRange().getDisplayValues();
+  if (values.length < 2) return { ok: true, updated: 0 };
+
+  const id = String(input.id || input.lead_id || "").trim();
+  const phone = String(input.phone || input.phone_number || "").trim();
+  const project = String(input.project || input.projek || "").trim();
+  const idIndex = headers.findIndex((header) => FIELD_ALIASES.id.includes(header));
+  const phoneIndex = headers.findIndex((header) => FIELD_ALIASES.phone.includes(header));
+  const projectIndex = headers.findIndex((header) => FIELD_ALIASES.project.includes(header));
+
+  let updated = 0;
+  for (let rowNumber = 2; rowNumber <= values.length; rowNumber += 1) {
+    const row = values[rowNumber - 1];
+    const rowId = idIndex >= 0 ? String(row[idIndex] || "").trim() : "";
+    const rowPhone = phoneIndex >= 0 ? String(row[phoneIndex] || "").trim() : "";
+    const rowProject = projectIndex >= 0 ? String(row[projectIndex] || "").trim() : "";
+    const idMatches = id && rowId === id;
+    const fallbackMatches = phone && project && rowPhone === phone && rowProject === project;
+
+    if (idMatches || fallbackMatches) {
+      const nextRow = row.slice(0, headers.length);
+      setRowValue_(headers, nextRow, "assignedAgentId", String(input.assigned_agent_id || input.assignedAgentId || "").trim());
+      setRowValue_(headers, nextRow, "assignedAgentEmail", String(input.assigned_agent_email || input.assignedAgentEmail || "").trim());
+      setRowValue_(headers, nextRow, "assignedAgentName", String(input.assigned_agent_name || input.assignedAgentName || "").trim());
+      setRowValue_(headers, nextRow, "receivedAt", input.received_at || input.receivedAt ? canonicalLeadTimestamp_(input.received_at || input.receivedAt) : "");
+      setRowValue_(headers, nextRow, "expiresAt", input.expires_at || input.expiresAt ? canonicalLeadTimestamp_(input.expires_at || input.expiresAt) : "");
+      setRowValue_(headers, nextRow, "queueState", String(input.queue_state || input.queueState || "").trim());
+      setRowValue_(headers, nextRow, "passCount", String(input.pass_count ?? input.passCount ?? 0).trim());
+      sheet.getRange(rowNumber, 1, 1, nextRow.length).setValues([nextRow]);
+      updated += 1;
+    }
+  }
+
+  return { ok: true, updated };
 }
 
 function replaceAgents_(agentsInput) {
@@ -498,6 +555,8 @@ function readLeads_(sheet) {
 }
 
 function mapRow_(headers, row, rowNumber) {
+  const receivedAt = getCell_(headers, row, "receivedAt");
+  const expiresAt = getCell_(headers, row, "expiresAt");
   const lead = {
     id: getCell_(headers, row, "id") || `${SHEET_NAME}-${rowNumber}`,
     name: getCell_(headers, row, "name"),
@@ -508,6 +567,13 @@ function mapRow_(headers, row, rowNumber) {
     source: canonicalLeadSource_(getCell_(headers, row, "source") || DEFAULT_SOURCE),
     status: getCell_(headers, row, "status") || "new",
     created_at: canonicalLeadTimestamp_(getCell_(headers, row, "createdAt")),
+    assigned_agent_id: getCell_(headers, row, "assignedAgentId"),
+    assigned_agent_email: getCell_(headers, row, "assignedAgentEmail"),
+    assigned_agent_name: getCell_(headers, row, "assignedAgentName"),
+    received_at: receivedAt ? canonicalLeadTimestamp_(receivedAt) : "",
+    expires_at: expiresAt ? canonicalLeadTimestamp_(expiresAt) : "",
+    queue_state: getCell_(headers, row, "queueState"),
+    pass_count: getCell_(headers, row, "passCount"),
   };
 
   return lead;

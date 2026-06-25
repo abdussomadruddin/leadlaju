@@ -491,6 +491,9 @@ function startAuthenticatedApp(user) {
   markCurrentLeadNotificationsSeen();
   scheduleSync();
   renderAll();
+  if (state.integration.endpoint) {
+    syncGoogleSheet({ silent: true, notifyNewLeads: true });
+  }
 }
 
 function showLogin() {
@@ -1201,6 +1204,7 @@ function activateQueuedLeads(options = {}) {
     if (!agent) break;
 
     addActivity("new", queuedLead, `${queuedLead.project} diberikan kepada ${agent.name}`);
+    syncLeadRuntimeInSheet(queuedLead);
     if (options.notify && shouldNotifyForLead(queuedLead)) {
       sendSystemNotification(queuedLead);
     }
@@ -1316,6 +1320,78 @@ function normalizeAgentRole(value) {
   return String(value || "").trim().toLowerCase() === "admin" ? "admin" : "agent";
 }
 
+function pickInputValue(input, keys) {
+  for (const key of keys) {
+    if (input?.[key] !== undefined && input[key] !== null && String(input[key]).trim() !== "") {
+      return input[key];
+    }
+  }
+  return "";
+}
+
+function readLeadRuntimeFromSheet(input) {
+  const assignedAgentId = String(
+    pickInputValue(input, ["assigned_agent_id", "assignedAgentId", "assigned_agent", "agent_id"]),
+  ).trim();
+  const queueState = String(
+    pickInputValue(input, ["queue_state", "queueState", "runtime_state", "runtimeState"]),
+  )
+    .trim()
+    .toLowerCase();
+  const receivedRaw = pickInputValue(input, ["received_at", "receivedAt", "assigned_at", "assignedAt"]);
+  const expiresRaw = pickInputValue(input, ["expires_at", "expiresAt"]);
+  const passCountRaw = pickInputValue(input, ["pass_count", "passCount", "rotation_count", "rotationCount"]);
+  const hasRuntime = Boolean(assignedAgentId || queueState || receivedRaw || expiresRaw || passCountRaw);
+
+  return {
+    hasRuntime,
+    assignedAgentId,
+    queueState,
+    receivedAt: receivedRaw ? parseLeadTimestamp(receivedRaw, null) : null,
+    expiresAt: expiresRaw ? parseLeadTimestamp(expiresRaw, null) : null,
+    passCount: passCountRaw === "" ? null : Number(passCountRaw) || 0,
+  };
+}
+
+function applyLeadRuntimeFromSheet(lead, runtime, now = Date.now()) {
+  if (!runtime?.hasRuntime || lead.status === "contacted") return false;
+
+  const before = JSON.stringify({
+    status: lead.status,
+    assignedAgentId: lead.assignedAgentId,
+    receivedAt: lead.receivedAt,
+    expiresAt: lead.expiresAt,
+    queuedAt: lead.queuedAt,
+    passCount: lead.passCount,
+  });
+
+  if (runtime.queueState === "queued") {
+    queueLead(lead, runtime.receivedAt || lead.queuedAt || now, {
+      resetPassCount: false,
+      previousAgentId: lead.lastAgentId || lead.assignedAgentId || null,
+    });
+    if (runtime.passCount !== null) lead.passCount = runtime.passCount;
+  } else if (runtime.assignedAgentId) {
+    lead.status = "new";
+    lead.assignedAgentId = runtime.assignedAgentId;
+    lead.receivedAt = runtime.receivedAt || lead.receivedAt || now;
+    lead.expiresAt = runtime.expiresAt || lead.expiresAt || lead.receivedAt + RESPONSE_WINDOW_MS;
+    lead.queuedAt = null;
+    lead.lastAgentId = null;
+    if (runtime.passCount !== null) lead.passCount = runtime.passCount;
+  }
+
+  const after = JSON.stringify({
+    status: lead.status,
+    assignedAgentId: lead.assignedAgentId,
+    receivedAt: lead.receivedAt,
+    expiresAt: lead.expiresAt,
+    queuedAt: lead.queuedAt,
+    passCount: lead.passCount,
+  });
+  return before !== after;
+}
+
 function normalizeSheetAgent(input) {
   if (!input) return null;
   const email = String(input.email || input.emel || input.email_address || "").trim().toLowerCase();
@@ -1368,6 +1444,7 @@ async function addLead(input, options = {}) {
   const source = normalizeLeadSource(input.source || input.sumber || input.platform, options.source || "Manual Lead");
   const createdAtValue = input.created_at || input.createdAt;
   const parsedCreatedAt = parseLeadTimestamp(createdAtValue, existingLead?.createdAt || Date.now());
+  const sheetRuntime = readLeadRuntimeFromSheet(input);
 
   if (existingLead) {
     if (!options.updateExisting) return false;
@@ -1382,6 +1459,7 @@ async function addLead(input, options = {}) {
     });
 
     if (applySheetStatusToLead(existingLead, input.status)) changed = true;
+    if (applyLeadRuntimeFromSheet(existingLead, sheetRuntime)) changed = true;
 
     if (!changed) return false;
     saveState();
@@ -1398,9 +1476,12 @@ async function addLead(input, options = {}) {
   const initialStatus = normalizeSheetStatus(input.status);
   const now = Date.now();
   if (options.queueIfBlocked) activateQueuedLeads({ now, notify: options.notify });
+  const hasSheetAssignment = Boolean(sheetRuntime.assignedAgentId || sheetRuntime.queueState === "queued");
   const assignedAgent =
-    initialStatus === "contacted" ? null : selectNextAvailableAgent();
-  const shouldQueue = options.queueIfBlocked && initialStatus === "new" && !assignedAgent;
+    initialStatus === "contacted" || hasSheetAssignment ? null : selectNextAvailableAgent();
+  const shouldQueue =
+    sheetRuntime.queueState === "queued" ||
+    (options.queueIfBlocked && initialStatus === "new" && !assignedAgent && !sheetRuntime.assignedAgentId);
   if (!assignedAgent && !shouldQueue && initialStatus !== "contacted") {
     showToast("Tiada ejen aktif", "Aktifkan sekurang-kurangnya seorang ejen dahulu.", "error");
     return false;
@@ -1426,6 +1507,7 @@ async function addLead(input, options = {}) {
     queuedAt: shouldQueue ? now : null,
     notes: "",
   };
+  applyLeadRuntimeFromSheet(lead, sheetRuntime, now);
 
   state.leads.unshift(lead);
   saveState();
@@ -1438,6 +1520,7 @@ async function addLead(input, options = {}) {
     console.error(error);
     return false;
   }
+  syncLeadRuntimeInSheet(lead);
   if (shouldQueue) {
     addActivity("new", lead, `${lead.project} disimpan dalam queue menunggu lead aktif selesai`);
   } else {
@@ -1668,6 +1751,38 @@ async function updateLeadStatusInSheet(lead, status) {
   );
 }
 
+function leadRuntimePayload(lead) {
+  const assignedAgent = getAgent(lead.assignedAgentId);
+  return {
+    id: lead.dedupeKey || lead.id,
+    phone: lead.phone,
+    project: lead.project,
+    name: lead.name,
+    assigned_agent_id: lead.assignedAgentId || "",
+    assigned_agent_email: assignedAgent?.email || "",
+    assigned_agent_name: assignedAgent?.name || "",
+    received_at: lead.receivedAt ? formatSheetTimestamp(lead.receivedAt) : "",
+    expires_at: lead.expiresAt ? formatSheetTimestamp(lead.expiresAt) : "",
+    queue_state: lead.status === "queued" ? "queued" : lead.status === "new" ? "active" : lead.status || "",
+    pass_count: lead.passCount || 0,
+  };
+}
+
+async function updateLeadRuntimeInSheet(lead) {
+  if (!lead) return false;
+  return postGoogleSheetAction(
+    {
+      action: "update_lead_runtime",
+      lead: leadRuntimePayload(lead),
+    },
+    "Lead sheet runtime update failed",
+  );
+}
+
+function syncLeadRuntimeInSheet(lead) {
+  updateLeadRuntimeInSheet(lead).catch((error) => console.error("Lead runtime sync failed", error));
+}
+
 function agentSheetPayload(agent) {
   return {
     id: agent.id,
@@ -1740,10 +1855,6 @@ async function syncLeadHandledCountsToSheet() {
 async function syncAgentsFromSheet(sheetAgentRows) {
   const result = { added: 0, updated: 0, removed: 0, backfilled: 0, skipped: 0 };
   if (!Array.isArray(sheetAgentRows)) return result;
-  if (!isAdmin()) {
-    result.skipped += sheetAgentRows.length;
-    return result;
-  }
 
   const sheetAgents = sheetAgentRows.map(normalizeSheetAgent).filter(Boolean);
   if (!sheetAgents.length) {
@@ -1803,17 +1914,19 @@ async function syncAgentsFromSheet(sheetAgentRows) {
     result.backfilled += sheetAgent.id && sheetAgent.password ? 0 : 1;
   }
 
-  const removedAgents = state.agents.filter(
-    (agent) =>
-      agent.role === "agent" &&
-      agent.active &&
-      agent.id !== state.currentUserId &&
-      !sheetEmails.has(String(agent.email || "").toLowerCase()),
-  );
+  if (isAdmin()) {
+    const removedAgents = state.agents.filter(
+      (agent) =>
+        agent.role === "agent" &&
+        agent.active &&
+        agent.id !== state.currentUserId &&
+        !sheetEmails.has(String(agent.email || "").toLowerCase()),
+    );
 
-  for (const agent of removedAgents) {
-    state.agents = state.agents.filter((item) => item.id !== agent.id);
-    result.removed += 1;
+    for (const agent of removedAgents) {
+      state.agents = state.agents.filter((item) => item.id !== agent.id);
+      result.removed += 1;
+    }
   }
 
   saveState();
@@ -1831,7 +1944,7 @@ async function syncAgentsFromSheet(sheetAgentRows) {
     }
   }
 
-  if (result.backfilled) {
+  if (isAdmin() && result.backfilled) {
     for (const sheetAgent of sheetAgents) {
       const savedAgent = state.agents.find((agent) => agent.email?.toLowerCase() === sheetAgent.email);
       if (savedAgent) await upsertAgentToSheet(savedAgent);
@@ -1931,6 +2044,7 @@ async function processExpiredLeads() {
       `Masa ${previousAgent?.name || "ejen"} tamat, ${lead.project} masuk queue semula`,
     );
     updateLeadStatusInSheet(lead, "New");
+    syncLeadRuntimeInSheet(lead);
     changed = true;
   });
 
@@ -2014,6 +2128,7 @@ async function handleCall(leadId) {
     const agent = getAgent((claimedLead || lead).assignedAgentId);
     saveState();
     await updateLeadStatusInSheet(claimedLead || lead, "Contacted");
+    await updateLeadRuntimeInSheet(claimedLead || lead);
     if (agent) await upsertAgentToSheet(agent);
     activateQueuedLeads({ notify: true });
     saveState();
@@ -2818,6 +2933,15 @@ async function syncGoogleSheet(options = {}) {
     if (!Array.isArray(rows)) throw new Error("Format JSON tidak sah");
 
     const agentSync = Array.isArray(payload) ? { added: 0, updated: 0, removed: 0 } : await syncAgentsFromSheet(payload.agents);
+    if (options.agentsOnly) {
+      state.integration.endpoint = endpoint;
+      state.integration.interval = Number(elements.pollInterval.value) || state.integration.interval || 15;
+      state.integration.connected = true;
+      state.integration.lastSyncAt = Date.now();
+      saveState();
+      return true;
+    }
+
     const shouldNotifyNewLeads = options.notifyNewLeads ?? Boolean(state.integration.lastSyncAt);
     let added = 0;
     let updated = 0;
@@ -2913,7 +3037,7 @@ async function syncGoogleSheet(options = {}) {
 
 function scheduleSync() {
   window.clearInterval(syncTimer);
-  if (!state.integration.endpoint || !isAdmin()) return;
+  if (!state.integration.endpoint) return;
   syncTimer = window.setInterval(
     () => syncGoogleSheet({ silent: true }),
     Math.max(15, Number(state.integration.interval) || 15) * 1000,
@@ -3064,6 +3188,9 @@ document.addEventListener("keydown", (event) => {
 async function bootstrap() {
   saveState();
   initRemoteDatabase();
+  if (state.integration.endpoint) {
+    await syncGoogleSheet({ silent: true, agentsOnly: true });
+  }
 
   const sessionUser = getSessionUser();
   if (sessionUser) {
