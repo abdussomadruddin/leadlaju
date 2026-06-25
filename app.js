@@ -823,6 +823,29 @@ function saveNotifiedLeadKeys() {
   localStorage.setItem(NOTIFIED_LEADS_KEY, JSON.stringify(compacted));
 }
 
+function lockViewportZoom() {
+  let lastTouchEnd = 0;
+  document.addEventListener(
+    "touchmove",
+    (event) => {
+      if (event.touches?.length > 1) event.preventDefault();
+    },
+    { passive: false },
+  );
+  document.addEventListener(
+    "touchend",
+    (event) => {
+      const now = Date.now();
+      if (now - lastTouchEnd <= 300) event.preventDefault();
+      lastTouchEnd = now;
+    },
+    { passive: false },
+  );
+  ["gesturestart", "gesturechange"].forEach((eventName) => {
+    document.addEventListener(eventName, (event) => event.preventDefault(), { passive: false });
+  });
+}
+
 function leadNotificationKey(lead) {
   return [lead.id || lead.dedupeKey, lead.assignedAgentId || "unassigned", lead.passCount || 0, lead.status].join(":");
 }
@@ -938,6 +961,11 @@ function selectNextAgent(excludeId = null) {
 
 function normalizePhone(value) {
   return String(value || "").replace(/[^\d+]/g, "");
+}
+
+function whatsappLeadUrl(phone) {
+  const digits = String(phone || "").replace(/\D/g, "");
+  return digits ? `https://wa.me/${digits}` : "";
 }
 
 function normalizeLeadSource(value, fallback = "Google Sheet") {
@@ -1907,28 +1935,32 @@ function renderLeadsTable() {
           const visualStatus = getLeadVisualStatus(lead);
           const statusLabel = formatSheetStatus(visualStatus);
           const contactedTime = lead.contactedAt ? `<small>Dihubungi ${formatDateTime(lead.contactedAt)}</small>` : "";
+          const whatsappUrl = canViewLeadPhone(lead) ? whatsappLeadUrl(lead.phone) : "";
+          const whatsappButton = whatsappUrl
+            ? `<a class="contact-edit-button whatsapp" href="${whatsappUrl}" target="_blank" rel="noopener">WhatsApp</a>`
+            : "";
           const editButton = canViewLeadPhone(lead)
             ? `<button class="contact-edit-button" type="button" data-lead-edit="${lead.id}">Edit</button>`
             : "";
           const deleteButton = isAdmin()
             ? `<button class="contact-edit-button danger" type="button" data-lead-delete="${lead.id}">Padam</button>`
             : "";
-          const actionButtons = [editButton, deleteButton].filter(Boolean).join("");
+          const actionButtons = [whatsappButton, editButton, deleteButton].filter(Boolean).join("");
           return `
             <tr data-lead-row="${lead.id}">
-              <td>
+              <td data-label="Lead">
                 <strong>${escapeHtml(lead.name)}</strong>
                 <small>${escapeHtml(displayLeadPhone(lead))}</small>
                 <small>${canViewLeadPhone(lead) && lead.email ? escapeHtml(lead.email) : "Emel dibuka selepas CALL NOW"}</small>
               </td>
-              <td>
+              <td data-label="Projek / Sumber">
                 <strong>${escapeHtml(lead.project || "Tidak dinyatakan")}</strong>
                 <small>${escapeHtml(lead.source)}</small>
               </td>
-              <td>${escapeHtml(getAgent(lead.assignedAgentId)?.name || "Tiada ejen")}</td>
-              <td><strong>Masuk ${formatDateTime(lead.receivedAt)}</strong>${contactedTime}</td>
-              <td><span class="status-badge ${visualStatus}">${statusLabel}</span></td>
-              <td class="lead-note-cell">
+              <td data-label="Ejen">${escapeHtml(getAgent(lead.assignedAgentId)?.name || "Tiada ejen")}</td>
+              <td data-label="Masa"><strong>Masuk ${formatDateTime(lead.receivedAt)}</strong>${contactedTime}</td>
+              <td data-label="Status"><span class="status-badge ${visualStatus}">${statusLabel}</span></td>
+              <td class="lead-note-cell" data-label="Nota">
                 <textarea
                   class="lead-note-field"
                   data-lead-note="${lead.id}"
@@ -1939,7 +1971,7 @@ function renderLeadsTable() {
                   <button class="lead-note-save" type="button" data-lead-note-save="${lead.id}">Simpan nota</button>
                 </div>
               </td>
-              <td><span class="lead-actions">${actionButtons || "-"}</span></td>
+              <td data-label="Tindakan"><span class="lead-actions">${actionButtons || "-"}</span></td>
             </tr>`;
         })
         .join("")
@@ -2690,4 +2722,5 @@ async function bootstrap() {
   }
 }
 
+lockViewportZoom();
 bootstrap();

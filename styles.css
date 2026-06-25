@@ -33,6 +33,7 @@
 
 html {
   scroll-behavior: smooth;
+  touch-action: manipulation;
 }
 
 body {
@@ -42,6 +43,7 @@ body {
   background: var(--canvas);
   font-family: "DM Sans", sans-serif;
   -webkit-font-smoothing: antialiased;
+  touch-action: manipulation;
 }
 
 body.auth-pending .login-screen,
@@ -2085,7 +2087,10 @@ td small {
 }
 
 .contact-edit-button {
+  display: inline-flex;
   min-height: 30px;
+  align-items: center;
+  justify-content: center;
   padding: 0 11px;
   border: 1px solid #d6e3fb;
   border-radius: 7px;
@@ -2093,6 +2098,7 @@ td small {
   background: var(--blue-soft);
   font-size: 8px;
   font-weight: 800;
+  text-decoration: none;
 }
 
 .contact-edit-button:hover {
@@ -2154,6 +2160,17 @@ td small {
 .lead-note-save:disabled {
   cursor: wait;
   opacity: 0.7;
+}
+
+.contact-edit-button.whatsapp {
+  border-color: #b9eed4;
+  color: #0f7a4d;
+  background: var(--green-soft);
+}
+
+.contact-edit-button.whatsapp:hover {
+  border-color: #8eddb9;
+  background: #dff7eb;
 }
 
 .contact-edit-button.danger {
@@ -2442,6 +2459,95 @@ td small {
   .table-toolbar select {
     min-height: 40px;
   }
+
+  .table-wrap {
+    overflow: visible;
+  }
+
+  .lead-log-table,
+  .lead-log-table tbody,
+  .lead-log-table tr,
+  .lead-log-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .lead-log-table thead {
+    display: none;
+  }
+
+  .lead-log-table {
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  .lead-log-table tbody {
+    display: grid;
+    gap: 12px;
+    padding: 12px;
+    background: #f8fafc;
+  }
+
+  .lead-log-table tr {
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: #fff;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .lead-log-table td {
+    padding: 12px 14px;
+    border-bottom: 1px solid #edf0f4;
+    font-size: 11px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .lead-log-table td:last-child {
+    border-bottom: 0;
+  }
+
+  .lead-log-table td::before {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--ink-500);
+    font-size: 8px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    content: attr(data-label);
+  }
+
+  .lead-log-table td small {
+    font-size: 9px;
+    line-height: 1.4;
+  }
+
+  .lead-note-cell {
+    min-width: 0;
+  }
+
+  .lead-note-field {
+    width: 100%;
+    min-height: 95px;
+    font-size: 11px;
+  }
+
+  .lead-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .lead-actions .contact-edit-button {
+    min-height: 36px;
+    font-size: 9px;
+  }
+
+  .lead-actions .contact-edit-button:only-child,
+  .lead-actions .contact-edit-button:nth-last-child(3):first-child {
+    grid-column: span 2;
+  }
 }
 
 @media (max-width: 420px) {
@@ -2472,5 +2578,19 @@ td small {
   .form-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .lead-log-table tbody {
+    padding: 10px;
+  }
+
+  .lead-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .lead-actions .contact-edit-button,
+  .lead-actions .contact-edit-button:only-child,
+  .lead-actions .contact-edit-button:nth-last-child(3):first-child {
+    grid-column: auto;
   }
 }

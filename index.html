@@ -2,7 +2,10 @@
 <html lang="ms">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
     <meta
       name="description"
       content="LeadLaju membantu pasukan hartanah menerima dan menghubungi lead baru dengan pantas."
@@ -22,9 +25,9 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260625-lead-log-notes" />
+    <link rel="stylesheet" href="styles.css?v=20260625-mobile-lead-log-whatsapp" />
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260625-lead-log-notes" defer></script>
+    <script src="app.js?v=20260625-mobile-lead-log-whatsapp" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -383,7 +386,7 @@
               <span class="queue-label" id="lead-log-count">0 lead</span>
             </div>
             <div class="table-wrap">
-              <table>
+              <table class="lead-log-table">
                 <thead>
                   <tr>
                     <th>Lead</th>
