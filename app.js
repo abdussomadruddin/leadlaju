@@ -143,9 +143,6 @@ const elements = {
   leadSearch: document.querySelector("#lead-search"),
   leadFilter: document.querySelector("#lead-filter"),
   leadLogCount: document.querySelector("#lead-log-count"),
-  contactSearch: document.querySelector("#contact-search"),
-  contactCount: document.querySelector("#contact-count"),
-  contactsTableBody: document.querySelector("#contacts-table-body"),
   contactModal: document.querySelector("#contact-modal"),
   contactForm: document.querySelector("#contact-form"),
   contactName: document.querySelector("#contact-name"),
@@ -1886,47 +1883,6 @@ function renderLeadsTable() {
     : `<tr><td class="table-empty" colspan="7">Tiada lead ditemui.</td></tr>`;
 }
 
-function getContactedLeads() {
-  return state.leads
-    .filter(
-      (lead) =>
-        lead.status === "contacted" &&
-        (isAdmin() || lead.assignedAgentId === state.currentUserId),
-    )
-    .sort((a, b) => (b.contactedAt || 0) - (a.contactedAt || 0));
-}
-
-function renderContacts() {
-  const search = elements.contactSearch.value.trim().toLowerCase();
-  const rows = getContactedLeads().filter((lead) =>
-    [lead.name, lead.phone, lead.email, lead.project]
-      .join(" ")
-      .toLowerCase()
-      .includes(search),
-  );
-  elements.contactCount.textContent = `${rows.length} pelanggan`;
-  elements.contactsTableBody.innerHTML = rows.length
-    ? rows
-        .map(
-          (lead) => `
-            <tr>
-              <td><strong>${escapeHtml(lead.name)}</strong></td>
-              <td><strong>${escapeHtml(lead.phone || "-")}</strong></td>
-              <td>${escapeHtml(lead.email || "-")}</td>
-              <td><strong>${escapeHtml(lead.project || "Tidak dinyatakan")}</strong></td>
-              <td>${lead.contactedAt ? formatDateTime(lead.contactedAt) : "-"}</td>
-              <td>
-                <span class="lead-actions">
-                  <button class="contact-edit-button" type="button" data-contact-edit="${lead.id}">Edit</button>
-                  <button class="contact-edit-button danger" type="button" data-contact-delete="${lead.id}">Padam</button>
-                </span>
-              </td>
-            </tr>`,
-        )
-        .join("")
-    : `<tr><td class="table-empty" colspan="6">Belum ada lead yang dihubungi.</td></tr>`;
-}
-
 function renderAgents() {
   elements.agentsGrid.innerHTML = state.agents
     .map(
@@ -2033,7 +1989,6 @@ function renderAll() {
   renderActivities();
   renderTeam();
   renderLeadsTable();
-  renderContacts();
   renderAgents();
   renderIntegration();
 }
@@ -2574,7 +2529,6 @@ elements.leadsTableBody.addEventListener("click", (event) => {
   if (remove) deleteLeadEverywhere(remove.dataset.leadDelete);
   if (saveNote) saveLeadNote(saveNote.dataset.leadNoteSave, saveNote);
 });
-elements.contactSearch.addEventListener("input", renderContacts);
 elements.manualLeadForm.addEventListener("submit", addManualLead);
 elements.manualLeadPhone.addEventListener("input", () => {
   elements.manualLeadError.textContent = "";
@@ -2625,12 +2579,6 @@ elements.agentsGrid.addEventListener("click", (event) => {
   if (password) openAgentPasswordModal(password.dataset.agentPassword);
 });
 
-elements.contactsTableBody.addEventListener("click", (event) => {
-  const edit = event.target.closest("[data-contact-edit]");
-  const remove = event.target.closest("[data-contact-delete]");
-  if (edit) openContactModal(edit.dataset.contactEdit);
-  if (remove) deleteLeadEverywhere(remove.dataset.contactDelete);
-});
 elements.contactDeleteButton.addEventListener("click", () => {
   const leadId = elements.contactDeleteButton.dataset.contactDelete || selectedContactId;
   if (leadId) deleteLeadEverywhere(leadId);
