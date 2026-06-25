@@ -1550,13 +1550,14 @@ async function syncAgentsFromSheet(sheetAgentRows) {
       if (sheetAgent.password.length >= 8) {
         updates.password = sheetAgent.password;
       }
+      const needsPasswordBackfill = !sheetAgent.password && Boolean(existingAgent.password);
       const changed = Object.entries(updates).some(([key, value]) => existingAgent[key] !== value);
       if (changed) {
         Object.assign(existingAgent, updates);
         await persistProfile(existingAgent);
         result.updated += 1;
       }
-      if (!sheetAgent.id) result.backfilled += 1;
+      if (!sheetAgent.id || needsPasswordBackfill) result.backfilled += 1;
       continue;
     }
 
@@ -1576,7 +1577,7 @@ async function syncAgentsFromSheet(sheetAgentRows) {
       leadsHandled: sheetAgent.leadsHandled,
     });
     result.added += 1;
-    result.backfilled += sheetAgent.id ? 0 : 1;
+    result.backfilled += sheetAgent.id && sheetAgent.password ? 0 : 1;
   }
 
   const removedAgents = state.agents.filter(
