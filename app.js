@@ -256,7 +256,7 @@ function mapLead(row) {
     phone: row.phone || "",
     email: row.email || "",
     project: row.project || "Tidak dinyatakan",
-    source: normalizeLeadSource(row.source || "Google Sheet"),
+    source: normalizeLeadSource(row.source || "Manual Lead"),
     createdAt: new Date(row.created_at).getTime(),
     receivedAt: new Date(row.received_at || row.created_at).getTime(),
     assignedAgentId: row.assigned_agent_id,
@@ -1051,10 +1051,10 @@ function whatsappLeadUrl(phone) {
   return digits ? `https://wa.me/${digits}` : "";
 }
 
-function normalizeLeadSource(value, fallback = "Google Sheet") {
-  const source = String(value || fallback || "Google Sheet").trim();
+function normalizeLeadSource(value, fallback = "Manual Lead") {
+  const source = String(value || fallback || "Manual Lead").trim();
   const lower = source.toLowerCase();
-  if (lower.includes("tiktok")) return "TikTok Ads";
+  if (lower.includes("tiktok")) return "Tiktok Ads";
   if (lower.includes("meta") || lower.includes("facebook") || lower === "fb") return "Meta Ads";
   if (lower.includes("manual")) return "Manual Lead";
   return source || fallback;
@@ -1186,7 +1186,7 @@ async function addLead(input, options = {}) {
 
   const dedupeKey = sheetDedupeKey(input);
   const existingLead = state.leads.find((lead) => lead.dedupeKey === dedupeKey);
-  const source = normalizeLeadSource(input.source || input.sumber || input.platform, options.source || "Google Sheet");
+  const source = normalizeLeadSource(input.source || input.sumber || input.platform, options.source || "Manual Lead");
   const createdAtValue = input.created_at || input.createdAt;
   const parsedCreatedAt = createdAtValue ? new Date(createdAtValue).getTime() : Date.now();
 

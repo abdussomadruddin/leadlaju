@@ -43,7 +43,8 @@ Google Sheet.
 
 1. Pastikan Google Sheet mempunyai tab lead dan tab `Agents`.
 2. Untuk lead, gunakan tajuk `name`, `phone`, `email`, `project`, `source`,
-   `status`, `created_at`, dan `id` pada baris pertama.
+   `status`, `created_at`, dan `id` pada baris pertama. Nilai `source` yang
+   disokong ialah `Manual Lead`, `Tiktok Ads`, dan `Meta Ads`.
 3. Untuk ejen, Apps Script akan sediakan tajuk `ID`, `Nama`, `No Phone`,
    `Emel`, `Role`, `Status`, `Leads Handled`, `Tarikh Daftar`, dan `Password`.
 4. Buka **Extensions > Apps Script** dalam Google Sheet.

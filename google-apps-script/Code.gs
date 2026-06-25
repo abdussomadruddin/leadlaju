@@ -1,7 +1,7 @@
 const SPREADSHEET_ID = "1ySHeB12lL2y4AxqpSx8dDniyujSaz2-9hoRzPlCv6TM";
 const SHEET_NAME = "Sheet1";
 const AGENTS_SHEET_NAME = "Agents";
-const DEFAULT_SOURCE = "Google Sheet";
+const DEFAULT_SOURCE = "Manual Lead";
 const DEFAULT_AGENT_PASSWORD = "Agent123!";
 
 const FIELD_ALIASES = {
@@ -60,6 +60,7 @@ function doGet() {
     const headers = ensureRequiredHeaders_(sheet);
     const agentHeaders = ensureRequiredHeadersBySpec_(agentsSheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
     ensureLeadIds_(sheet, headers);
+    ensureLeadSources_(sheet, headers);
     const leads = readLeads_(sheet);
     const agents = readAgents_(agentsSheet, agentHeaders);
     return jsonResponse({
@@ -118,7 +119,7 @@ function appendLead_(input) {
     city: String(input.city || input.bandar || "").trim(),
     project: String(input.project || input.projek || input.project_name || "Tidak dinyatakan").trim(),
     status: canonicalSheetStatus_(input.status || "new"),
-    source: String(input.source || input.sumber || input.platform || "Manual Lead").trim(),
+    source: canonicalLeadSource_(input.source || input.sumber || input.platform || "Manual Lead"),
   };
 
   if (!lead.name || !lead.phone) {
@@ -380,6 +381,15 @@ function canonicalSheetStatus_(value) {
   return "New";
 }
 
+function canonicalLeadSource_(value) {
+  const source = String(value || DEFAULT_SOURCE).trim();
+  const lower = source.toLowerCase();
+  if (lower.includes("manual")) return "Manual Lead";
+  if (lower.includes("tiktok")) return "Tiktok Ads";
+  if (lower.includes("meta") || lower.includes("facebook") || lower === "fb") return "Meta Ads";
+  return source || DEFAULT_SOURCE;
+}
+
 function authorizeSheetTemplate() {
   return refreshSheetTemplate_();
 }
@@ -415,6 +425,7 @@ function refreshSheetTemplate_() {
   const headers = ensureRequiredHeaders_(sheet);
   ensureRequiredHeadersBySpec_(agentsSheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
   ensureLeadIds_(sheet, headers);
+  ensureLeadSources_(sheet, headers);
   return { ok: true, refreshed_at: new Date().toISOString() };
 }
 
@@ -459,7 +470,7 @@ function mapRow_(headers, row, rowNumber) {
     email: getCell_(headers, row, "email"),
     city: getCell_(headers, row, "city"),
     project: getCell_(headers, row, "project"),
-    source: getCell_(headers, row, "source") || DEFAULT_SOURCE,
+    source: canonicalLeadSource_(getCell_(headers, row, "source") || DEFAULT_SOURCE),
     status: getCell_(headers, row, "status") || "new",
     created_at: getCell_(headers, row, "createdAt"),
   };
@@ -556,6 +567,33 @@ function ensureLeadIds_(sheet, headers) {
 
   if (changed) {
     sheet.getRange(2, idIndex + 1, ids.length, 1).setValues(ids);
+  }
+}
+
+function ensureLeadSources_(sheet, headers) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+
+  const sourceIndex = headers.findIndex((header) => FIELD_ALIASES.source.includes(header));
+  const nameIndex = headers.findIndex((header) => FIELD_ALIASES.name.includes(header));
+  const phoneIndex = headers.findIndex((header) => FIELD_ALIASES.phone.includes(header));
+  if (sourceIndex < 0 || nameIndex < 0 || phoneIndex < 0) return;
+
+  const range = sheet.getRange(2, sourceIndex + 1, lastRow - 1, 1);
+  const sourceValues = range.getDisplayValues();
+  const rowValues = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).getDisplayValues();
+  let changed = false;
+  const nextValues = sourceValues.map((value, index) => {
+    const row = rowValues[index];
+    const hasLead = String(row[nameIndex] || "").trim() && String(row[phoneIndex] || "").trim();
+    if (!hasLead) return [value[0]];
+    const canonical = canonicalLeadSource_(value[0]);
+    if (canonical !== String(value[0] || "").trim()) changed = true;
+    return [canonical];
+  });
+
+  if (changed) {
+    range.setValues(nextValues);
   }
 }
 

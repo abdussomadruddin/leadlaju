@@ -1,9 +1,9 @@
-const CACHE_NAME = "leadlaju-pwa-v20260625-google-sheet-core-v10";
+const CACHE_NAME = "leadlaju-pwa-v20260626-source-sync-v11";
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20260625-google-sheet-core-v10",
-  "/app.js?v=20260625-google-sheet-core-v10",
+  "/styles.css?v=20260626-source-sync-v11",
+  "/app.js?v=20260626-source-sync-v11",
   "/manifest.webmanifest?v=20260625-pwa-notifications",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",
