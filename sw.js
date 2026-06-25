@@ -1,9 +1,9 @@
-const CACHE_NAME = "leadlaju-pwa-v20260626-global-sheet-v14";
+const CACHE_NAME = "leadlaju-pwa-v20260626-readable-cards-v15";
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20260626-global-sheet-v14",
-  "/app.js?v=20260626-global-sheet-v14",
+  "/styles.css?v=20260626-readable-cards-v15",
+  "/app.js?v=20260626-readable-cards-v15",
   "/manifest.webmanifest?v=20260625-pwa-notifications",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",
