@@ -145,6 +145,7 @@ Deno.serve(async (request) => {
       }
       const { error } = await adminClient.auth.admin.updateUserById(payload.userId, {
         password: String(payload.password),
+        email_confirm: true,
       });
       if (error) throw error;
     } else if (payload.action === "delete") {
