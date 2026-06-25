@@ -1,9 +1,9 @@
-const CACHE_NAME = "leadlaju-pwa-v20260625-agent-delete-sync-v7";
+const CACHE_NAME = "leadlaju-pwa-v20260625-google-sheet-core-v8";
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20260625-agent-delete-sync-v7",
-  "/app.js?v=20260625-agent-delete-sync-v7",
+  "/styles.css?v=20260625-google-sheet-core-v8",
+  "/app.js?v=20260625-google-sheet-core-v8",
   "/manifest.webmanifest?v=20260625-pwa-notifications",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",

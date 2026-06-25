@@ -2,13 +2,6 @@ const SPREADSHEET_ID = "1ySHeB12lL2y4AxqpSx8dDniyujSaz2-9hoRzPlCv6TM";
 const SHEET_NAME = "Sheet1";
 const AGENTS_SHEET_NAME = "Agents";
 const DEFAULT_SOURCE = "Google Sheet";
-const SUPABASE_URL = "https://rfqwyhafvfvafiqrcmxa.supabase.co";
-const SUPABASE_KEY = "sb_publishable_or7DVUc_la79KiBz4kR5uw_EIGyN3-l";
-const SUPABASE_ADMIN_EMAIL = "admin@leadlaju.my";
-const SUPABASE_ADMIN_PASSWORD_PROPERTY = "SUPABASE_ADMIN_PASSWORD";
-const SUPABASE_SYNC_HASH_PROPERTY = "SUPABASE_SYNC_HASH";
-const SUPABASE_ACCESS_TOKEN_PROPERTY = "SUPABASE_ACCESS_TOKEN";
-const SUPABASE_TOKEN_EXPIRY_PROPERTY = "SUPABASE_TOKEN_EXPIRY";
 const DEFAULT_AGENT_PASSWORD = "Agent123!";
 
 const FIELD_ALIASES = {
@@ -56,6 +49,7 @@ const AGENT_HEADERS = [
   { field: "active", label: "Status" },
   { field: "leadsHandled", label: "Leads Handled" },
   { field: "createdAt", label: "Tarikh Daftar" },
+  { field: "password", label: "Password" },
 ];
 
 function doGet() {
@@ -68,18 +62,12 @@ function doGet() {
     ensureLeadIds_(sheet, headers);
     const leads = readLeads_(sheet);
     const agents = readAgents_(agentsSheet, agentHeaders);
-    const supabaseSync = safeSyncSupabaseFromSheet_(leads, agents, {
-      agentSheet: agentsSheet,
-      agentHeaders,
-      force: false,
-    });
     return jsonResponse({
       ok: true,
       spreadsheet: spreadsheet.getName(),
       sheet: sheet.getName(),
       leads,
       agents,
-      supabaseSync,
     });
   } catch (error) {
     return jsonResponse({ ok: false, error: String(error), leads: [] });
@@ -90,22 +78,22 @@ function doPost(event) {
   try {
     const payload = JSON.parse(event.postData.contents || "{}");
     if (payload.action === "add_lead") {
-      return jsonResponse(withSupabaseSync_(appendLead_(payload.lead || payload), true));
+      return jsonResponse(appendLead_(payload.lead || payload));
     }
     if (payload.action === "delete_lead") {
-      return jsonResponse(withSupabaseSync_(deleteLead_(payload.lead || payload), true));
+      return jsonResponse(deleteLead_(payload.lead || payload));
     }
     if (payload.action === "update_lead_status") {
-      return jsonResponse(withSupabaseSync_(updateLeadStatus_(payload.lead || payload), true));
+      return jsonResponse(updateLeadStatus_(payload.lead || payload));
     }
     if (payload.action === "add_agent") {
-      return jsonResponse(withSupabaseSync_(upsertAgent_(payload.agent || payload), true));
+      return jsonResponse(upsertAgent_(payload.agent || payload));
     }
     if (payload.action === "delete_agent") {
-      return jsonResponse(withSupabaseSync_(deleteAgent_(payload.agent || payload), true));
+      return jsonResponse(deleteAgent_(payload.agent || payload));
     }
     if (payload.action === "replace_agents") {
-      return jsonResponse(withSupabaseSync_(replaceAgents_(payload.agents || []), true));
+      return jsonResponse(replaceAgents_(payload.agents || []));
     }
     if (payload.action === "send_reset_code") {
       return jsonResponse(sendResetCode_(payload));
@@ -374,455 +362,9 @@ function normalizeAgentActive_(value) {
   return "active";
 }
 
-function withSupabaseSync_(result, force) {
-  const response = Object.assign({}, result || {});
-  response.supabaseSync = safeSyncCurrentSheet_(force);
-  return response;
-}
-
-function safeSyncCurrentSheet_(force) {
-  try {
-    const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const sheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
-    const agentsSheet = getOrCreateSheet_(spreadsheet, AGENTS_SHEET_NAME);
-    const headers = ensureRequiredHeaders_(sheet);
-    const agentHeaders = ensureRequiredHeadersBySpec_(agentsSheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
-    ensureLeadIds_(sheet, headers);
-    return safeSyncSupabaseFromSheet_(readLeads_(sheet), readAgents_(agentsSheet, agentHeaders), {
-      agentSheet: agentsSheet,
-      agentHeaders,
-      force: Boolean(force),
-    });
-  } catch (error) {
-    return { ok: false, error: String(error) };
-  }
-}
-
-function safeSyncSupabaseFromSheet_(leads, agents, options) {
-  try {
-    return syncSupabaseFromSheet_(leads, agents, options || {});
-  } catch (error) {
-    return { ok: false, error: String(error) };
-  }
-}
-
-function syncSupabaseFromSheet_(leads, agents, options) {
-  const password = getSupabaseAdminPassword_();
-  if (!password) {
-    return {
-      ok: false,
-      skipped: true,
-      error: `Set ${SUPABASE_ADMIN_PASSWORD_PROPERTY} di Apps Script properties untuk aktifkan Sheet -> Supabase.`,
-    };
-  }
-
-  const normalizedLeads = (leads || []).map(normalizeSupabaseLead_).filter(Boolean);
-  const normalizedAgents = (agents || []).map(normalizeSupabaseAgent_).filter(Boolean);
-  const syncHash = computeSyncHash_(normalizedLeads, normalizedAgents);
-  const properties = PropertiesService.getScriptProperties();
-  if (!options.force && properties.getProperty(SUPABASE_SYNC_HASH_PROPERTY) === syncHash) {
-    return { ok: true, skipped: true, unchanged: true };
-  }
-
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(5000)) {
-    return { ok: false, skipped: true, error: "Sync Supabase sedang berjalan. Cuba lagi sebentar." };
-  }
-
-  try {
-    const token = getSupabaseAccessToken_();
-    let profiles = fetchSupabaseProfiles_(token);
-    const agentResult = syncSupabaseAgents_(normalizedAgents, profiles, token, options);
-    if (agentResult.changedProfiles) {
-      profiles = fetchSupabaseProfiles_(token);
-    }
-    const leadResult = syncSupabaseLeads_(normalizedLeads, profiles, token);
-    properties.setProperty(SUPABASE_SYNC_HASH_PROPERTY, syncHash);
-    return {
-      ok: true,
-      leads: leadResult,
-      agents: agentResult,
-      synced_at: new Date().toISOString(),
-    };
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-function syncSupabaseAgents_(sheetAgents, profiles, token, options) {
-  const result = { added: 0, updated: 0, removed: 0, passwordUpdated: 0, backfilled: 0, skipped: 0, changedProfiles: false };
-  if (!sheetAgents.length) {
-    result.skipped += 1;
-    return result;
-  }
-
-  const byId = {};
-  const byEmail = {};
-  profiles.forEach((profile) => {
-    if (profile.id) byId[String(profile.id)] = profile;
-    if (profile.email) byEmail[String(profile.email).trim().toLowerCase()] = profile;
-  });
-
-  const sheetEmails = new Set(sheetAgents.map((agent) => agent.email));
-
-  sheetAgents.forEach((agent) => {
-    const existing = (agent.id && byId[agent.id]) || byEmail[agent.email];
-    if (existing) {
-      const nextActive = existing.role === "admin" ? true : agent.active;
-      const payload = {
-        name: agent.name,
-        phone: agent.phone,
-        active: nextActive,
-        leads_handled: agent.leadsHandled,
-      };
-      supabaseFetch_(`/rest/v1/profiles?id=eq.${encodeURIComponent(existing.id)}`, {
-        method: "patch",
-        payload,
-        headers: { Prefer: "return=minimal" },
-      }, token);
-      result.updated += 1;
-      result.changedProfiles = true;
-
-      if (!agent.id && existing.id && writeAgentIdByEmail_(options.agentSheet, options.agentHeaders, agent.email, existing.id)) {
-        result.backfilled += 1;
-      }
-
-      if (agent.password.length >= 8 && existing.role === "agent") {
-        callAdminManageAgent_({
-          action: "update_password",
-          userId: existing.id,
-          password: agent.password,
-        }, token);
-        result.passwordUpdated += 1;
-      }
-      return;
-    }
-
-    if (agent.role === "admin") {
-      result.skipped += 1;
-      return;
-    }
-
-    callAdminManageAgent_({
-      action: "create",
-      name: agent.name,
-      phone: agent.phone,
-      email: agent.email,
-      password: agent.password.length >= 8 ? agent.password : DEFAULT_AGENT_PASSWORD,
-      active: agent.active,
-    }, token);
-    const createdProfile = fetchSupabaseProfileByEmail_(agent.email, token);
-    if (createdProfile?.id && writeAgentIdByEmail_(options.agentSheet, options.agentHeaders, agent.email, createdProfile.id)) {
-      result.backfilled += 1;
-    }
-    result.added += 1;
-    result.changedProfiles = true;
-  });
-
-  profiles
-    .filter((profile) => profile.role === "agent" && !sheetEmails.has(String(profile.email || "").toLowerCase()))
-    .forEach((profile) => {
-      callAdminManageAgent_({ action: "delete", userId: profile.id, email: profile.email }, token);
-      result.removed += 1;
-      result.changedProfiles = true;
-    });
-
-  return result;
-}
-
-function syncSupabaseLeads_(sheetLeads, profiles, token) {
-  const result = { added: 0, updated: 0, removed: 0, skipped: 0 };
-  const keys = sheetLeads.map((lead) => lead.dedupeKey);
-  const existingRows = fetchExistingSupabaseLeads_(keys, token);
-  const existingByKey = {};
-  existingRows.forEach((lead) => {
-    existingByKey[lead.dedupe_key] = lead;
-  });
-
-  const activeAgents = profiles.filter((profile) => profile.role === "agent" && profile.active);
-  let roundRobinIndex = fetchSupabaseRoundRobinIndex_(token);
-
-  sheetLeads.forEach((lead) => {
-    const existing = existingByKey[lead.dedupeKey];
-    const leadStage = normalizeLeadStageForSupabase_(lead.status);
-    if (existing) {
-      const payload = {
-        name: lead.name,
-        phone: lead.phone,
-        email: lead.email,
-        project: lead.project,
-        source: lead.source,
-      };
-      const existingStage =
-        existing.status === "contacted" ? "contacted" : Number(existing.pass_count || 0) > 0 ? "passed" : "new";
-      if (existingStage !== leadStage) {
-        payload.status = leadStage === "contacted" ? "contacted" : "new";
-        payload.pass_count = leadStage === "passed" ? Math.max(Number(existing.pass_count || 0), 1) : 0;
-        payload.contacted_at = null;
-        payload.response_ms = null;
-      }
-      if (leadStage === "contacted") {
-        payload.status = "contacted";
-        payload.pass_count = Number(existing.pass_count || 0);
-        payload.contacted_at = existing.contacted_at || new Date().toISOString();
-        payload.response_ms = Number(existing.response_ms || 0);
-      }
-      supabaseFetch_(`/rest/v1/leads?dedupe_key=eq.${encodeURIComponent(lead.dedupeKey)}`, {
-        method: "patch",
-        payload,
-        headers: { Prefer: "return=minimal" },
-      }, token);
-      result.updated += 1;
-      return;
-    }
-
-    const assignedAgent = activeAgents.length ? activeAgents[roundRobinIndex % activeAgents.length] : null;
-    if (assignedAgent) roundRobinIndex += 1;
-    const isContacted = leadStage === "contacted";
-    const isPassed = leadStage === "passed";
-    supabaseFetch_("/rest/v1/leads", {
-      method: "post",
-      payload: {
-        dedupe_key: lead.dedupeKey,
-        name: lead.name,
-        phone: lead.phone,
-        email: lead.email,
-        project: lead.project,
-        source: lead.source,
-        status: isContacted ? "contacted" : "new",
-        assigned_agent_id: assignedAgent ? assignedAgent.id : null,
-        expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
-        pass_count: isPassed ? 1 : 0,
-        response_ms: isContacted ? 0 : null,
-        contacted_at: isContacted ? new Date().toISOString() : null,
-        notes: "",
-        created_at: lead.createdAt,
-        received_at: new Date().toISOString(),
-      },
-      headers: { Prefer: "return=minimal" },
-    }, token);
-    result.added += 1;
-  });
-
-  const deletedCount = supabaseFetch_("/rest/v1/rpc/delete_leads_not_in_dedupe_keys", {
-    method: "post",
-    payload: { p_dedupe_keys: keys },
-  }, token);
-  result.removed = Number(deletedCount) || 0;
-
-  supabaseFetch_("/rest/v1/app_settings?id=eq.1", {
-    method: "patch",
-    payload: {
-      round_robin_index: roundRobinIndex,
-      last_sync_at: new Date().toISOString(),
-    },
-    headers: { Prefer: "return=minimal" },
-  }, token);
-
-  return result;
-}
-
-function getSupabaseAdminPassword_() {
-  return String(PropertiesService.getScriptProperties().getProperty(SUPABASE_ADMIN_PASSWORD_PROPERTY) || "").trim();
-}
-
-function authorizeSupabaseSync() {
-  const response = UrlFetchApp.fetch(SUPABASE_URL, { muteHttpExceptions: true });
-  return response.getResponseCode();
-}
-
-function syncSupabaseFromSpreadsheet() {
-  return safeSyncCurrentSheet_(true);
-}
-
-function onSheetCoreEdit() {
-  return safeSyncCurrentSheet_(true);
-}
-
-function onSheetCoreChange() {
-  return safeSyncCurrentSheet_(true);
-}
-
-function installSheetCoreTriggers() {
-  const handlers = ["onSheetCoreEdit", "onSheetCoreChange", "syncSupabaseFromSpreadsheet"];
-  ScriptApp.getProjectTriggers().forEach((trigger) => {
-    if (handlers.includes(trigger.getHandlerFunction())) {
-      ScriptApp.deleteTrigger(trigger);
-    }
-  });
-  ScriptApp.newTrigger("onSheetCoreEdit").forSpreadsheet(SPREADSHEET_ID).onEdit().create();
-  ScriptApp.newTrigger("onSheetCoreChange").forSpreadsheet(SPREADSHEET_ID).onChange().create();
-  ScriptApp.newTrigger("syncSupabaseFromSpreadsheet").timeBased().everyMinutes(5).create();
-  return { ok: true, installed: handlers };
-}
-
-function getSupabaseAccessToken_() {
-  const properties = PropertiesService.getScriptProperties();
-  const existingToken = properties.getProperty(SUPABASE_ACCESS_TOKEN_PROPERTY);
-  const expiry = Number(properties.getProperty(SUPABASE_TOKEN_EXPIRY_PROPERTY) || 0);
-  if (existingToken && expiry > Date.now() + 60000) return existingToken;
-
-  const response = UrlFetchApp.fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
-    method: "post",
-    contentType: "application/json",
-    muteHttpExceptions: true,
-    headers: { apikey: SUPABASE_KEY },
-    payload: JSON.stringify({
-      email: SUPABASE_ADMIN_EMAIL,
-      password: getSupabaseAdminPassword_(),
-    }),
-  });
-  const body = parseJson_(response.getContentText());
-  if (response.getResponseCode() < 200 || response.getResponseCode() >= 300 || !body.access_token) {
-    throw new Error(`Supabase auth gagal: ${response.getContentText()}`);
-  }
-
-  properties.setProperty(SUPABASE_ACCESS_TOKEN_PROPERTY, body.access_token);
-  properties.setProperty(
-    SUPABASE_TOKEN_EXPIRY_PROPERTY,
-    String(Date.now() + Math.max(Number(body.expires_in || 3600) - 60, 60) * 1000),
-  );
-  return body.access_token;
-}
-
-function fetchSupabaseProfiles_(token) {
-  return supabaseFetch_(
-    "/rest/v1/profiles?select=id,name,phone,email,role,active,leads_handled,created_at&order=created_at.asc",
-    { method: "get" },
-    token,
-  ) || [];
-}
-
-function fetchSupabaseProfileByEmail_(email, token) {
-  const rows = supabaseFetch_(
-    `/rest/v1/profiles?select=id,name,phone,email,role,active,leads_handled,created_at&email=eq.${encodeURIComponent(email)}&limit=1`,
-    { method: "get" },
-    token,
-  ) || [];
-  return rows[0] || null;
-}
-
-function fetchExistingSupabaseLeads_(keys, token) {
-  if (!keys.length) return [];
-  const filter = `in.(${keys.map(postgrestQuote_).join(",")})`;
-  return supabaseFetch_(
-    `/rest/v1/leads?select=dedupe_key,status,assigned_agent_id,contacted_at,response_ms,pass_count&dedupe_key=${encodeURIComponent(filter)}`,
-    { method: "get" },
-    token,
-  ) || [];
-}
-
-function fetchSupabaseRoundRobinIndex_(token) {
-  const rows = supabaseFetch_("/rest/v1/app_settings?select=round_robin_index&id=eq.1&limit=1", { method: "get" }, token) || [];
-  return Number(rows[0]?.round_robin_index || 0) || 0;
-}
-
-function callAdminManageAgent_(payload, token) {
-  const result = supabaseFetch_("/functions/v1/admin-manage-agent", {
-    method: "post",
-    payload,
-  }, token);
-  if (!result?.ok) {
-    throw new Error(result?.error || "Edge Function admin-manage-agent gagal.");
-  }
-  return result;
-}
-
-function supabaseFetch_(path, options, token) {
-  const request = {
-    method: String(options.method || "get").toUpperCase(),
-    muteHttpExceptions: true,
-    headers: Object.assign(
-      {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${token}`,
-      },
-      options.headers || {},
-    ),
-  };
-
-  if (Object.prototype.hasOwnProperty.call(options, "payload")) {
-    request.contentType = "application/json";
-    request.payload = JSON.stringify(options.payload);
-  }
-
-  const response = UrlFetchApp.fetch(`${SUPABASE_URL}${path}`, request);
-  const status = response.getResponseCode();
-  const text = response.getContentText();
-  if (status < 200 || status >= 300) {
-    throw new Error(`Supabase ${request.method} ${path} gagal (${status}): ${text}`);
-  }
-  if (!text) return null;
-  return parseJson_(text);
-}
-
-function normalizeSupabaseLead_(input) {
-  const name = String(input.name || input.nama || "").trim();
-  const phone = String(input.phone || input.phone_number || input.mobile || "").trim();
-  if (!name || !phone) return null;
-  const project = String(input.project || input.projek || input.project_name || "Tidak dinyatakan").trim();
-  const createdAt = normalizeDateIso_(input.created_at || input.createdAt);
-  return {
-    dedupeKey: sheetLeadDedupeKey_(input, project),
-    name,
-    phone,
-    email: String(input.email || input.emel || input.email_address || "").trim(),
-    project,
-    source: normalizeLeadSourceForSupabase_(input.source || input.sumber || input.platform),
-    status: normalizeLeadStageForSupabase_(input.status),
-    createdAt,
-  };
-}
-
-function normalizeSupabaseAgent_(input) {
-  const name = String(input.name || input.nama || "").trim();
-  const email = String(input.email || input.emel || input.email_address || "").trim().toLowerCase();
-  if (!name || !email) return null;
-  return {
-    id: String(input.id || input.user_id || input.agent_id || "").trim(),
-    name,
-    phone: String(input.phone || input.phone_number || input.mobile || "").trim(),
-    email,
-    role: String(input.role || "agent").trim().toLowerCase() === "admin" ? "admin" : "agent",
-    active: normalizeAgentActive_(input.active ?? input.status ?? "active") === "active",
-    leadsHandled: Number(input.leads_handled ?? input.leadsHandled ?? 0) || 0,
-    password: String(input.password || input.kata_laluan || input.temporary_password || "").trim(),
-  };
-}
-
-function sheetLeadDedupeKey_(input, project) {
-  const id = String(input.id || input.lead_id || "").trim();
-  if (id) return id;
-  return `${normalizePhoneForKey_(input.phone || input.phone_number || input.mobile)}-${project}-${input.created_at || input.createdAt || ""}`;
-}
-
-function normalizeLeadSourceForSupabase_(value) {
-  const source = String(value || DEFAULT_SOURCE).trim();
-  const lower = source.toLowerCase();
-  if (lower.includes("tiktok")) return "TikTok Ads";
-  if (lower.includes("meta") || lower.includes("facebook") || lower === "fb") return "Meta Ads";
-  if (lower.includes("manual")) return "Manual Lead";
-  return source || DEFAULT_SOURCE;
-}
-
-function normalizeLeadStatusForSupabase_(value) {
-  return normalizeLeadStageForSupabase_(value) === "contacted" ? "contacted" : "new";
-}
-
-function normalizeLeadStageForSupabase_(value) {
+function normalizeLeadStage_(value) {
   const status = String(value || "").trim().toLowerCase();
-  if (
-    [
-      "done",
-      "completed",
-      "complete",
-      "contacted",
-      "called",
-      "call",
-      "dihubungi",
-      "telah dihubungi",
-    ].includes(status)
-  ) {
+  if (["done", "completed", "complete", "contacted", "called", "call", "dihubungi", "telah dihubungi"].includes(status)) {
     return "contacted";
   }
   if (["passed", "pass", "expired", "missed", "tamat", "terlepas", "dipindahkan"].includes(status)) {
@@ -832,58 +374,48 @@ function normalizeLeadStageForSupabase_(value) {
 }
 
 function canonicalSheetStatus_(value) {
-  const stage = normalizeLeadStageForSupabase_(value);
+  const stage = normalizeLeadStage_(value);
   if (stage === "contacted") return "Contacted";
   if (stage === "passed") return "Passed";
   return "New";
 }
 
-function normalizeDateIso_(value) {
-  const date = value ? new Date(value) : new Date();
-  if (Number.isNaN(date.getTime())) return new Date().toISOString();
-  return date.toISOString();
+function authorizeSheetTemplate() {
+  return refreshSheetTemplate_();
 }
 
-function normalizePhoneForKey_(value) {
-  return String(value || "").replace(/[^\d+]/g, "");
+function syncSheetTemplate() {
+  return refreshSheetTemplate_();
 }
 
-function computeSyncHash_(leads, agents) {
-  const digest = Utilities.computeDigest(
-    Utilities.DigestAlgorithm.SHA_256,
-    JSON.stringify({ leads, agents }),
-  );
-  return Utilities.base64EncodeWebSafe(digest);
+function onSheetCoreEdit() {
+  return refreshSheetTemplate_();
 }
 
-function postgrestQuote_(value) {
-  return `"${String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+function onSheetCoreChange() {
+  return refreshSheetTemplate_();
 }
 
-function parseJson_(text) {
-  if (!text) return null;
-  try {
-    return JSON.parse(text);
-  } catch (error) {
-    return text;
-  }
-}
-
-function writeAgentIdByEmail_(sheet, headers, email, id) {
-  if (!sheet || !headers || !email || !id) return false;
-  const idIndex = headers.findIndex((header) => AGENT_FIELD_ALIASES.id.includes(header));
-  const emailIndex = headers.findIndex((header) => AGENT_FIELD_ALIASES.email.includes(header));
-  if (idIndex < 0 || emailIndex < 0) return false;
-
-  const values = sheet.getDataRange().getDisplayValues();
-  for (let rowNumber = 2; rowNumber <= values.length; rowNumber += 1) {
-    const rowEmail = String(values[rowNumber - 1][emailIndex] || "").trim().toLowerCase();
-    if (rowEmail === email) {
-      sheet.getRange(rowNumber, idIndex + 1).setValue(id);
-      return true;
+function installSheetCoreTriggers() {
+  const handlers = ["onSheetCoreEdit", "onSheetCoreChange", "syncSheetTemplate"];
+  ScriptApp.getProjectTriggers().forEach((trigger) => {
+    if (handlers.includes(trigger.getHandlerFunction())) {
+      ScriptApp.deleteTrigger(trigger);
     }
-  }
-  return false;
+  });
+  ScriptApp.newTrigger("onSheetCoreEdit").forSpreadsheet(SPREADSHEET_ID).onEdit().create();
+  ScriptApp.newTrigger("onSheetCoreChange").forSpreadsheet(SPREADSHEET_ID).onChange().create();
+  return { ok: true, installed: ["onSheetCoreEdit", "onSheetCoreChange"] };
+}
+
+function refreshSheetTemplate_() {
+  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
+  const agentsSheet = getOrCreateSheet_(spreadsheet, AGENTS_SHEET_NAME);
+  const headers = ensureRequiredHeaders_(sheet);
+  ensureRequiredHeadersBySpec_(agentsSheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
+  ensureLeadIds_(sheet, headers);
+  return { ok: true, refreshed_at: new Date().toISOString() };
 }
 
 function sendResetCode_(payload) {

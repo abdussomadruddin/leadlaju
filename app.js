@@ -1,12 +1,6 @@
 const STORAGE_KEY = "leadlaju-state-v1";
 const AUTH_KEY = "leadlaju-auth-v1";
-const SUPABASE_CONFIG_KEY = "leadlaju-supabase-config-v1";
-const SUPABASE_DISABLED_KEY = "leadlaju-supabase-disabled-v1";
 const NOTIFIED_LEADS_KEY = "leadlaju-notified-leads-v1";
-const DEFAULT_SUPABASE_CONFIG = Object.freeze({
-  url: "https://rfqwyhafvfvafiqrcmxa.supabase.co",
-  key: "sb_publishable_or7DVUc_la79KiBz4kR5uw_EIGyN3-l",
-});
 const SESSION_DURATION_MS = 365 * 24 * 60 * 60 * 1000;
 const RESPONSE_WINDOW_MS = 5 * 60 * 1000;
 const DEFAULT_AGENT_PASSWORD = "Agent123!";
@@ -76,13 +70,11 @@ let toastTimer;
 let lastRenderedActiveLeadKey = null;
 let passwordResetRequest = null;
 let selectedAgentId = null;
+let editingAgentId = null;
 let selectedContactId = null;
-let supabaseClient = null;
-let supabaseChannel = null;
-let supabaseMode = false;
-let remoteReloadTimer = null;
+let remoteDatabaseClient = null;
+let remoteDatabaseMode = false;
 let claimingLeadId = null;
-let remoteStateLoadedOnce = false;
 let serviceWorkerRegistrationPromise = null;
 let notificationAudioContext = null;
 let notifiedLeadKeys = loadNotifiedLeadKeys();
@@ -164,6 +156,14 @@ const elements = {
   addAgentButton: document.querySelector("#add-agent-button"),
   agentModal: document.querySelector("#agent-modal"),
   agentForm: document.querySelector("#agent-form"),
+  agentModalKicker: document.querySelector("#agent-modal-kicker"),
+  agentModalTitle: document.querySelector("#agent-modal-title"),
+  agentName: document.querySelector("#agent-name"),
+  agentPhone: document.querySelector("#agent-phone"),
+  agentEmail: document.querySelector("#agent-email"),
+  agentPassword: document.querySelector("#agent-password"),
+  agentPasswordLabel: document.querySelector("#agent-password-label"),
+  agentSubmitButton: document.querySelector("#agent-submit-button"),
   agentPasswordModal: document.querySelector("#agent-password-modal"),
   agentPasswordForm: document.querySelector("#agent-password-form"),
   agentPasswordDescription: document.querySelector("#agent-password-description"),
@@ -178,11 +178,6 @@ const elements = {
   sidebarSyncText: document.querySelector("#sidebar-sync-text"),
   sidebarSyncStatus: document.querySelector("#sidebar-sync-status"),
   liveSyncLabel: document.querySelector("#live-sync-label"),
-  supabaseForm: document.querySelector("#supabase-form"),
-  supabaseUrl: document.querySelector("#supabase-url"),
-  supabaseKey: document.querySelector("#supabase-key"),
-  supabaseResult: document.querySelector("#supabase-result"),
-  supabaseDisconnect: document.querySelector("#supabase-disconnect"),
   resetCodeFields: document.querySelector("#reset-code-fields"),
   toast: document.querySelector("#toast"),
   toastTitle: document.querySelector("#toast-title"),
@@ -230,30 +225,14 @@ function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
-function loadSupabaseConfig() {
-  const params = new URLSearchParams(window.location.search);
-  if (params.has("demo")) return null;
-  if (localStorage.getItem(SUPABASE_DISABLED_KEY) === "true") return null;
-  try {
-    const config = JSON.parse(localStorage.getItem(SUPABASE_CONFIG_KEY));
-    if (config?.url && config?.key) return config;
-  } catch {
-    // Fall through to the production project configuration.
-  }
-  return DEFAULT_SUPABASE_CONFIG;
+function loadRemoteDatabaseConfig() {
+  return null;
 }
 
-function initSupabase() {
-  const config = loadSupabaseConfig();
-  if (!config || !window.supabase?.createClient) return null;
-  supabaseClient = window.supabase.createClient(config.url, config.key, {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true,
-    },
-  });
-  return supabaseClient;
+function initRemoteDatabase() {
+  remoteDatabaseClient = null;
+  remoteDatabaseMode = false;
+  return null;
 }
 
 function mapProfile(row) {
@@ -302,15 +281,15 @@ function mapActivity(row) {
 }
 
 async function loadRemoteState(userId) {
-  if (!supabaseClient) return false;
+  if (!remoteDatabaseClient || !userId) return false;
   const previousLeadKeys = new Set(state.leads.map(leadNotificationKey));
-  const shouldDetectNewLeads = remoteStateLoadedOnce;
+  const shouldDetectNewLeads = false;
   try {
     const [profilesResult, leadsResult, activitiesResult, settingsResult] = await Promise.all([
-      supabaseClient.from("profiles").select("*").order("created_at"),
-      supabaseClient.rpc("get_visible_leads"),
-      supabaseClient.from("activities").select("*").order("created_at", { ascending: false }).limit(80),
-      supabaseClient.from("app_settings").select("*").eq("id", 1).maybeSingle(),
+      remoteDatabaseClient.from("profiles").select("*").order("created_at"),
+      remoteDatabaseClient.rpc("get_visible_leads"),
+      remoteDatabaseClient.from("activities").select("*").order("created_at", { ascending: false }).limit(80),
+      remoteDatabaseClient.from("app_settings").select("*").eq("id", 1).maybeSingle(),
     ]);
 
     if (profilesResult.error) throw profilesResult.error;
@@ -338,45 +317,32 @@ async function loadRemoteState(userId) {
           : null,
       },
     };
-    supabaseMode = true;
+    remoteDatabaseMode = true;
     saveState();
-    subscribeToSupabase();
     if (shouldDetectNewLeads) {
       await notifyForNewVisibleLeads(previousLeadKeys);
     } else {
       markCurrentLeadNotificationsSeen();
     }
-    remoteStateLoadedOnce = true;
     return true;
   } catch (error) {
-    console.error("Supabase load failed", error);
-    supabaseMode = false;
+      console.error("Remote load failed", error);
+    remoteDatabaseMode = false;
     return false;
   }
 }
 
-function subscribeToSupabase() {
-  if (!supabaseClient || supabaseChannel) return;
-  supabaseChannel = supabaseClient
-    .channel("leadlaju-live")
-    .on("postgres_changes", { event: "*", schema: "public", table: "leads" }, queueRemoteReload)
-    .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, queueRemoteReload)
-    .on("postgres_changes", { event: "INSERT", schema: "public", table: "activities" }, queueRemoteReload)
-    .subscribe();
+function subscribeToRemoteDatabase() {
+  return null;
 }
 
 function queueRemoteReload() {
-  window.clearTimeout(remoteReloadTimer);
-  remoteReloadTimer = window.setTimeout(async () => {
-    if (!supabaseMode) return;
-    await loadRemoteState(state.currentUserId);
-    renderAll();
-  }, 250);
+  return null;
 }
 
 async function persistProfile(agent) {
-  if (!supabaseMode) return true;
-  const { error } = await supabaseClient
+  if (!remoteDatabaseMode) return true;
+  const { error } = await remoteDatabaseClient
     .from("profiles")
     .update({
       name: agent.name,
@@ -390,8 +356,8 @@ async function persistProfile(agent) {
 }
 
 async function persistLead(lead) {
-  if (!supabaseMode) return true;
-  const { error } = await supabaseClient
+  if (!remoteDatabaseMode) return true;
+  const { error } = await remoteDatabaseClient
     .from("leads")
     .update({
       name: lead.name,
@@ -413,8 +379,8 @@ async function persistLead(lead) {
 }
 
 async function persistNewLead(lead) {
-  if (!supabaseMode) return true;
-  const { error } = await supabaseClient.from("leads").insert({
+  if (!remoteDatabaseMode) return true;
+  const { error } = await remoteDatabaseClient.from("leads").insert({
     id: lead.id,
     dedupe_key: lead.dedupeKey,
     name: lead.name,
@@ -436,8 +402,8 @@ async function persistNewLead(lead) {
 }
 
 async function persistActivity(activity) {
-  if (!supabaseMode) return true;
-  const { error } = await supabaseClient.from("activities").insert({
+  if (!remoteDatabaseMode) return true;
+  const { error } = await remoteDatabaseClient.from("activities").insert({
     id: activity.id,
     type: activity.type,
     lead_id: activity.leadId,
@@ -453,8 +419,8 @@ async function deleteLeads(leadIds) {
   const ids = [...new Set(leadIds)].filter(Boolean);
   if (!ids.length) return true;
 
-  if (supabaseMode) {
-    const { error } = await supabaseClient.from("leads").delete().in("id", ids);
+  if (remoteDatabaseMode) {
+    const { error } = await remoteDatabaseClient.from("leads").delete().in("id", ids);
     if (error) throw error;
   }
 
@@ -558,21 +524,21 @@ async function handleLogin(event) {
     return;
   }
 
-  if (supabaseClient) {
-    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+  if (remoteDatabaseClient) {
+    const { data, error } = await remoteDatabaseClient.auth.signInWithPassword({ email, password });
     if (error || !data.user) {
       setLoginError("Emel atau kata laluan tidak betul.");
       return;
     }
     const loaded = await loadRemoteState(data.user.id);
     if (!loaded) {
-      await supabaseClient.auth.signOut();
+      await remoteDatabaseClient.auth.signOut();
       setLoginError("Akaun berjaya disahkan tetapi data sistem tidak dapat dimuatkan.");
       return;
     }
     const signedInUser = getCurrentUser();
     if (!signedInUser?.active) {
-      await supabaseClient.auth.signOut();
+      await remoteDatabaseClient.auth.signOut();
       setLoginError("Akaun anda sedang menunggu approval admin.");
       return;
     }
@@ -627,14 +593,14 @@ async function handleAgentSignup(event) {
     setSignupError("Pengesahan kata laluan tidak sepadan.");
     return;
   }
-  if (!supabaseClient && state.agents.some((agent) => agent.email.toLowerCase() === email)) {
+  if (!remoteDatabaseClient && state.agents.some((agent) => agent.email.toLowerCase() === email)) {
     setSignupError("Emel ini sudah wujud dalam sistem.");
     return;
   }
 
   let signupAgent = null;
-  if (supabaseClient) {
-    const { data, error } = await supabaseClient.functions.invoke("admin-manage-agent", {
+  if (remoteDatabaseClient) {
+    const { data, error } = await remoteDatabaseClient.functions.invoke("admin-manage-agent", {
       body: {
         action: "signup_request",
         name,
@@ -685,12 +651,11 @@ async function handleAgentSignup(event) {
 }
 
 async function logout() {
-  if (supabaseClient) {
-    await supabaseClient.auth.signOut();
+  if (remoteDatabaseClient) {
+    await remoteDatabaseClient.auth.signOut();
   }
   localStorage.removeItem(AUTH_KEY);
-  supabaseMode = false;
-  remoteStateLoadedOnce = false;
+  remoteDatabaseMode = false;
   showLogin();
 }
 
@@ -724,9 +689,9 @@ function openResetPasswordModal() {
   window.setTimeout(() => elements.resetEmail.focus(), 80);
 }
 
-function openSupabaseRecoveryModal() {
+function openRemoteRecoveryModal() {
   resetPasswordFlow();
-  passwordResetRequest = { supabaseRecovery: true };
+  passwordResetRequest = { remoteRecovery: true };
   elements.resetRequestForm.hidden = true;
   elements.resetVerifyForm.hidden = false;
   elements.resetCodeFields.hidden = true;
@@ -762,11 +727,11 @@ async function sendPasswordResetEmail(agent, code) {
 async function requestPasswordReset(event) {
   event.preventDefault();
   const email = elements.resetEmail.value.trim().toLowerCase();
-  if (supabaseClient) {
+  if (remoteDatabaseClient) {
     const redirectTo = `${window.location.origin}${window.location.pathname}`;
-    const { error } = await supabaseClient.auth.resetPasswordForEmail(email, { redirectTo });
+    const { error } = await remoteDatabaseClient.auth.resetPasswordForEmail(email, { redirectTo });
     if (error) {
-      elements.resetRequestError.textContent = "Emel reset tidak dapat dihantar. Semak tetapan Supabase Auth.";
+      elements.resetRequestError.textContent = "Emel reset tidak dapat dihantar. Semak tetapan emel.";
       return;
     }
     closeModal(elements.resetPasswordModal);
@@ -810,11 +775,11 @@ async function verifyPasswordReset(event) {
     elements.resetVerifyError.textContent = "Permintaan reset tidak sah.";
     return;
   }
-  if (!passwordResetRequest.supabaseRecovery && passwordResetRequest.expiresAt <= Date.now()) {
+  if (!passwordResetRequest.remoteRecovery && passwordResetRequest.expiresAt <= Date.now()) {
     elements.resetVerifyError.textContent = "Kod telah tamat. Minta kod baru.";
     return;
   }
-  if (!passwordResetRequest.supabaseRecovery && code !== passwordResetRequest.code) {
+  if (!passwordResetRequest.remoteRecovery && code !== passwordResetRequest.code) {
     elements.resetVerifyError.textContent = "Kod verifikasi tidak betul.";
     return;
   }
@@ -827,8 +792,8 @@ async function verifyPasswordReset(event) {
     return;
   }
 
-  if (passwordResetRequest.supabaseRecovery) {
-    const { error } = await supabaseClient.auth.updateUser({ password });
+  if (passwordResetRequest.remoteRecovery) {
+    const { error } = await remoteDatabaseClient.auth.updateUser({ password });
     if (error) {
       elements.resetVerifyError.textContent = "Kata laluan tidak dapat dikemas kini.";
       return;
@@ -1131,22 +1096,28 @@ function formatSheetStatus(status) {
 function applySheetStatusToLead(lead, sheetStatus, now = Date.now()) {
   const nextStatus = normalizeSheetStatus(sheetStatus);
   const previousVisualStatus = getLeadVisualStatus(lead);
+  if (lead.status === "contacted" && nextStatus === "new" && lead.statusLockedUntil > now) {
+    return false;
+  }
 
   if (nextStatus === "contacted") {
     lead.status = "contacted";
     lead.passCount = lead.passCount || 0;
     lead.contactedAt = lead.contactedAt || now;
     lead.responseMs = lead.responseMs || Math.max(0, lead.contactedAt - lead.receivedAt);
+    lead.statusLockedUntil = null;
   } else if (nextStatus === "passed") {
     lead.status = "new";
     lead.passCount = Math.max(lead.passCount || 0, 1);
     lead.contactedAt = null;
     lead.responseMs = null;
+    lead.statusLockedUntil = null;
   } else {
     lead.status = "new";
     lead.passCount = 0;
     lead.contactedAt = null;
     lead.responseMs = null;
+    lead.statusLockedUntil = null;
   }
 
   return previousVisualStatus !== getLeadVisualStatus(lead);
@@ -1237,7 +1208,7 @@ async function addLead(input, options = {}) {
     try {
       await persistLead(existingLead);
     } catch (error) {
-      showToast("Lead tidak dapat dikemas kini", "Semak sambungan dan polisi Supabase.", "error");
+      showToast("Lead tidak dapat dikemas kini", "Semak sambungan Google Sheet dan cuba lagi.", "error");
       console.error(error);
       return false;
     }
@@ -1279,7 +1250,7 @@ async function addLead(input, options = {}) {
   } catch (error) {
     state.leads = state.leads.filter((item) => item.id !== lead.id);
     saveState();
-    showToast("Lead tidak dapat disimpan", "Semak sambungan dan polisi Supabase.", "error");
+    showToast("Lead tidak dapat disimpan", "Semak sambungan Google Sheet dan cuba lagi.", "error");
     console.error(error);
     return false;
   }
@@ -1349,7 +1320,7 @@ async function addManualLead(event) {
   }
 
   closeModal(elements.manualLeadModal);
-  showToast("Manual lead disimpan", "Google Sheet, dashboard dan Supabase telah diselaraskan.", "success");
+  showToast("Manual lead disimpan", "Google Sheet dan dashboard telah diselaraskan.", "success");
   renderAll();
 }
 
@@ -1513,6 +1484,7 @@ function agentSheetPayload(agent) {
     role: agent.role || "agent",
     active: agent.active ? "active" : "inactive",
     leadsHandled: agent.leadsHandled || 0,
+    password: agent.password || "",
     created_at: agent.createdAt ? new Date(agent.createdAt).toISOString() : new Date().toISOString(),
   };
 }
@@ -1571,9 +1543,13 @@ async function syncAgentsFromSheet(sheetAgentRows) {
       const updates = {
         name: sheetAgent.name,
         phone: sheetAgent.phone,
+        email: sheetAgent.email,
         active: nextActive,
         leadsHandled: sheetAgent.leadsHandled,
       };
+      if (sheetAgent.password.length >= 8) {
+        updates.password = sheetAgent.password;
+      }
       const changed = Object.entries(updates).some(([key, value]) => existingAgent[key] !== value);
       if (changed) {
         Object.assign(existingAgent, updates);
@@ -1589,33 +1565,16 @@ async function syncAgentsFromSheet(sheetAgentRows) {
       continue;
     }
 
-    if (supabaseMode) {
-      const { data, error } = await supabaseClient.functions.invoke("admin-manage-agent", {
-        body: {
-          action: "create",
-          name: sheetAgent.name,
-          phone: sheetAgent.phone,
-          email: sheetAgent.email,
-          password: sheetAgent.password.length >= 8 ? sheetAgent.password : DEFAULT_AGENT_PASSWORD,
-          active: sheetAgent.active,
-        },
-      });
-      if (error || !data?.ok) {
-        throw new Error(data?.error || "Ejen dari Google Sheet tidak dapat dicipta di Supabase.");
-      }
-      reloadRemote = true;
-    } else {
-      state.agents.push({
-        id: sheetAgent.id || makeId("agent"),
-        name: sheetAgent.name,
-        phone: sheetAgent.phone,
-        email: sheetAgent.email,
-        password: sheetAgent.password.length >= 8 ? sheetAgent.password : DEFAULT_AGENT_PASSWORD,
-        role: "agent",
-        active: sheetAgent.active,
-        leadsHandled: sheetAgent.leadsHandled,
-      });
-    }
+    state.agents.push({
+      id: sheetAgent.id || makeId("agent"),
+      name: sheetAgent.name,
+      phone: sheetAgent.phone,
+      email: sheetAgent.email,
+      password: sheetAgent.password.length >= 8 ? sheetAgent.password : DEFAULT_AGENT_PASSWORD,
+      role: "agent",
+      active: sheetAgent.active,
+      leadsHandled: sheetAgent.leadsHandled,
+    });
     result.added += 1;
     result.backfilled += sheetAgent.id ? 0 : 1;
   }
@@ -1623,27 +1582,18 @@ async function syncAgentsFromSheet(sheetAgentRows) {
   const removedAgents = state.agents.filter(
     (agent) =>
       agent.role === "agent" &&
+      agent.active &&
       agent.id !== state.currentUserId &&
       !sheetEmails.has(String(agent.email || "").toLowerCase()),
   );
 
   for (const agent of removedAgents) {
-    if (supabaseMode) {
-      const { data, error } = await supabaseClient.functions.invoke("admin-manage-agent", {
-        body: { action: "delete", userId: agent.id, email: agent.email },
-      });
-      if (error || !data?.ok) {
-        throw new Error(data?.error || `Ejen ${agent.name} tidak dapat dibuang dari Supabase.`);
-      }
-      reloadRemote = true;
-    } else {
-      state.agents = state.agents.filter((item) => item.id !== agent.id);
-    }
+    state.agents = state.agents.filter((item) => item.id !== agent.id);
     result.removed += 1;
   }
 
   saveState();
-  if (supabaseMode && reloadRemote) {
+  if (remoteDatabaseMode && reloadRemote) {
     await loadRemoteState(state.currentUserId);
     for (const sheetAgent of sheetAgents) {
       const savedAgent = state.agents.find((agent) => agent.email?.toLowerCase() === sheetAgent.email);
@@ -1762,8 +1712,8 @@ async function processExpiredLeads() {
         `Masa ${previousAgent?.name || "ejen"} tamat, dipindahkan kepada ${nextAgent.name}`,
       );
       changed = true;
-      if (supabaseMode) {
-        supabaseClient
+      if (remoteDatabaseMode) {
+        remoteDatabaseClient
           .rpc("pass_expired_lead", {
             p_lead_id: lead.id,
             p_next_agent_id: nextAgent.id,
@@ -1831,8 +1781,8 @@ async function handleCall(leadId) {
     let claimedLead = lead;
     let phoneToCall = lead.phone;
 
-    if (supabaseMode) {
-      const { data, error } = await supabaseClient.rpc("claim_lead", { p_lead_id: leadId });
+    if (remoteDatabaseMode) {
+      const { data, error } = await remoteDatabaseClient.rpc("claim_lead", { p_lead_id: leadId });
       if (error) throw error;
       if (!data?.length) {
         showToast("Lead tidak dapat dikunci", "Lead mungkin telah dipindahkan, tamat masa atau diambil ejen lain.", "error");
@@ -1848,6 +1798,7 @@ async function handleCall(leadId) {
       lead.status = "contacted";
       lead.contactedAt = Date.now();
       lead.responseMs = lead.contactedAt - lead.receivedAt;
+      lead.statusLockedUntil = Date.now() + 2 * 60 * 1000;
       const localAgent = getAgent(lead.assignedAgentId);
       if (localAgent) localAgent.leadsHandled = (localAgent.leadsHandled || 0) + 1;
       addActivity("contacted", lead, `${localAgent?.name || "Ejen"} CALL NOW untuk ${lead.project}`);
@@ -1855,20 +1806,21 @@ async function handleCall(leadId) {
 
     const agent = getAgent((claimedLead || lead).assignedAgentId);
     saveState();
+    await updateLeadStatusInSheet(claimedLead || lead, "Contacted");
+    if (agent) await upsertAgentToSheet(agent);
     showToast(
       "Lead berjaya dikunci",
       `${lead.name} untuk projek ${lead.project} kini milik ${agent?.name || "ejen ini"}.`,
     );
     renderAll();
-    updateLeadStatusInSheet(claimedLead || lead, "Contacted");
 
     if (!dialLeadPhone(phoneToCall)) {
       showToast("Nombor telefon tiada", "Lead ini belum ada nombor telefon yang boleh dipanggil.", "error");
     }
   } catch (error) {
     console.error(error);
-    showToast("CALL NOW gagal", error?.message || "Semak sambungan Supabase dan cuba lagi.", "error");
-    if (supabaseMode) {
+    showToast("CALL NOW gagal", error?.message || "Semak sambungan Google Sheet dan cuba lagi.", "error");
+    if (remoteDatabaseMode) {
       await loadRemoteState(state.currentUserId);
       renderAll();
     }
@@ -2108,9 +2060,11 @@ function renderAgents() {
         const roleLabel = agent.role === "admin" ? "Administrator" : isPendingAgent ? "Menunggu approval" : "Property Agent";
         const actionButtons = isPendingAgent
           ? `
+            <button class="edit-agent" type="button" data-agent-edit="${agent.id}">Edit details</button>
             <button class="approve-agent" type="button" data-agent-approve="${agent.id}">Approve</button>
             <button class="reject-agent" type="button" data-agent-reject="${agent.id}">Reject</button>`
           : `
+            <button class="edit-agent" type="button" data-agent-edit="${agent.id}">Edit details</button>
             <button class="edit-password" type="button" data-agent-password="${agent.id}">Edit password</button>
             ${
               agent.id !== state.currentUserId
@@ -2183,21 +2137,8 @@ function renderUser() {
 
 function renderIntegration() {
   const integration = state.integration;
-  const supabaseConfig = loadSupabaseConfig();
   elements.sheetEndpoint.value = integration.endpoint;
   elements.pollInterval.value = String(integration.interval);
-  elements.supabaseUrl.value = supabaseConfig?.url || "";
-  elements.supabaseKey.value = supabaseConfig?.key || "";
-  elements.supabaseResult.classList.toggle("error", Boolean(supabaseConfig && !supabaseMode));
-  elements.supabaseResult.innerHTML = `
-    <span class="status-dot"></span>
-    <span>${
-      supabaseMode
-        ? "Supabase aktif. Akaun, lead dan aktiviti sedang diselaraskan secara live."
-        : supabaseConfig
-          ? "Konfigurasi disimpan tetapi sambungan belum aktif. Semak schema dan akaun Auth."
-          : "Belum dikonfigurasi. Data tempatan sedang digunakan."
-    }</span>`;
   elements.sidebarSyncText.textContent = integration.connected ? "Disambungkan" : "Belum disambungkan";
   elements.sidebarSyncStatus.textContent = integration.connected
     ? `Sync ${integration.lastSyncAt ? relativeTime(integration.lastSyncAt) : "aktif"}`
@@ -2251,10 +2192,24 @@ function switchView(viewName) {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-function openAgentModal() {
+function openAgentModal(agentId = null) {
+  const agent = agentId ? getAgent(agentId) : null;
+  editingAgentId = agent?.id || null;
+  elements.agentForm.reset();
+  elements.agentModalKicker.textContent = agent ? "Kemaskini ahli pasukan" : "Ahli pasukan baru";
+  elements.agentModalTitle.textContent = agent ? "Edit Ejen" : "Daftar Ejen";
+  elements.agentPasswordLabel.textContent = agent ? "Kata laluan baru (optional)" : "Kata laluan sementara";
+  elements.agentPassword.required = !agent;
+  elements.agentPassword.placeholder = agent ? "Biarkan kosong jika tidak mahu tukar" : "Minimum 8 aksara";
+  elements.agentSubmitButton.textContent = agent ? "Simpan perubahan" : "Daftar ejen";
+  if (agent) {
+    elements.agentName.value = agent.name;
+    elements.agentPhone.value = agent.phone || "";
+    elements.agentEmail.value = agent.email || "";
+  }
   elements.agentModal.classList.add("open");
   elements.agentModal.setAttribute("aria-hidden", "false");
-  window.setTimeout(() => document.querySelector("#agent-name").focus(), 100);
+  window.setTimeout(() => elements.agentName.focus(), 100);
 }
 
 function closeModal(modal) {
@@ -2264,50 +2219,54 @@ function closeModal(modal) {
 
 async function addAgent(event) {
   event.preventDefault();
-  const name = document.querySelector("#agent-name").value.trim();
-  const phone = document.querySelector("#agent-phone").value.trim();
-  const email = document.querySelector("#agent-email").value.trim();
-  const password = document.querySelector("#agent-password").value;
-  if (!name || !phone || !email || password.length < 8) return;
-  if (state.agents.some((agent) => agent.email.toLowerCase() === email.toLowerCase())) {
+  const name = elements.agentName.value.trim();
+  const phone = elements.agentPhone.value.trim();
+  const email = elements.agentEmail.value.trim();
+  const password = elements.agentPassword.value;
+  const editingAgent = editingAgentId ? getAgent(editingAgentId) : null;
+  if (!name || !phone || !email) return;
+  if (!editingAgent && password.length < 8) return;
+  if (editingAgent && password && password.length < 8) {
+    showToast("Password terlalu pendek", "Kata laluan mesti sekurang-kurangnya 8 aksara.", "error");
+    return;
+  }
+  if (
+    state.agents.some(
+      (agent) => agent.id !== editingAgentId && agent.email.toLowerCase() === email.toLowerCase(),
+    )
+  ) {
     showToast("Emel telah digunakan", "Gunakan alamat emel lain untuk ejen ini.", "error");
     return;
   }
 
-  if (supabaseMode) {
-    const { data, error } = await supabaseClient.functions.invoke("admin-manage-agent", {
-      body: { action: "create", name, phone, email, password },
-    });
-    if (error || !data?.ok) {
-      showToast(
-        "Ejen tidak dapat didaftarkan",
-        data?.error || "Deploy Edge Function admin-manage-agent dan semak akses admin.",
-        "error",
-      );
-      return;
-    }
-    await loadRemoteState(state.currentUserId);
+  if (editingAgent) {
+    editingAgent.name = name;
+    editingAgent.phone = phone;
+    editingAgent.email = email.toLowerCase();
+    if (password) editingAgent.password = password;
   } else {
     state.agents.push({
       id: makeId("agent"),
       name,
       phone,
-      email,
+      email: email.toLowerCase(),
       password,
       role: "agent",
       active: true,
       leadsHandled: 0,
+      createdAt: Date.now(),
     });
-    saveState();
   }
-  const savedAgent = state.agents.find((agent) => agent.email.toLowerCase() === email.toLowerCase());
+  saveState();
+  const savedAgent = editingAgent || state.agents.find((agent) => agent.email.toLowerCase() === email.toLowerCase());
   const agentsPushed = await upsertAgentToSheet(savedAgent);
   elements.agentForm.reset();
+  editingAgentId = null;
   closeModal(elements.agentModal);
   showToast(
-    agentsPushed ? "Ejen didaftarkan" : "Ejen masuk dashboard",
+    agentsPushed ? (editingAgent ? "Ejen dikemaskini" : "Ejen didaftarkan") : "Ejen masuk dashboard",
     agentsPushed
-      ? `${name} kini termasuk dalam dashboard, Supabase dan Google Sheet.`
+      ? `${name} kini diselaraskan dalam dashboard dan Google Sheet.`
       : "Google Sheet belum dapat dikemas kini. Semak Web App URL.",
     agentsPushed ? "success" : "error",
   );
@@ -2320,8 +2279,8 @@ async function approveAgent(agentId) {
   agent.active = true;
   saveState();
   try {
-    if (supabaseMode) {
-      const { data, error } = await supabaseClient.functions.invoke("admin-manage-agent", {
+    if (remoteDatabaseMode) {
+      const { data, error } = await remoteDatabaseClient.functions.invoke("admin-manage-agent", {
         body: { action: "approve", userId: agentId },
       });
       if (error || !data?.ok) {
@@ -2335,7 +2294,7 @@ async function approveAgent(agentId) {
     agent.active = false;
     saveState();
     console.error(error);
-    showToast("Approval gagal", error.message || "Semak sambungan dan polisi Supabase.", "error");
+    showToast("Approval gagal", error.message || "Semak sambungan Google Sheet.", "error");
     renderAll();
     return;
   }
@@ -2389,7 +2348,7 @@ async function toggleAgent(agentId) {
     );
   } catch (error) {
     console.error(error);
-    showToast("Perubahan belum disimpan", "Semak polisi database Supabase.", "error");
+    showToast("Perubahan belum disimpan", "Semak sambungan Google Sheet.", "error");
   }
   const agentsPushed = await upsertAgentToSheet(agent);
   showToast(
@@ -2407,20 +2366,20 @@ async function toggleAgent(agentId) {
 async function removeAgent(agentId) {
   const agent = getAgent(agentId);
   if (!agent) return;
-  if (supabaseMode) {
+  if (remoteDatabaseMode) {
     const agentsPushed = await deleteAgentFromSheet(agent);
-    const { data, error } = await supabaseClient.functions.invoke("admin-manage-agent", {
+    const { data, error } = await remoteDatabaseClient.functions.invoke("admin-manage-agent", {
       body: { action: "delete", userId: agentId, email: agent.email },
     });
     if (error || !data?.ok) {
-      showToast("Ejen tidak dapat dibuang", data?.error || "Semak Edge Function Supabase.", "error");
+      showToast("Ejen tidak dapat dibuang", data?.error || "Semak sambungan Google Sheet.", "error");
       return;
     }
     await loadRemoteState(state.currentUserId);
     showToast(
       agentsPushed ? "Ejen dibuang" : "Ejen dibuang dari dashboard",
       agentsPushed
-        ? `${agent.name} telah dikeluarkan daripada dashboard, Supabase dan Google Sheet.`
+        ? `${agent.name} telah dikeluarkan daripada dashboard dan Google Sheet.`
         : "Google Sheet belum dapat dikemas kini. Semak Web App URL.",
       agentsPushed ? "success" : "error",
     );
@@ -2442,7 +2401,7 @@ async function removeAgent(agentId) {
   showToast(
     agentsPushed ? "Ejen dibuang" : "Ejen dibuang dari dashboard",
     agentsPushed
-      ? `${agent.name} telah dikeluarkan daripada dashboard, Supabase dan Google Sheet.`
+      ? `${agent.name} telah dikeluarkan daripada dashboard dan Google Sheet.`
       : "Google Sheet belum dapat dikemas kini. Semak Web App URL.",
     agentsPushed ? "success" : "error",
   );
@@ -2476,19 +2435,20 @@ async function updateAgentPassword(event) {
     return;
   }
 
-  if (supabaseMode) {
-    const { data, error } = await supabaseClient.functions.invoke("admin-manage-agent", {
+  if (remoteDatabaseMode) {
+    const { data, error } = await remoteDatabaseClient.functions.invoke("admin-manage-agent", {
       body: { action: "update_password", userId: agent.id, password },
     });
     if (error || !data?.ok) {
       elements.agentPasswordError.textContent =
-        data?.error || "Password tidak dapat dikemas kini. Semak Edge Function Supabase.";
+        data?.error || "Password tidak dapat dikemas kini. Semak sambungan Google Sheet.";
       return;
     }
   } else {
     agent.password = password;
     saveState();
   }
+  await upsertAgentToSheet(agent);
 
   closeModal(elements.agentPasswordModal);
   showToast("Kata laluan dikemas kini", `Kata laluan ${agent.name} telah ditukar.`);
@@ -2539,7 +2499,7 @@ async function updateContact(event) {
     renderAll();
   } catch (error) {
     console.error(error);
-    elements.contactFormError.textContent = "Perubahan tidak dapat disimpan ke Supabase.";
+    elements.contactFormError.textContent = "Perubahan tidak dapat disimpan ke dashboard.";
   }
 }
 
@@ -2564,8 +2524,8 @@ async function saveLeadNote(leadId, button = null) {
   }
 
   try {
-    if (supabaseMode) {
-      const { data, error } = await supabaseClient.rpc("update_lead_notes", {
+    if (remoteDatabaseMode) {
+      const { data, error } = await remoteDatabaseClient.rpc("update_lead_notes", {
         p_lead_id: lead.id,
         p_notes: nextNotes,
       });
@@ -2578,7 +2538,7 @@ async function saveLeadNote(leadId, button = null) {
     lead.notes = previousNotes;
     field.value = previousNotes;
     console.error(error);
-    showToast("Nota gagal disimpan", error?.message || "Semak sambungan Supabase dan cuba lagi.", "error");
+    showToast("Nota gagal disimpan", error?.message || "Semak sambungan Google Sheet dan cuba lagi.", "error");
   } finally {
     if (button) {
       button.disabled = false;
@@ -2596,7 +2556,7 @@ async function deleteLeadEverywhere(leadId) {
   if (!lead) return;
 
   const confirmed = window.confirm(
-    `Padam lead ${lead.name}? Tindakan ini akan buang lead daripada Google Sheet, dashboard dan Supabase.`,
+    `Padam lead ${lead.name}? Tindakan ini akan buang lead daripada Google Sheet dan dashboard.`,
   );
   if (!confirmed) return;
 
@@ -2612,11 +2572,11 @@ async function deleteLeadEverywhere(leadId) {
       selectedContactId = null;
       closeModal(elements.contactModal);
     }
-    showToast("Lead dipadam", "Google Sheet, dashboard dan Supabase telah diselaraskan.");
+    showToast("Lead dipadam", "Google Sheet dan dashboard telah diselaraskan.");
     renderAll();
   } catch (error) {
     console.error(error);
-    showToast("Lead tidak dipadam", "Semak sambungan dan polisi Supabase.", "error");
+    showToast("Lead tidak dipadam", "Semak sambungan Google Sheet.", "error");
   }
 }
 
@@ -2654,8 +2614,8 @@ async function syncGoogleSheet(options = {}) {
     }
     const removedLeads = state.leads.filter((lead) => !sheetKeys.has(lead.dedupeKey));
     let removed = removedLeads.length;
-    if (supabaseMode && isAdmin()) {
-      const { data, error } = await supabaseClient.rpc("delete_leads_not_in_dedupe_keys", {
+    if (remoteDatabaseMode && isAdmin()) {
+      const { data, error } = await remoteDatabaseClient.rpc("delete_leads_not_in_dedupe_keys", {
         p_dedupe_keys: [...sheetKeys],
       });
       if (error) throw error;
@@ -2675,8 +2635,8 @@ async function syncGoogleSheet(options = {}) {
     state.integration.connected = true;
     state.integration.lastSyncAt = Date.now();
     saveState();
-    if (supabaseMode) {
-      await supabaseClient.from("app_settings").upsert({
+    if (remoteDatabaseMode) {
+      await remoteDatabaseClient.from("app_settings").upsert({
         id: 1,
         google_sheet_endpoint: endpoint,
         poll_interval: state.integration.interval,
@@ -2703,7 +2663,7 @@ async function syncGoogleSheet(options = {}) {
       showToast(
         title,
         added || updated || removed
-          ? "Dashboard dan Supabase telah diselaraskan dengan Google Sheet."
+          ? "Dashboard telah diselaraskan dengan Google Sheet."
           : "Tiada perubahan baru ditemui.",
       );
     }
@@ -2740,8 +2700,8 @@ async function saveIntegration(event) {
     state.integration.connected = false;
     state.integration.lastSyncAt = null;
     saveState();
-    if (supabaseMode) {
-      await supabaseClient.from("app_settings").upsert({
+    if (remoteDatabaseMode) {
+      await remoteDatabaseClient.from("app_settings").upsert({
         id: 1,
         google_sheet_endpoint: null,
         poll_interval: state.integration.interval,
@@ -2756,32 +2716,6 @@ async function saveIntegration(event) {
   }
   saveState();
   syncGoogleSheet();
-}
-
-function saveSupabaseConfig(event) {
-  event.preventDefault();
-  const url = elements.supabaseUrl.value.trim().replace(/\/+$/, "");
-  const key = elements.supabaseKey.value.trim();
-  if (!/^https:\/\/.+\.supabase\.co$/i.test(url) || !key) {
-    elements.supabaseResult.classList.add("error");
-    elements.supabaseResult.innerHTML =
-      '<span class="status-dot"></span><span>Masukkan Project URL dan publishable / anon key yang sah.</span>';
-    return;
-  }
-  localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify({ url, key }));
-  localStorage.removeItem(SUPABASE_DISABLED_KEY);
-  showToast("Konfigurasi Supabase disimpan", "App akan dimuat semula untuk mengaktifkan database.");
-  window.setTimeout(() => window.location.reload(), 500);
-}
-
-async function disconnectSupabase() {
-  if (supabaseClient) await supabaseClient.auth.signOut();
-  localStorage.removeItem(SUPABASE_CONFIG_KEY);
-  localStorage.setItem(SUPABASE_DISABLED_KEY, "true");
-  supabaseClient = null;
-  supabaseMode = false;
-  showToast("Supabase diputuskan", "App kembali menggunakan data tempatan.");
-  window.setTimeout(() => window.location.reload(), 400);
 }
 
 document.querySelectorAll("[data-view]").forEach((button) => {
@@ -2828,14 +2762,12 @@ elements.manualLeadForm.addEventListener("submit", addManualLead);
 elements.manualLeadPhone.addEventListener("input", () => {
   elements.manualLeadError.textContent = "";
 });
-elements.addAgentButton.addEventListener("click", openAgentModal);
+elements.addAgentButton.addEventListener("click", () => openAgentModal());
 elements.agentForm.addEventListener("submit", addAgent);
 elements.agentPasswordForm.addEventListener("submit", updateAgentPassword);
 elements.contactForm.addEventListener("submit", updateContact);
 elements.integrationForm.addEventListener("submit", saveIntegration);
 elements.syncNowButton.addEventListener("click", () => syncGoogleSheet());
-elements.supabaseForm.addEventListener("submit", saveSupabaseConfig);
-elements.supabaseDisconnect.addEventListener("click", disconnectSupabase);
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.addEventListener("message", (event) => {
@@ -2848,7 +2780,10 @@ document.querySelectorAll("[data-close-modal]").forEach((button) => {
 });
 
 elements.agentModal.addEventListener("click", (event) => {
-  if (event.target === elements.agentModal) closeModal(elements.agentModal);
+  if (event.target === elements.agentModal) {
+    editingAgentId = null;
+    closeModal(elements.agentModal);
+  }
 });
 
 elements.manualLeadModal.addEventListener("click", (event) => {
@@ -2871,11 +2806,13 @@ elements.agentsGrid.addEventListener("click", (event) => {
   const reject = event.target.closest("[data-agent-reject]");
   const remove = event.target.closest("[data-agent-remove]");
   const password = event.target.closest("[data-agent-password]");
+  const edit = event.target.closest("[data-agent-edit]");
   if (toggle) toggleAgent(toggle.dataset.agentToggle);
   if (approve) approveAgent(approve.dataset.agentApprove);
   if (reject) rejectAgent(reject.dataset.agentReject);
   if (remove) removeAgent(remove.dataset.agentRemove);
   if (password) openAgentPasswordModal(password.dataset.agentPassword);
+  if (edit) openAgentModal(edit.dataset.agentEdit);
 });
 
 elements.contactDeleteButton.addEventListener("click", () => {
@@ -2887,6 +2824,7 @@ elements.contactDeleteButton.addEventListener("click", () => {
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     closeModal(elements.agentModal);
+    editingAgentId = null;
     closeModal(elements.manualLeadModal);
     closeModal(elements.resetPasswordModal);
     closeModal(elements.agentPasswordModal);
@@ -2897,33 +2835,7 @@ document.addEventListener("keydown", (event) => {
 
 async function bootstrap() {
   saveState();
-  initSupabase();
-  if (supabaseClient) {
-    supabaseClient.auth.onAuthStateChange((event) => {
-      if (event === "PASSWORD_RECOVERY") {
-        window.setTimeout(openSupabaseRecoveryModal, 0);
-      }
-    });
-    const {
-      data: { session },
-    } = await supabaseClient.auth.getSession();
-    if (session?.user) {
-      const loaded = await loadRemoteState(session.user.id);
-      if (loaded) {
-        const signedInUser = getCurrentUser();
-        if (!signedInUser?.active) {
-          await supabaseClient.auth.signOut();
-          showLogin();
-          setLoginError("Akaun anda sedang menunggu approval admin.");
-          return;
-        }
-        startAuthenticatedApp(signedInUser);
-        return;
-      }
-    }
-    showLogin();
-    return;
-  }
+  initRemoteDatabase();
 
   const sessionUser = getSessionUser();
   if (sessionUser) {

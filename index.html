@@ -25,9 +25,8 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260625-agent-delete-sync-v7" />
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260625-agent-delete-sync-v7" defer></script>
+    <link rel="stylesheet" href="styles.css?v=20260625-google-sheet-core-v8" />
+    <script src="app.js?v=20260625-google-sheet-core-v8" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -482,31 +481,6 @@
             </div>
           </div>
 
-          <section class="panel supabase-card">
-            <div class="integration-brand">
-              <span class="large-sheet-icon supabase-icon">S</span>
-              <div>
-                <h3>Database Supabase</h3>
-                <p>Simpan akaun ejen dan lead untuk kegunaan semua peranti secara live.</p>
-              </div>
-            </div>
-            <form id="supabase-form">
-              <label for="supabase-url">Project URL</label>
-              <input id="supabase-url" type="url" placeholder="https://project-id.supabase.co" />
-              <label for="supabase-key">Publishable / anon key</label>
-              <input id="supabase-key" type="password" autocomplete="off" placeholder="sb_publishable_... atau anon key" />
-              <p class="form-help">Jangan masukkan service_role key di sini. Jalankan fail schema.sql sebelum menyambung.</p>
-              <div class="form-actions">
-                <button class="primary-button" type="submit">Simpan Supabase</button>
-                <button class="secondary-button" id="supabase-disconnect" type="button">Putuskan</button>
-              </div>
-            </form>
-            <div class="connection-result" id="supabase-result">
-              <span class="status-dot"></span>
-              <span>Belum dikonfigurasi. Data tempatan sedang digunakan.</span>
-            </div>
-          </section>
-
           <div class="integration-grid">
             <section class="panel integration-form-card">
               <div class="integration-brand">
@@ -551,7 +525,7 @@
               <h3>Kolum Google Sheet</h3>
               <p>
                 Google Sheet ialah database utama. Sebarang tambah, edit atau padam di Sheet akan diselaraskan
-                ke dashboard dan Supabase. Susunan kolum tidak penting.
+                ke dashboard. Susunan kolum tidak penting.
               </p>
               <div class="column-list">
                 <span><b>name</b><small>Nama lead</small></span>
@@ -559,7 +533,9 @@
                 <span><b>email</b><small>Emel lead</small></span>
                 <span><b>project</b><small>Nama projek</small></span>
                 <span><b>source</b><small>Manual / Meta / TikTok</small></span>
+                <span><b>status</b><small>New / Contacted / Passed</small></span>
                 <span><b>created_at</b><small>Tarikh & masa</small></span>
+                <span><b>id</b><small>ID unik lead</small></span>
               </div>
               <div class="guide-note">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -567,8 +543,8 @@
                   <path d="M12 10v6M12 7h.01" />
                 </svg>
                 <p>
-                  Fail <strong>google-apps-script/Code.gs</strong> dalam projek ini boleh terus digunakan
-                  untuk menerbitkan data Sheet sebagai Web App URL.
+                  Fail <strong>google-apps-script/Code.gs</strong> akan sediakan tab <strong>Agents</strong>
+                  dengan kolum ID, Nama, No Phone, Emel, Role, Status, Leads Handled, Tarikh Daftar dan Password.
                 </p>
               </div>
             </section>
@@ -611,7 +587,7 @@
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="agent-modal-title">
         <div class="modal-heading">
           <div>
-            <span class="section-kicker">Ahli pasukan baru</span>
+            <span class="section-kicker" id="agent-modal-kicker">Ahli pasukan baru</span>
             <h2 id="agent-modal-title">Daftar Ejen</h2>
           </div>
           <button class="modal-close" data-close-modal="agent-modal" type="button" aria-label="Tutup">×</button>
@@ -623,7 +599,7 @@
           <input id="agent-phone" type="tel" placeholder="+60 12-345 6789" required />
           <label for="agent-email">Emel</label>
           <input id="agent-email" type="email" placeholder="amir@agency.com" required />
-          <label for="agent-password">Kata laluan sementara</label>
+          <label for="agent-password" id="agent-password-label">Kata laluan sementara</label>
           <input
             id="agent-password"
             type="password"
@@ -632,7 +608,7 @@
             placeholder="Minimum 8 aksara"
             required
           />
-          <button class="primary-button full" type="submit">Daftar ejen</button>
+          <button class="primary-button full" id="agent-submit-button" type="submit">Daftar ejen</button>
         </form>
       </div>
     </div>
