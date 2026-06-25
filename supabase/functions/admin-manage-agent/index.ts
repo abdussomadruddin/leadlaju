@@ -5,6 +5,79 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+async function findAuthUserByEmail(adminClient, email: string) {
+  const targetEmail = String(email || "").trim().toLowerCase();
+  if (!targetEmail) return null;
+
+  for (let page = 1; page <= 20; page += 1) {
+    const { data, error } = await adminClient.auth.admin.listUsers({ page, perPage: 100 });
+    if (error) throw error;
+    const user = data.users.find((item) => String(item.email || "").trim().toLowerCase() === targetEmail);
+    if (user) return user;
+    if (data.users.length < 100) return null;
+  }
+
+  return null;
+}
+
+async function upsertAgentAuthUser(
+  adminClient,
+  payload: { email: string; password: string; name: string; phone?: string; active: boolean },
+) {
+  const email = String(payload.email).trim().toLowerCase();
+  const password = String(payload.password);
+  const name = String(payload.name).trim();
+  const phone = String(payload.phone || "").trim();
+
+  const { data: existingProfile } = await adminClient
+    .from("profiles")
+    .select("id, active")
+    .eq("email", email)
+    .maybeSingle();
+  const existingAuthUser = existingProfile?.id
+    ? (await adminClient.auth.admin.getUserById(existingProfile.id)).data.user
+    : await findAuthUserByEmail(adminClient, email);
+
+  if (existingAuthUser?.id) {
+    const { error: updateUserError } = await adminClient.auth.admin.updateUserById(existingAuthUser.id, {
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { name, phone, role: "agent" },
+    });
+    if (updateUserError) throw updateUserError;
+
+    await adminClient.from("profiles").upsert({
+      id: existingAuthUser.id,
+      name,
+      phone,
+      email,
+      role: "agent",
+      active: payload.active,
+    });
+    return existingAuthUser.id;
+  }
+
+  const { data, error } = await adminClient.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    user_metadata: { name, phone, role: "agent" },
+  });
+  if (error) throw error;
+
+  await adminClient.from("profiles").upsert({
+    id: data.user.id,
+    name,
+    phone,
+    email,
+    role: "agent",
+    active: payload.active,
+  });
+
+  return data.user.id;
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -45,42 +118,15 @@ Deno.serve(async (request) => {
         throw new Error("Emel ini sudah aktif dalam sistem. Sila log masuk.");
       }
 
-      if (existingProfile?.id) {
-        const { error: updateUserError } = await adminClient.auth.admin.updateUserById(existingProfile.id, {
-          password,
-          email_confirm: true,
-          user_metadata: { name, phone, role: "agent" },
-        });
-        if (updateUserError) throw updateUserError;
-
-        await adminClient.from("profiles").update({
-          name,
-          phone,
-          role: "agent",
-          active: false,
-        }).eq("id", existingProfile.id);
-
-        return Response.json({ ok: true, pending: true, userId: existingProfile.id }, { headers: corsHeaders });
-      }
-
-      const { data, error } = await adminClient.auth.admin.createUser({
+      const userId = await upsertAgentAuthUser(adminClient, {
         email,
         password,
-        email_confirm: true,
-        user_metadata: { name, phone, role: "agent" },
-      });
-      if (error) throw error;
-
-      await adminClient.from("profiles").upsert({
-        id: data.user.id,
         name,
         phone,
-        email,
-        role: "agent",
         active: false,
       });
 
-      return Response.json({ ok: true, pending: true, userId: data.user.id }, { headers: corsHeaders });
+      return Response.json({ ok: true, pending: true, userId }, { headers: corsHeaders });
     }
 
     const {
@@ -104,24 +150,11 @@ Deno.serve(async (request) => {
       }
       const shouldActivate =
         payload.active === false || String(payload.active || "").toLowerCase() === "inactive" ? false : true;
-      const { data, error } = await adminClient.auth.admin.createUser({
-        email: String(payload.email).trim().toLowerCase(),
-        password: String(payload.password),
-        email_confirm: true,
-        user_metadata: {
-          name: String(payload.name).trim(),
-          phone: String(payload.phone || "").trim(),
-          role: "agent",
-        },
-      });
-      if (error) throw error;
-
-      await adminClient.from("profiles").upsert({
-        id: data.user.id,
-        name: String(payload.name).trim(),
-        phone: String(payload.phone || "").trim(),
-        email: String(payload.email).trim().toLowerCase(),
-        role: "agent",
+      await upsertAgentAuthUser(adminClient, {
+        email: payload.email,
+        password: payload.password,
+        name: payload.name,
+        phone: payload.phone,
         active: shouldActivate,
       });
     } else if (payload.action === "approve") {
@@ -149,7 +182,21 @@ Deno.serve(async (request) => {
       });
       if (error) throw error;
     } else if (payload.action === "delete") {
-      if (!payload.userId || payload.userId === user.id) {
+      const email = String(payload.email || "").trim().toLowerCase();
+      let targetUserId = payload.userId || "";
+      if (!targetUserId && email) {
+        const { data: profileByEmail } = await adminClient
+          .from("profiles")
+          .select("id")
+          .eq("email", email)
+          .maybeSingle();
+        targetUserId = profileByEmail?.id || (await findAuthUserByEmail(adminClient, email))?.id || "";
+      }
+
+      if (!targetUserId) {
+        return Response.json({ ok: true, deleted: false }, { headers: corsHeaders });
+      }
+      if (targetUserId === user.id) {
         throw new Error("Akaun ini tidak boleh dibuang.");
       }
       const { data: replacement } = await adminClient
@@ -157,13 +204,13 @@ Deno.serve(async (request) => {
         .select("id")
         .eq("role", "agent")
         .eq("active", true)
-        .neq("id", payload.userId)
+        .neq("id", targetUserId)
         .limit(1)
         .maybeSingle();
       const { count: pendingLeadCount } = await adminClient
         .from("leads")
         .select("id", { count: "exact", head: true })
-        .eq("assigned_agent_id", payload.userId)
+        .eq("assigned_agent_id", targetUserId)
         .eq("status", "new");
       if (!replacement?.id && pendingLeadCount) {
         throw new Error("Aktifkan ejen pengganti sebelum membuang akaun ini.");
@@ -175,10 +222,10 @@ Deno.serve(async (request) => {
             assigned_agent_id: replacement.id,
             expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
           })
-          .eq("assigned_agent_id", payload.userId)
+          .eq("assigned_agent_id", targetUserId)
           .eq("status", "new");
       }
-      const { error } = await adminClient.auth.admin.deleteUser(payload.userId);
+      const { error } = await adminClient.auth.admin.deleteUser(targetUserId);
       if (error) throw error;
     } else {
       throw new Error("Tindakan tidak dikenali.");

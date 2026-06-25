@@ -522,7 +522,7 @@ function syncSupabaseAgents_(sheetAgents, profiles, token, options) {
   profiles
     .filter((profile) => profile.role === "agent" && !sheetEmails.has(String(profile.email || "").toLowerCase()))
     .forEach((profile) => {
-      callAdminManageAgent_({ action: "delete", userId: profile.id }, token);
+      callAdminManageAgent_({ action: "delete", userId: profile.id, email: profile.email }, token);
       result.removed += 1;
       result.changedProfiles = true;
     });

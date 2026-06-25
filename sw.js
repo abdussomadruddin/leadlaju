@@ -1,9 +1,9 @@
-const CACHE_NAME = "leadlaju-pwa-v20260625-agent-signup-login-v6";
+const CACHE_NAME = "leadlaju-pwa-v20260625-agent-delete-sync-v7";
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20260625-agent-signup-login-v6",
-  "/app.js?v=20260625-agent-signup-login-v6",
+  "/styles.css?v=20260625-agent-delete-sync-v7",
+  "/app.js?v=20260625-agent-delete-sync-v7",
   "/manifest.webmanifest?v=20260625-pwa-notifications",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",

@@ -627,11 +627,12 @@ async function handleAgentSignup(event) {
     setSignupError("Pengesahan kata laluan tidak sepadan.");
     return;
   }
-  if (state.agents.some((agent) => agent.email.toLowerCase() === email)) {
+  if (!supabaseClient && state.agents.some((agent) => agent.email.toLowerCase() === email)) {
     setSignupError("Emel ini sudah wujud dalam sistem.");
     return;
   }
 
+  let signupAgent = null;
   if (supabaseClient) {
     const { data, error } = await supabaseClient.functions.invoke("admin-manage-agent", {
       body: {
@@ -646,8 +647,23 @@ async function handleAgentSignup(event) {
       setSignupError(data?.error || error?.message || "Permohonan tidak dapat dihantar.");
       return;
     }
+    signupAgent = {
+      id: data.userId,
+      name,
+      phone,
+      email,
+      role: "agent",
+      active: false,
+      leadsHandled: 0,
+      createdAt: Date.now(),
+    };
+    state.agents = [
+      ...state.agents.filter((agent) => agent.email.toLowerCase() !== email),
+      signupAgent,
+    ];
+    saveState();
   } else {
-    state.agents.push({
+    signupAgent = {
       id: makeId("agent"),
       name,
       phone,
@@ -657,10 +673,12 @@ async function handleAgentSignup(event) {
       active: false,
       leadsHandled: 0,
       createdAt: Date.now(),
-    });
+    };
+    state.agents.push(signupAgent);
     saveState();
   }
 
+  await upsertAgentToSheet(signupAgent);
   elements.signupForm.reset();
   showSignupForm(false);
   setLoginError("Permohonan dihantar. Tunggu admin approve, kemudian log masuk guna emel dan kata laluan ini.");
@@ -1605,7 +1623,6 @@ async function syncAgentsFromSheet(sheetAgentRows) {
   const removedAgents = state.agents.filter(
     (agent) =>
       agent.role === "agent" &&
-      agent.active &&
       agent.id !== state.currentUserId &&
       !sheetEmails.has(String(agent.email || "").toLowerCase()),
   );
@@ -1613,7 +1630,7 @@ async function syncAgentsFromSheet(sheetAgentRows) {
   for (const agent of removedAgents) {
     if (supabaseMode) {
       const { data, error } = await supabaseClient.functions.invoke("admin-manage-agent", {
-        body: { action: "delete", userId: agent.id },
+        body: { action: "delete", userId: agent.id, email: agent.email },
       });
       if (error || !data?.ok) {
         throw new Error(data?.error || `Ejen ${agent.name} tidak dapat dibuang dari Supabase.`);
@@ -2391,15 +2408,15 @@ async function removeAgent(agentId) {
   const agent = getAgent(agentId);
   if (!agent) return;
   if (supabaseMode) {
+    const agentsPushed = await deleteAgentFromSheet(agent);
     const { data, error } = await supabaseClient.functions.invoke("admin-manage-agent", {
-      body: { action: "delete", userId: agentId },
+      body: { action: "delete", userId: agentId, email: agent.email },
     });
     if (error || !data?.ok) {
       showToast("Ejen tidak dapat dibuang", data?.error || "Semak Edge Function Supabase.", "error");
       return;
     }
     await loadRemoteState(state.currentUserId);
-    const agentsPushed = await deleteAgentFromSheet(agent);
     showToast(
       agentsPushed ? "Ejen dibuang" : "Ejen dibuang dari dashboard",
       agentsPushed
