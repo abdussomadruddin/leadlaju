@@ -7,6 +7,7 @@ const DEFAULT_AGENT_PASSWORD = "Agent123!";
 const NOTIFICATION_ICON = "/assets/icon-192.png";
 const NOTIFICATION_BADGE = "/assets/badge-96.png";
 const MALAYSIA_TIME_ZONE = "Asia/Kuala_Lumpur";
+const DEFAULT_SYNC_INTERVAL_SECONDS = 5;
 const DEFAULT_GOOGLE_SHEET_ENDPOINT =
   "https://script.google.com/macros/s/AKfycbyXEPXT-m6YETnvOZEy0CxF82CMmMGDmgpVmDIv-a7XTEdJp92mYkOQhaBSRTPnNH7K/exec";
 const LEAD_STATUS_OPTIONS = [
@@ -69,7 +70,7 @@ const defaultState = {
   roundRobinIndex: 0,
   integration: {
     endpoint: DEFAULT_GOOGLE_SHEET_ENDPOINT,
-    interval: 15,
+    interval: DEFAULT_SYNC_INTERVAL_SECONDS,
     lastSyncAt: null,
     connected: true,
   },
@@ -208,7 +209,7 @@ function normalizeIntegration(input = {}) {
     ...defaultState.integration,
     ...input,
     endpoint,
-    interval: Number(input.interval) || defaultState.integration.interval,
+    interval: DEFAULT_SYNC_INTERVAL_SECONDS,
     connected: input.connected !== false || endpoint === DEFAULT_GOOGLE_SHEET_ENDPOINT,
   };
 }
@@ -3066,7 +3067,7 @@ async function syncGoogleSheet(options = {}) {
     const agentSync = Array.isArray(payload) ? { added: 0, updated: 0, removed: 0 } : await syncAgentsFromSheet(payload.agents);
     if (options.agentsOnly) {
       state.integration.endpoint = endpoint;
-      state.integration.interval = Number(elements.pollInterval.value) || state.integration.interval || 15;
+      state.integration.interval = DEFAULT_SYNC_INTERVAL_SECONDS;
       state.integration.connected = true;
       state.integration.lastSyncAt = Date.now();
       saveState();
@@ -3108,7 +3109,7 @@ async function syncGoogleSheet(options = {}) {
     const handledSync = await syncLeadHandledCountsToSheet();
 
     state.integration.endpoint = endpoint;
-    state.integration.interval = Number(elements.pollInterval.value) || 15;
+    state.integration.interval = DEFAULT_SYNC_INTERVAL_SECONDS;
     state.integration.connected = true;
     state.integration.lastSyncAt = Date.now();
     saveState();
@@ -3171,14 +3172,14 @@ function scheduleSync() {
   if (!getSheetEndpoint()) return;
   syncTimer = window.setInterval(
     () => syncGoogleSheet({ silent: true }),
-    Math.max(15, Number(state.integration.interval) || 15) * 1000,
+    DEFAULT_SYNC_INTERVAL_SECONDS * 1000,
   );
 }
 
 async function saveIntegration(event) {
   event.preventDefault();
   state.integration.endpoint = elements.sheetEndpoint.value.trim() || DEFAULT_GOOGLE_SHEET_ENDPOINT;
-  state.integration.interval = Number(elements.pollInterval.value) || 15;
+  state.integration.interval = DEFAULT_SYNC_INTERVAL_SECONDS;
   state.integration.connected = true;
   saveState();
   syncGoogleSheet();
