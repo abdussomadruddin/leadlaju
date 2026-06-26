@@ -2,9 +2,13 @@ const SPREADSHEET_ID = "1ySHeB12lL2y4AxqpSx8dDniyujSaz2-9hoRzPlCv6TM";
 const SHEET_NAME = "Sheet1";
 const AGENTS_SHEET_NAME = "Agents";
 const REMINDERS_SHEET_NAME = "Reminders";
+const PUSH_SUBSCRIPTIONS_SHEET_NAME = "PushSubscriptions";
 const DEFAULT_SOURCE = "Manual Lead";
 const DEFAULT_AGENT_PASSWORD = "Agent123!";
 const MALAYSIA_TIME_ZONE = "Asia/Kuala_Lumpur";
+const PUSH_API_URL = "https://leadlaju.vercel.app/api/push";
+const PUSH_NOTIFY_SECRET = "leadlaju-push-notify-v1";
+const RESPONSE_WINDOW_MINUTES = 5;
 
 const FIELD_ALIASES = {
   id: ["id", "lead id", "lead_id", "tiktok lead id", "meta lead id"],
@@ -86,15 +90,43 @@ const REMINDER_HEADERS = [
   { field: "message", label: "Message" },
 ];
 
+const PUSH_FIELD_ALIASES = {
+  endpoint: ["endpoint", "push endpoint"],
+  p256dh: ["p256dh", "push p256dh"],
+  auth: ["auth", "push auth"],
+  agentId: ["agent id", "agent_id", "id ejen"],
+  agentEmail: ["agent email", "agent_email", "email ejen", "emel"],
+  agentName: ["agent name", "agent_name", "nama ejen", "nama"],
+  role: ["role", "peranan"],
+  active: ["status", "active", "aktif"],
+  userAgent: ["user agent", "user_agent", "device"],
+  updatedAt: ["updated at", "updated_at", "tarikh kemaskini"],
+};
+
+const PUSH_HEADERS = [
+  { field: "endpoint", label: "Endpoint" },
+  { field: "p256dh", label: "P256DH" },
+  { field: "auth", label: "Auth" },
+  { field: "agentId", label: "Agent ID" },
+  { field: "agentEmail", label: "Agent Email" },
+  { field: "agentName", label: "Agent Name" },
+  { field: "role", label: "Role" },
+  { field: "active", label: "Status" },
+  { field: "userAgent", label: "User Agent" },
+  { field: "updatedAt", label: "Updated At" },
+];
+
 function doGet() {
   try {
     const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
     const sheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
     const agentsSheet = getOrCreateSheet_(spreadsheet, AGENTS_SHEET_NAME);
     const remindersSheet = getOrCreateSheet_(spreadsheet, REMINDERS_SHEET_NAME);
+    const pushSheet = getOrCreateSheet_(spreadsheet, PUSH_SUBSCRIPTIONS_SHEET_NAME);
     const headers = ensureRequiredHeaders_(sheet);
     const agentHeaders = ensureRequiredHeadersBySpec_(agentsSheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
     const reminderHeaders = ensureRequiredHeadersBySpec_(remindersSheet, REMINDER_HEADERS, REMINDER_FIELD_ALIASES);
+    ensureRequiredHeadersBySpec_(pushSheet, PUSH_HEADERS, PUSH_FIELD_ALIASES);
     ensureLeadIds_(sheet, headers);
     ensureLeadTimestamps_(sheet, headers);
     ensureLeadSources_(sheet, headers);
@@ -108,6 +140,7 @@ function doGet() {
       leads,
       agents,
       follow_up_reminder: followUpReminder,
+      push_subscription_count: Math.max(pushSheet.getLastRow() - 1, 0),
     });
   } catch (error) {
     return jsonResponse({ ok: false, error: String(error), leads: [] });
@@ -143,6 +176,9 @@ function doPost(event) {
     }
     if (payload.action === "broadcast_follow_up_reminder") {
       return jsonResponse(appendReminder_(payload.reminder || payload));
+    }
+    if (payload.action === "register_push_subscription") {
+      return jsonResponse(registerPushSubscription_(payload));
     }
 
     return jsonResponse({ ok: false, error: "Action tidak disokong." });
@@ -181,7 +217,63 @@ function appendReminder_(input) {
     sheet.deleteRows(2, extraRows);
   }
 
+  sendFollowUpReminderPush_(spreadsheet, reminder);
   return { ok: true, reminder };
+}
+
+function registerPushSubscription_(payload) {
+  const subscription = payload.subscription || {};
+  const keys = subscription.keys || {};
+  const endpoint = String(subscription.endpoint || "").trim();
+  const p256dh = String(keys.p256dh || subscription.p256dh || "").trim();
+  const auth = String(keys.auth || subscription.auth || "").trim();
+  const agent = payload.agent || {};
+
+  if (!endpoint || !p256dh || !auth) {
+    return { ok: false, error: "Push subscription tidak lengkap." };
+  }
+
+  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = getOrCreateSheet_(spreadsheet, PUSH_SUBSCRIPTIONS_SHEET_NAME);
+  const headers = ensureRequiredHeadersBySpec_(sheet, PUSH_HEADERS, PUSH_FIELD_ALIASES);
+  const values = sheet.getDataRange().getDisplayValues();
+  const endpointIndex = headers.findIndex((header) => PUSH_FIELD_ALIASES.endpoint.includes(header));
+  let rowNumber = 0;
+
+  for (let index = 1; index < values.length; index += 1) {
+    const rowEndpoint = endpointIndex >= 0 ? String(values[index][endpointIndex] || "").trim() : "";
+    if (rowEndpoint === endpoint) {
+      rowNumber = index + 1;
+      break;
+    }
+  }
+
+  const row = rowNumber ? values[rowNumber - 1].slice(0, headers.length) : new Array(headers.length).fill("");
+  while (row.length < headers.length) row.push("");
+  setRowValueBySpec_(headers, row, PUSH_FIELD_ALIASES, "endpoint", endpoint);
+  setRowValueBySpec_(headers, row, PUSH_FIELD_ALIASES, "p256dh", p256dh);
+  setRowValueBySpec_(headers, row, PUSH_FIELD_ALIASES, "auth", auth);
+  setRowValueBySpec_(headers, row, PUSH_FIELD_ALIASES, "agentId", String(agent.id || agent.agent_id || "").trim());
+  setRowValueBySpec_(headers, row, PUSH_FIELD_ALIASES, "agentEmail", String(agent.email || agent.emel || "").trim().toLowerCase());
+  setRowValueBySpec_(headers, row, PUSH_FIELD_ALIASES, "agentName", String(agent.name || agent.nama || "").trim());
+  setRowValueBySpec_(headers, row, PUSH_FIELD_ALIASES, "role", String(agent.role || "agent").trim());
+  setRowValueBySpec_(
+    headers,
+    row,
+    PUSH_FIELD_ALIASES,
+    "active",
+    normalizeAgentActive_(agent.active ?? agent.status ?? "active"),
+  );
+  setRowValueBySpec_(headers, row, PUSH_FIELD_ALIASES, "userAgent", String(payload.user_agent || payload.userAgent || "").trim());
+  setRowValueBySpec_(headers, row, PUSH_FIELD_ALIASES, "updatedAt", canonicalLeadTimestamp_(new Date()));
+
+  if (rowNumber) {
+    sheet.getRange(rowNumber, 1, 1, row.length).setValues([row]);
+    return { ok: true, updated: true };
+  }
+
+  sheet.appendRow(row);
+  return { ok: true, registered: true };
 }
 
 function appendLead_(input) {
@@ -218,6 +310,7 @@ function appendLead_(input) {
   setRowValue_(headers, row, "source", lead.source);
   setRowValue_(headers, row, "id", lead.id);
   sheet.appendRow(row);
+  notifyUnsentLeadPushes_(spreadsheet, sheet, headers);
 
   return { ok: true, lead };
 }
@@ -496,6 +589,252 @@ function readLatestReminder_(sheet, headers) {
   return null;
 }
 
+function readPushSubscriptions_(spreadsheet, options) {
+  const sheet = getOrCreateSheet_(spreadsheet, PUSH_SUBSCRIPTIONS_SHEET_NAME);
+  const headers = ensureRequiredHeadersBySpec_(sheet, PUSH_HEADERS, PUSH_FIELD_ALIASES);
+  const values = sheet.getDataRange().getDisplayValues();
+  if (values.length < 2) return [];
+
+  const agentsSheet = getOrCreateSheet_(spreadsheet, AGENTS_SHEET_NAME);
+  const agentHeaders = ensureRequiredHeadersBySpec_(agentsSheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
+  const activeAgents = readAgents_(agentsSheet, agentHeaders).filter(
+    (agent) => agent.active === "active",
+  );
+  const activeAgentIds = new Set(activeAgents.map((agent) => String(agent.id || "").trim()).filter(Boolean));
+  const activeAgentEmails = new Set(activeAgents.map((agent) => String(agent.email || "").trim().toLowerCase()).filter(Boolean));
+
+  return values.slice(1)
+    .map((row) => {
+      const agentId = getCellBySpec_(headers, row, PUSH_FIELD_ALIASES, "agentId");
+      const agentEmail = getCellBySpec_(headers, row, PUSH_FIELD_ALIASES, "agentEmail").toLowerCase();
+      const role = getCellBySpec_(headers, row, PUSH_FIELD_ALIASES, "role") || "agent";
+      const active = normalizeAgentActive_(getCellBySpec_(headers, row, PUSH_FIELD_ALIASES, "active"));
+      return {
+        endpoint: getCellBySpec_(headers, row, PUSH_FIELD_ALIASES, "endpoint"),
+        p256dh: getCellBySpec_(headers, row, PUSH_FIELD_ALIASES, "p256dh"),
+        auth: getCellBySpec_(headers, row, PUSH_FIELD_ALIASES, "auth"),
+        agentId,
+        agentEmail,
+        agentName: getCellBySpec_(headers, row, PUSH_FIELD_ALIASES, "agentName"),
+        role,
+        active,
+      };
+    })
+    .filter((item) => {
+      if (!item.endpoint || !item.p256dh || !item.auth) return false;
+      if (item.active !== "active") return false;
+      if (options && options.agentOnly && roleIsAdmin_(item.role)) return false;
+      if (item.agentId && activeAgentIds.has(item.agentId)) return true;
+      if (item.agentEmail && activeAgentEmails.has(item.agentEmail)) return true;
+      return roleIsAdmin_(item.role) && !options?.agentOnly;
+    });
+}
+
+function roleIsAdmin_(role) {
+  return String(role || "").trim().toLowerCase() === "admin";
+}
+
+function subscriptionForApi_(item) {
+  return {
+    endpoint: item.endpoint,
+    keys: {
+      p256dh: item.p256dh,
+      auth: item.auth,
+    },
+  };
+}
+
+function sendPushViaApi_(spreadsheet, subscriptions, notification) {
+  if (!subscriptions.length) return { ok: true, sent: 0, failed: 0 };
+  try {
+    const response = UrlFetchApp.fetch(PUSH_API_URL, {
+      method: "post",
+      contentType: "application/json",
+      muteHttpExceptions: true,
+      payload: JSON.stringify({
+        secret: PUSH_NOTIFY_SECRET,
+        subscriptions: subscriptions.map(subscriptionForApi_),
+        notification,
+      }),
+    });
+    const result = JSON.parse(response.getContentText() || "{}");
+    if (Array.isArray(result.expired) && result.expired.length) {
+      deleteExpiredPushSubscriptions_(spreadsheet, result.expired);
+    }
+    return result;
+  } catch (error) {
+    console.warn("Push notification failed", error);
+    return { ok: false, error: String(error), sent: 0, failed: subscriptions.length };
+  }
+}
+
+function deleteExpiredPushSubscriptions_(spreadsheet, endpoints) {
+  const expired = new Set(endpoints.map((endpoint) => String(endpoint || "").trim()).filter(Boolean));
+  if (!expired.size) return 0;
+  const sheet = getOrCreateSheet_(spreadsheet, PUSH_SUBSCRIPTIONS_SHEET_NAME);
+  const headers = ensureRequiredHeadersBySpec_(sheet, PUSH_HEADERS, PUSH_FIELD_ALIASES);
+  const values = sheet.getDataRange().getDisplayValues();
+  const endpointIndex = headers.findIndex((header) => PUSH_FIELD_ALIASES.endpoint.includes(header));
+  if (endpointIndex < 0 || values.length < 2) return 0;
+
+  let deleted = 0;
+  for (let rowNumber = values.length; rowNumber >= 2; rowNumber -= 1) {
+    const endpoint = String(values[rowNumber - 1][endpointIndex] || "").trim();
+    if (expired.has(endpoint)) {
+      sheet.deleteRow(rowNumber);
+      deleted += 1;
+    }
+  }
+  return deleted;
+}
+
+function sendFollowUpReminderPush_(spreadsheet, reminder) {
+  const subscriptions = readPushSubscriptions_(spreadsheet, { agentOnly: true });
+  const notification = {
+    title: "Admin remind follow up",
+    body: `${reminder.createdByName}: ${reminder.message}`,
+    tag: `leadlaju-admin-reminder-${reminder.id}`,
+    view: "leads",
+    url: "/?view=leads",
+    requireInteraction: true,
+  };
+  return sendPushViaApi_(spreadsheet, subscriptions, notification);
+}
+
+function getLeadPushKeys_() {
+  try {
+    const raw = PropertiesService.getScriptProperties().getProperty("leadlaju_notified_push_leads") || "[]";
+    const parsed = JSON.parse(raw);
+    return new Set(Array.isArray(parsed) ? parsed : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveLeadPushKeys_(keys) {
+  const compacted = Array.from(keys).slice(-500);
+  PropertiesService.getScriptProperties().setProperty("leadlaju_notified_push_leads", JSON.stringify(compacted));
+}
+
+function getActiveAgentsForPush_(spreadsheet) {
+  const agentsSheet = getOrCreateSheet_(spreadsheet, AGENTS_SHEET_NAME);
+  const agentHeaders = ensureRequiredHeadersBySpec_(agentsSheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
+  return readAgents_(agentsSheet, agentHeaders).filter(
+    (agent) => agent.active === "active" && !roleIsAdmin_(agent.role),
+  );
+}
+
+function findLeadAgent_(agents, lead) {
+  const id = String(lead.assigned_agent_id || "").trim();
+  const email = String(lead.assigned_agent_email || "").trim().toLowerCase();
+  const name = String(lead.assigned_agent_name || "").trim().toLowerCase();
+  return agents.find((agent) => {
+    if (id && String(agent.id || "").trim() === id) return true;
+    if (email && String(agent.email || "").trim().toLowerCase() === email) return true;
+    return name && String(agent.name || "").trim().toLowerCase() === name;
+  }) || null;
+}
+
+function filterSubscriptionsForAgent_(subscriptions, agent) {
+  const agentId = String(agent.id || "").trim();
+  const agentEmail = String(agent.email || "").trim().toLowerCase();
+  return subscriptions.filter((subscription) => {
+    if (agentId && subscription.agentId === agentId) return true;
+    return agentEmail && subscription.agentEmail === agentEmail;
+  });
+}
+
+function assignLeadRuntimeRow_(sheet, headers, rowNumber, row, agent, now) {
+  const receivedAt = canonicalLeadTimestamp_(now);
+  const expiresAt = canonicalLeadTimestamp_(new Date(now.getTime() + RESPONSE_WINDOW_MINUTES * 60 * 1000));
+  const nextRow = row.slice(0, headers.length);
+  while (nextRow.length < headers.length) nextRow.push("");
+  setRowValue_(headers, nextRow, "assignedAgentId", agent.id);
+  setRowValue_(headers, nextRow, "assignedAgentEmail", agent.email);
+  setRowValue_(headers, nextRow, "assignedAgentName", agent.name);
+  setRowValue_(headers, nextRow, "receivedAt", receivedAt);
+  setRowValue_(headers, nextRow, "expiresAt", expiresAt);
+  setRowValue_(headers, nextRow, "queueState", "active");
+  if (!getCell_(headers, nextRow, "passCount")) setRowValue_(headers, nextRow, "passCount", "0");
+  sheet.getRange(rowNumber, 1, 1, nextRow.length).setValues([nextRow]);
+  return {
+    assigned_agent_id: agent.id,
+    assigned_agent_email: agent.email,
+    assigned_agent_name: agent.name,
+    received_at: receivedAt,
+    expires_at: expiresAt,
+  };
+}
+
+function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(8000)) return { ok: false, error: "Push sync sedang berjalan." };
+
+  try {
+    const values = sheet.getDataRange().getDisplayValues();
+    if (values.length < 2) return { ok: true, sent: 0 };
+
+    const agents = getActiveAgentsForPush_(spreadsheet);
+    if (!agents.length) return { ok: true, sent: 0, reason: "no_agents" };
+
+    const subscriptions = readPushSubscriptions_(spreadsheet, { agentOnly: true });
+
+    const notifiedKeys = getLeadPushKeys_();
+    const properties = PropertiesService.getScriptProperties();
+    let roundRobinIndex = Number(properties.getProperty("leadlaju_push_round_robin_index") || 0);
+    let sent = 0;
+    let changedKeys = false;
+
+    for (let index = 1; index < values.length; index += 1) {
+      const rowNumber = index + 1;
+      const row = values[index].slice(0, headers.length);
+      const lead = mapRow_(headers, row, rowNumber);
+      if (!lead.name || !lead.phone) continue;
+      if (normalizeLeadStage_(lead.status) !== "new") continue;
+
+      let agent = findLeadAgent_(agents, lead);
+      let runtime = {
+        assigned_agent_id: lead.assigned_agent_id,
+        assigned_agent_email: lead.assigned_agent_email,
+        assigned_agent_name: lead.assigned_agent_name,
+        received_at: lead.received_at,
+        expires_at: lead.expires_at,
+      };
+      if (!agent) {
+        agent = agents[roundRobinIndex % agents.length];
+        roundRobinIndex = (roundRobinIndex + 1) % agents.length;
+        runtime = assignLeadRuntimeRow_(sheet, headers, rowNumber, row, agent, new Date());
+      }
+
+      const notificationKey = `${lead.id}:${agent.id}:${runtime.received_at || ""}`;
+      if (notifiedKeys.has(notificationKey)) continue;
+
+      const targetSubscriptions = filterSubscriptionsForAgent_(subscriptions, agent);
+      if (!targetSubscriptions.length) continue;
+
+      const result = sendPushViaApi_(spreadsheet, targetSubscriptions, {
+        title: `Lead baru: ${lead.project || "Projek baru"}`,
+        body: `${lead.name}\nNombor dibuka selepas CALL NOW. Diberikan kepada ${agent.name}.`,
+        tag: `leadlaju-lead-${lead.id}-${agent.id}`,
+        leadId: lead.id,
+        url: "/",
+        requireInteraction: true,
+      });
+      if (result.ok !== false) {
+        notifiedKeys.add(notificationKey);
+        changedKeys = true;
+        sent += Number(result.sent || targetSubscriptions.length || 0);
+      }
+    }
+
+    properties.setProperty("leadlaju_push_round_robin_index", String(roundRobinIndex));
+    if (changedKeys) saveLeadPushKeys_(notifiedKeys);
+    return { ok: true, sent };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function normalizeAgentActive_(value) {
   const normalized = String(value || "").trim().toLowerCase();
   if (["inactive", "tidak aktif", "false", "0", "off", "disabled"].includes(normalized)) {
@@ -615,7 +954,8 @@ function installSheetCoreTriggers() {
   });
   ScriptApp.newTrigger("onSheetCoreEdit").forSpreadsheet(SPREADSHEET_ID).onEdit().create();
   ScriptApp.newTrigger("onSheetCoreChange").forSpreadsheet(SPREADSHEET_ID).onChange().create();
-  return { ok: true, installed: ["onSheetCoreEdit", "onSheetCoreChange"] };
+  ScriptApp.newTrigger("syncSheetTemplate").timeBased().everyMinutes(1).create();
+  return { ok: true, installed: ["onSheetCoreEdit", "onSheetCoreChange", "syncSheetTemplate"] };
 }
 
 function refreshSheetTemplate_() {
@@ -623,13 +963,16 @@ function refreshSheetTemplate_() {
   const sheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
   const agentsSheet = getOrCreateSheet_(spreadsheet, AGENTS_SHEET_NAME);
   const remindersSheet = getOrCreateSheet_(spreadsheet, REMINDERS_SHEET_NAME);
+  const pushSheet = getOrCreateSheet_(spreadsheet, PUSH_SUBSCRIPTIONS_SHEET_NAME);
   const headers = ensureRequiredHeaders_(sheet);
   ensureRequiredHeadersBySpec_(agentsSheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
   ensureRequiredHeadersBySpec_(remindersSheet, REMINDER_HEADERS, REMINDER_FIELD_ALIASES);
+  ensureRequiredHeadersBySpec_(pushSheet, PUSH_HEADERS, PUSH_FIELD_ALIASES);
   ensureLeadIds_(sheet, headers);
   ensureLeadTimestamps_(sheet, headers);
   ensureLeadSources_(sheet, headers);
-  return { ok: true, refreshed_at: new Date().toISOString() };
+  const pushResult = notifyUnsentLeadPushes_(spreadsheet, sheet, headers);
+  return { ok: true, refreshed_at: new Date().toISOString(), push: pushResult };
 }
 
 function sendResetCode_(payload) {
@@ -670,6 +1013,7 @@ function mapRow_(headers, row, rowNumber) {
   const expiresAt = getCell_(headers, row, "expiresAt");
   const lead = {
     id: getCell_(headers, row, "id") || `${SHEET_NAME}-${rowNumber}`,
+    row_number: rowNumber,
     name: getCell_(headers, row, "name"),
     phone: getCell_(headers, row, "phone"),
     email: getCell_(headers, row, "email"),

@@ -16,6 +16,8 @@ const FOLLOW_UP_REMINDER_SLOTS = [
   { time: "15:00", label: "3 petang" },
 ];
 const FOLLOW_UP_REMINDER_WINDOW_MINUTES = 10;
+const WEB_PUSH_PUBLIC_KEY =
+  "BJRcHLhmZgPSdid007nVHluQhJY4MD3IlC-t0--hq2eWToRTovU_k5GZsEmmbJK596VHrj2N5ZMdUpzJX64F5R0";
 const DEFAULT_GOOGLE_SHEET_ENDPOINT =
   "https://script.google.com/macros/s/AKfycbyXEPXT-m6YETnvOZEy0CxF82CMmMGDmgpVmDIv-a7XTEdJp92mYkOQhaBSRTPnNH7K/exec";
 const LEAD_STATUS_OPTIONS = [
@@ -534,6 +536,7 @@ function startAuthenticatedApp(user) {
     updateCountdown();
   }, 1000);
   registerServiceWorker();
+  syncPushSubscription().catch((error) => console.warn("Push subscription sync failed", error));
   markCurrentLeadNotificationsSeen();
   scheduleSync();
   scheduleFollowUpReminders();
@@ -1144,6 +1147,66 @@ async function registerServiceWorker() {
       });
   }
   return serviceWorkerRegistrationPromise;
+}
+
+function urlBase64ToUint8Array(value) {
+  const padding = "=".repeat((4 - (value.length % 4)) % 4);
+  const base64 = `${value}${padding}`.replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  return Uint8Array.from([...rawData].map((character) => character.charCodeAt(0)));
+}
+
+function isPushSupported() {
+  return (
+    "Notification" in window &&
+    "serviceWorker" in navigator &&
+    "PushManager" in window &&
+    window.location.protocol !== "file:"
+  );
+}
+
+async function syncPushSubscription(force = false) {
+  if (!isPushSupported() || Notification.permission !== "granted") return false;
+  const user = getCurrentUser();
+  if (!user?.id || !user.active) return false;
+
+  const registration = await registerServiceWorker();
+  if (!registration?.pushManager) return false;
+
+  let subscription = await registration.pushManager.getSubscription();
+  if (!subscription) {
+    subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(WEB_PUSH_PUBLIC_KEY),
+    });
+  }
+
+  const subscriptionPayload = subscription.toJSON();
+  const endpoint = subscriptionPayload.endpoint || subscription.endpoint;
+  if (!endpoint) return false;
+
+  const storageKey = `leadlaju-push-subscription-${user.id}`;
+  const fingerprint = `${endpoint}:${subscriptionPayload.keys?.p256dh || ""}:${user.email}:${user.active}`;
+  if (!force && localStorage.getItem(storageKey) === fingerprint) return true;
+
+  const pushed = await postGoogleSheetAction(
+    {
+      action: "register_push_subscription",
+      subscription: subscriptionPayload,
+      agent: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        active: user.active,
+      },
+      user_agent: navigator.userAgent,
+    },
+    "Push subscription sync failed",
+  );
+
+  if (pushed) localStorage.setItem(storageKey, fingerprint);
+  return pushed;
 }
 
 async function playNotificationSound() {
@@ -2443,11 +2506,15 @@ async function requestNotifications() {
   await registerServiceWorker();
   await playNotificationSound();
   if (Notification.permission === "granted") {
+    await syncPushSubscription(true).catch((error) => console.warn("Push subscription sync failed", error));
     showToast("Notifikasi aktif", "Lead baru dan reminder follow up akan keluar notifikasi sistem.");
     return;
   }
   const permission = await Notification.requestPermission();
-  if (permission === "granted") await playNotificationSound();
+  if (permission === "granted") {
+    await playNotificationSound();
+    await syncPushSubscription(true).catch((error) => console.warn("Push subscription sync failed", error));
+  }
   showToast(
     permission === "granted" ? "Notifikasi diaktifkan" : "Notifikasi belum aktif",
     permission === "granted"
