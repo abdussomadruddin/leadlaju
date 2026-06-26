@@ -1981,19 +1981,32 @@ async function syncAgentsFromSheet(sheetAgentRows) {
     result.backfilled += sheetAgent.id && sheetAgent.password ? 0 : 1;
   }
 
-  if (isAdmin()) {
-    const removedAgents = state.agents.filter(
-      (agent) =>
-        agent.role === "agent" &&
-        agent.active &&
-        agent.id !== state.currentUserId &&
-        !sheetEmails.has(String(agent.email || "").toLowerCase()),
-    );
+  const removedAgents = state.agents.filter(
+    (agent) =>
+      agent.role === "agent" &&
+      agent.id !== state.currentUserId &&
+      !sheetEmails.has(String(agent.email || "").toLowerCase()),
+  );
 
-    for (const agent of removedAgents) {
-      state.agents = state.agents.filter((item) => item.id !== agent.id);
-      result.removed += 1;
-    }
+  for (const agent of removedAgents) {
+    state.agents = state.agents.filter((item) => item.id !== agent.id);
+    result.removed += 1;
+  }
+
+  if (removedAgents.length) {
+    const removedAgentIds = new Set(removedAgents.map((agent) => agent.id));
+    const now = Date.now();
+    const reassignedLeads = [];
+    state.leads.forEach((lead) => {
+      if (lead.status !== "new" || !removedAgentIds.has(lead.assignedAgentId)) return;
+      queueLead(lead, now, {
+        previousAgentId: lead.assignedAgentId,
+        resetPassCount: false,
+      });
+      reassignedLeads.push(lead);
+    });
+    const activatedLeads = activateQueuedLeads({ now, notify: true });
+    [...reassignedLeads, ...activatedLeads].forEach(syncLeadRuntimeInSheet);
   }
 
   saveState();
