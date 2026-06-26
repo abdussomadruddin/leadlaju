@@ -1,9 +1,9 @@
-const CACHE_NAME = "leadlaju-pwa-v20260626-five-sec-sync-v18";
+const CACHE_NAME = "leadlaju-pwa-v20260626-followup-reminders-v19";
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20260626-five-sec-sync-v18",
-  "/app.js?v=20260626-five-sec-sync-v18",
+  "/styles.css?v=20260626-followup-reminders-v19",
+  "/app.js?v=20260626-followup-reminders-v19",
   "/manifest.webmanifest?v=20260625-pwa-notifications",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",
@@ -77,7 +77,8 @@ async function showLeadNotification(payload = {}) {
     badge: payload.badge || "/assets/badge-96.png",
     data: {
       url: payload.url || "/",
-      leadId: payload.leadId || null
+      leadId: payload.leadId || null,
+      view: payload.view || null
     }
   };
   await self.registration.showNotification(title, options);
@@ -106,13 +107,18 @@ self.addEventListener("push", (event) => {
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const targetUrl = new URL(event.notification.data?.url || "/", self.location.origin).href;
+  const view = event.notification.data?.view || null;
 
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
       const existingClient = clients.find((client) => client.url.startsWith(self.location.origin));
       if (existingClient) {
         existingClient.focus();
-        existingClient.postMessage({ type: "OPEN_DASHBOARD", leadId: event.notification.data?.leadId || null });
+        existingClient.postMessage({
+          type: view ? "OPEN_VIEW" : "OPEN_DASHBOARD",
+          view,
+          leadId: event.notification.data?.leadId || null
+        });
         return;
       }
       return self.clients.openWindow(targetUrl);

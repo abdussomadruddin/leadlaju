@@ -1,6 +1,7 @@
 const STORAGE_KEY = "leadlaju-state-v1";
 const AUTH_KEY = "leadlaju-auth-v1";
 const NOTIFIED_LEADS_KEY = "leadlaju-notified-leads-v1";
+const FOLLOW_UP_REMINDER_KEY = "leadlaju-follow-up-reminders-v1";
 const SESSION_DURATION_MS = 365 * 24 * 60 * 60 * 1000;
 const RESPONSE_WINDOW_MS = 5 * 60 * 1000;
 const DEFAULT_AGENT_PASSWORD = "Agent123!";
@@ -8,6 +9,11 @@ const NOTIFICATION_ICON = "/assets/icon-192.png";
 const NOTIFICATION_BADGE = "/assets/badge-96.png";
 const MALAYSIA_TIME_ZONE = "Asia/Kuala_Lumpur";
 const DEFAULT_SYNC_INTERVAL_SECONDS = 5;
+const FOLLOW_UP_REMINDER_SLOTS = [
+  { time: "09:00", label: "9 pagi" },
+  { time: "15:00", label: "3 petang" },
+];
+const FOLLOW_UP_REMINDER_WINDOW_MINUTES = 10;
 const DEFAULT_GOOGLE_SHEET_ENDPOINT =
   "https://script.google.com/macros/s/AKfycbyXEPXT-m6YETnvOZEy0CxF82CMmMGDmgpVmDIv-a7XTEdJp92mYkOQhaBSRTPnNH7K/exec";
 const LEAD_STATUS_OPTIONS = [
@@ -80,6 +86,7 @@ let state = loadState();
 let activeView = "dashboard";
 let tickTimer;
 let syncTimer;
+let followUpReminderTimer;
 let toastTimer;
 let lastRenderedActiveLeadKey = null;
 let passwordResetRequest = null;
@@ -92,6 +99,7 @@ let claimingLeadId = null;
 let serviceWorkerRegistrationPromise = null;
 let notificationAudioContext = null;
 let notifiedLeadKeys = loadNotifiedLeadKeys();
+let sentFollowUpReminderKeys = loadFollowUpReminderKeys();
 
 const elements = {
   sidebar: document.querySelector("#sidebar"),
@@ -518,6 +526,8 @@ function startAuthenticatedApp(user) {
   registerServiceWorker();
   markCurrentLeadNotificationsSeen();
   scheduleSync();
+  scheduleFollowUpReminders();
+  switchView(getRequestedStartView());
   renderAll();
   if (getSheetEndpoint()) {
     syncGoogleSheet({ silent: true, notifyNewLeads: true });
@@ -527,6 +537,7 @@ function startAuthenticatedApp(user) {
 function showLogin() {
   window.clearInterval(tickTimer);
   window.clearInterval(syncTimer);
+  window.clearInterval(followUpReminderTimer);
   elements.sidebar.classList.remove("open");
   elements.appShell.setAttribute("aria-hidden", "true");
   document.body.classList.remove("auth-pending", "authenticated");
@@ -1019,6 +1030,22 @@ function saveNotifiedLeadKeys() {
   localStorage.setItem(NOTIFIED_LEADS_KEY, JSON.stringify(compacted));
 }
 
+function loadFollowUpReminderKeys() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(FOLLOW_UP_REMINDER_KEY) || "[]");
+    return new Set(Array.isArray(saved) ? saved : []);
+  } catch {
+    localStorage.removeItem(FOLLOW_UP_REMINDER_KEY);
+    return new Set();
+  }
+}
+
+function saveFollowUpReminderKeys() {
+  const compacted = [...sentFollowUpReminderKeys].slice(-120);
+  sentFollowUpReminderKeys = new Set(compacted);
+  localStorage.setItem(FOLLOW_UP_REMINDER_KEY, JSON.stringify(compacted));
+}
+
 function lockViewportZoom() {
   let lastTouchEnd = 0;
   document.addEventListener(
@@ -1061,8 +1088,16 @@ function markCurrentLeadNotificationsSeen() {
   saveNotifiedLeadKeys();
 }
 
-function getNotificationStartUrl() {
-  return `${window.location.origin}${window.location.pathname || "/"}`;
+function getNotificationStartUrl(viewName = "") {
+  const url = new URL(window.location.pathname || "/", window.location.origin);
+  if (viewName) url.searchParams.set("view", viewName);
+  return url.href;
+}
+
+function getRequestedStartView() {
+  const params = new URLSearchParams(window.location.search);
+  const requestedView = params.get("view") || window.location.hash.replace(/^#/, "");
+  return ["dashboard", "leads", "agents", "integration"].includes(requestedView) ? requestedView : "dashboard";
 }
 
 async function registerServiceWorker() {
@@ -2086,6 +2121,110 @@ async function sendSystemNotification(lead, options = {}) {
   }
 }
 
+function getDueFollowUpReminderSlot(value = Date.now()) {
+  const parts = malaysiaDateParts(value);
+  const currentMinutes = Number(parts.hour) * 60 + Number(parts.minute);
+  return FOLLOW_UP_REMINDER_SLOTS.find((slot) => {
+    const [hour, minute] = slot.time.split(":").map(Number);
+    const slotMinutes = hour * 60 + minute;
+    return currentMinutes >= slotMinutes && currentMinutes < slotMinutes + FOLLOW_UP_REMINDER_WINDOW_MINUTES;
+  });
+}
+
+function followUpReminderKey(slot, value = Date.now()) {
+  const user = getCurrentUser();
+  return `${todayKey(value)}:${slot.time}:${user?.id || "guest"}`;
+}
+
+function getVisibleFollowUpReminderLeads() {
+  const user = getCurrentUser();
+  return state.leads.filter((lead) => {
+    if (!lead?.name && !lead?.phone && !lead?.project) return false;
+    return isAdmin() || lead.assignedAgentId === user?.id;
+  });
+}
+
+function buildFollowUpSummary(leads) {
+  const counts = new Map();
+  leads.forEach((lead) => {
+    const label = formatSheetStatus(getLeadVisualStatus(lead));
+    counts.set(label, (counts.get(label) || 0) + 1);
+  });
+  return [...counts.entries()]
+    .map(([label, count]) => `${label}: ${count}`)
+    .slice(0, 4)
+    .join(" • ");
+}
+
+async function sendFollowUpReminder(slot, leads) {
+  const user = getCurrentUser();
+  const count = leads.length;
+  const summary = buildFollowUpSummary(leads);
+  const title = `Reminder follow up ${slot.label}`;
+  const body = `${count} lead untuk follow up.${summary ? `\n${summary}` : ""}\nBuka Log Lead untuk update status dan nota.`;
+
+  showToast(title, `${count} lead perlu follow up dalam Log Lead.`);
+  await playNotificationSound();
+
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+
+  const notificationOptions = {
+    body,
+    tag: `leadlaju-follow-up-${todayKey()}-${slot.time}-${user?.id || "guest"}`,
+    renotify: true,
+    requireInteraction: true,
+    icon: NOTIFICATION_ICON,
+    badge: NOTIFICATION_BADGE,
+    data: {
+      view: "leads",
+      url: getNotificationStartUrl("leads"),
+    },
+  };
+
+  try {
+    const registration = await registerServiceWorker();
+    if (registration?.showNotification) {
+      await registration.showNotification(title, notificationOptions);
+      return;
+    }
+  } catch (error) {
+    console.warn("Follow-up reminder notification failed", error);
+  }
+
+  try {
+    const notification = new Notification(title, notificationOptions);
+    notification.onclick = () => {
+      window.focus();
+      switchView("leads");
+      notification.close();
+    };
+  } catch (error) {
+    console.warn("Browser reminder notification failed", error);
+  }
+}
+
+async function checkFollowUpReminder() {
+  if (document.body.classList.contains("logged-out")) return;
+  const slot = getDueFollowUpReminderSlot();
+  if (!slot) return;
+
+  const key = followUpReminderKey(slot);
+  if (sentFollowUpReminderKeys.has(key)) return;
+
+  const leads = getVisibleFollowUpReminderLeads();
+  if (!leads.length) return;
+
+  sentFollowUpReminderKeys.add(key);
+  saveFollowUpReminderKeys();
+  await sendFollowUpReminder(slot, leads);
+}
+
+function scheduleFollowUpReminders() {
+  window.clearInterval(followUpReminderTimer);
+  checkFollowUpReminder();
+  followUpReminderTimer = window.setInterval(checkFollowUpReminder, 30 * 1000);
+}
+
 async function requestNotifications() {
   if (!("Notification" in window)) {
     showToast("Tidak disokong", "Pelayar ini tidak menyokong notifikasi sistem.", "error");
@@ -2094,7 +2233,7 @@ async function requestNotifications() {
   await registerServiceWorker();
   await playNotificationSound();
   if (Notification.permission === "granted") {
-    showToast("Notifikasi aktif", "Lead baru akan keluar notifikasi sistem dan bunyi dalam app.");
+    showToast("Notifikasi aktif", "Lead baru dan reminder follow up akan keluar notifikasi sistem.");
     return;
   }
   const permission = await Notification.requestPermission();
@@ -2102,7 +2241,7 @@ async function requestNotifications() {
   showToast(
     permission === "granted" ? "Notifikasi diaktifkan" : "Notifikasi belum aktif",
     permission === "granted"
-      ? "Lead baru akan muncul sebagai notifikasi sistem dan bunyi dalam app."
+      ? "Lead baru dan reminder follow up akan muncul sebagai notifikasi sistem."
       : "Benarkan notifikasi melalui tetapan pelayar untuk mengaktifkannya.",
     permission === "granted" ? "success" : "error",
   );
@@ -3243,8 +3382,14 @@ elements.syncNowButton.addEventListener("click", () => syncGoogleSheet());
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.addEventListener("message", (event) => {
     if (event.data?.type === "OPEN_DASHBOARD") switchView("dashboard");
+    if (event.data?.type === "OPEN_VIEW") switchView(event.data.view || "dashboard");
   });
 }
+
+window.addEventListener("focus", () => checkFollowUpReminder());
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) checkFollowUpReminder();
+});
 
 document.querySelectorAll("[data-close-modal]").forEach((button) => {
   button.addEventListener("click", () => closeModal(document.querySelector(`#${button.dataset.closeModal}`)));
