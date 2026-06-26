@@ -2,7 +2,8 @@ const STORAGE_KEY = "leadlaju-state-v1";
 const AUTH_KEY = "leadlaju-auth-v1";
 const NOTIFIED_LEADS_KEY = "leadlaju-notified-leads-v1";
 const FOLLOW_UP_REMINDER_KEY = "leadlaju-follow-up-reminders-v1";
-const ADMIN_REMINDER_KEY = "leadlaju-admin-reminders-v1";
+const ADMIN_REMINDER_DISMISSED_KEY = "leadlaju-admin-reminder-dismissed-v2";
+const ADMIN_REMINDER_NOTIFIED_KEY = "leadlaju-admin-reminder-notified-v2";
 const SESSION_DURATION_MS = 365 * 24 * 60 * 60 * 1000;
 const RESPONSE_WINDOW_MS = 5 * 60 * 1000;
 const DEFAULT_AGENT_PASSWORD = "Agent123!";
@@ -101,7 +102,9 @@ let serviceWorkerRegistrationPromise = null;
 let notificationAudioContext = null;
 let notifiedLeadKeys = loadNotifiedLeadKeys();
 let sentFollowUpReminderKeys = loadFollowUpReminderKeys();
-let seenAdminReminderKeys = loadAdminReminderKeys();
+let dismissedAdminReminderKeys = loadAdminReminderKeys(ADMIN_REMINDER_DISMISSED_KEY);
+let notifiedAdminReminderKeys = loadAdminReminderKeys(ADMIN_REMINDER_NOTIFIED_KEY);
+let latestAdminReminder = null;
 
 const elements = {
   sidebar: document.querySelector("#sidebar"),
@@ -149,6 +152,10 @@ const elements = {
   notificationCount: document.querySelector("#notification-count"),
   notificationButton: document.querySelector("#notification-button"),
   remindAgentsButton: document.querySelector("#remind-agents-button"),
+  adminReminderAlert: document.querySelector("#admin-reminder-alert"),
+  adminReminderTitle: document.querySelector("#admin-reminder-title"),
+  adminReminderMessage: document.querySelector("#admin-reminder-message"),
+  dismissAdminReminderButton: document.querySelector("#dismiss-admin-reminder"),
   manualLeadButtons: [
     document.querySelector("#manual-lead-button"),
     document.querySelector("#manual-lead-button-2"),
@@ -1049,20 +1056,21 @@ function saveFollowUpReminderKeys() {
   localStorage.setItem(FOLLOW_UP_REMINDER_KEY, JSON.stringify(compacted));
 }
 
-function loadAdminReminderKeys() {
+function loadAdminReminderKeys(storageKey) {
   try {
-    const saved = JSON.parse(localStorage.getItem(ADMIN_REMINDER_KEY) || "[]");
+    const saved = JSON.parse(localStorage.getItem(storageKey) || "[]");
     return new Set(Array.isArray(saved) ? saved : []);
   } catch {
-    localStorage.removeItem(ADMIN_REMINDER_KEY);
+    localStorage.removeItem(storageKey);
     return new Set();
   }
 }
 
-function saveAdminReminderKeys() {
-  const compacted = [...seenAdminReminderKeys].slice(-120);
-  seenAdminReminderKeys = new Set(compacted);
-  localStorage.setItem(ADMIN_REMINDER_KEY, JSON.stringify(compacted));
+function saveAdminReminderKeys(keySet, storageKey) {
+  const compacted = [...keySet].slice(-120);
+  const nextSet = new Set(compacted);
+  localStorage.setItem(storageKey, JSON.stringify(compacted));
+  return nextSet;
 }
 
 function lockViewportZoom() {
@@ -2243,12 +2251,52 @@ function normalizeAdminReminder(input) {
   };
 }
 
+function adminReminderUserKey(reminder, user = getCurrentUser()) {
+  return `${reminder?.id || "reminder"}:${user?.id || "guest"}`;
+}
+
+function renderAdminReminderAlert(reminder = latestAdminReminder) {
+  if (!elements.adminReminderAlert) return;
+  const user = getCurrentUser();
+  if (!reminder || user?.role !== "agent" || !user.active) {
+    elements.adminReminderAlert.hidden = true;
+    return;
+  }
+
+  const key = adminReminderUserKey(reminder, user);
+  if (dismissedAdminReminderKeys.has(key)) {
+    elements.adminReminderAlert.hidden = true;
+    return;
+  }
+
+  const leads = getAgentFollowUpLeads(user.id);
+  const summary = buildFollowUpSummary(leads);
+  elements.adminReminderTitle.textContent = `Admin remind follow up - ${leads.length} lead`;
+  elements.adminReminderMessage.textContent = `${reminder.createdByName}: ${reminder.message}${
+    summary ? ` (${summary})` : ""
+  }`;
+  elements.adminReminderAlert.hidden = false;
+}
+
+function dismissAdminReminder() {
+  if (!latestAdminReminder) return;
+  dismissedAdminReminderKeys.add(adminReminderUserKey(latestAdminReminder));
+  dismissedAdminReminderKeys = saveAdminReminderKeys(
+    dismissedAdminReminderKeys,
+    ADMIN_REMINDER_DISMISSED_KEY,
+  );
+  renderAdminReminderAlert();
+}
+
 async function sendAdminFollowUpNotification(reminder) {
   const user = getCurrentUser();
   if (!user || user.role !== "agent" || !user.active) return;
 
-  const key = `${reminder.id}:${user.id}`;
-  if (seenAdminReminderKeys.has(key)) return;
+  latestAdminReminder = reminder;
+  renderAdminReminderAlert(reminder);
+
+  const key = adminReminderUserKey(reminder, user);
+  if (dismissedAdminReminderKeys.has(key) || notifiedAdminReminderKeys.has(key)) return;
 
   const leads = getAgentFollowUpLeads(user.id);
   const count = leads.length;
@@ -2256,12 +2304,12 @@ async function sendAdminFollowUpNotification(reminder) {
   const title = "Admin remind follow up";
   const body = `${reminder.createdByName}: ${reminder.message}\n${count} lead untuk disemak.${summary ? `\n${summary}` : ""}`;
 
-  seenAdminReminderKeys.add(key);
-  saveAdminReminderKeys();
-  showToast(title, `${count} lead perlu follow up dalam Log Lead.`);
-  await playNotificationSound();
+  const canShowInApp = !document.hidden;
+  const canSystemNotify = "Notification" in window && Notification.permission === "granted";
+  if (!canShowInApp && !canSystemNotify) return;
 
-  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  if (canShowInApp) showToast(title, `${count} lead perlu follow up dalam Log Lead.`);
+  await playNotificationSound();
 
   const notificationOptions = {
     body,
@@ -2276,31 +2324,47 @@ async function sendAdminFollowUpNotification(reminder) {
     },
   };
 
-  try {
-    const registration = await registerServiceWorker();
-    if (registration?.showNotification) {
-      await registration.showNotification(title, notificationOptions);
-      return;
+  let delivered = canShowInApp;
+  if (canSystemNotify) {
+    try {
+      const registration = await registerServiceWorker();
+      if (registration?.showNotification) {
+        await registration.showNotification(title, notificationOptions);
+        delivered = true;
+      }
+    } catch (error) {
+      console.warn("Admin reminder notification failed", error);
     }
-  } catch (error) {
-    console.warn("Admin reminder notification failed", error);
+
+    if (!delivered) {
+      try {
+        const notification = new Notification(title, notificationOptions);
+        notification.onclick = () => {
+          window.focus();
+          switchView("leads");
+          notification.close();
+        };
+        delivered = true;
+      } catch (error) {
+        console.warn("Browser admin reminder failed", error);
+      }
+    }
   }
 
-  try {
-    const notification = new Notification(title, notificationOptions);
-    notification.onclick = () => {
-      window.focus();
-      switchView("leads");
-      notification.close();
-    };
-  } catch (error) {
-    console.warn("Browser admin reminder failed", error);
+  if (delivered) {
+    notifiedAdminReminderKeys.add(key);
+    notifiedAdminReminderKeys = saveAdminReminderKeys(
+      notifiedAdminReminderKeys,
+      ADMIN_REMINDER_NOTIFIED_KEY,
+    );
   }
 }
 
 async function processAdminReminderFromSheet(input) {
   if (document.body.classList.contains("logged-out")) return;
   const reminder = normalizeAdminReminder(input);
+  latestAdminReminder = reminder;
+  renderAdminReminderAlert(reminder);
   if (!reminder) return;
   await sendAdminFollowUpNotification(reminder);
 }
@@ -2862,6 +2926,7 @@ function renderIntegration() {
 
 function renderAll() {
   renderUser();
+  renderAdminReminderAlert();
   renderActiveLead();
   renderStats();
   renderActivities();
@@ -3486,6 +3551,7 @@ document.querySelectorAll("[data-view-link]").forEach((button) => {
 elements.manualLeadButtons.forEach((button) => button.addEventListener("click", openManualLeadModal));
 elements.notificationButton.addEventListener("click", requestNotifications);
 elements.remindAgentsButton?.addEventListener("click", remindAllAgentsForFollowUp);
+elements.dismissAdminReminderButton?.addEventListener("click", dismissAdminReminder);
 elements.mobileMenu.addEventListener("click", () => elements.sidebar.classList.toggle("open"));
 elements.loginForm.addEventListener("submit", handleLogin);
 elements.loginEmail.addEventListener("input", () => setLoginError(""));
@@ -3538,9 +3604,15 @@ if ("serviceWorker" in navigator) {
   });
 }
 
-window.addEventListener("focus", () => checkFollowUpReminder());
+window.addEventListener("focus", () => {
+  checkFollowUpReminder();
+  if (latestAdminReminder) sendAdminFollowUpNotification(latestAdminReminder);
+});
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) checkFollowUpReminder();
+  if (!document.hidden) {
+    checkFollowUpReminder();
+    if (latestAdminReminder) sendAdminFollowUpNotification(latestAdminReminder);
+  }
 });
 
 document.querySelectorAll("[data-close-modal]").forEach((button) => {

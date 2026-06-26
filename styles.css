@@ -928,6 +928,44 @@ svg {
   justify-content: flex-end;
 }
 
+.agent-reminder-alert {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  margin-top: 22px;
+  padding: 16px;
+  border: 1px solid #ffe1a6;
+  border-radius: 16px;
+  background: #fffaf0;
+  box-shadow: var(--shadow-sm);
+}
+
+.agent-reminder-alert > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.agent-reminder-alert strong {
+  font-family: "Manrope", sans-serif;
+  font-size: 15px;
+  letter-spacing: -0.03em;
+}
+
+.agent-reminder-alert small {
+  color: var(--ink-700);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.agent-reminder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .section-kicker {
   display: block;
   margin-bottom: 7px;
@@ -2507,6 +2545,20 @@ td small {
     align-items: flex-start;
     flex-direction: column;
     gap: 16px;
+  }
+
+  .agent-reminder-alert {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-reminder-actions {
+    justify-content: stretch;
+  }
+
+  .agent-reminder-actions .secondary-button,
+  .agent-reminder-actions .text-button {
+    width: 100%;
+    justify-content: center;
   }
 
   .stats-grid {
