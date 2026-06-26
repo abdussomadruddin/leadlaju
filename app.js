@@ -2,6 +2,7 @@ const STORAGE_KEY = "leadlaju-state-v1";
 const AUTH_KEY = "leadlaju-auth-v1";
 const NOTIFIED_LEADS_KEY = "leadlaju-notified-leads-v1";
 const FOLLOW_UP_REMINDER_KEY = "leadlaju-follow-up-reminders-v1";
+const ADMIN_REMINDER_KEY = "leadlaju-admin-reminders-v1";
 const SESSION_DURATION_MS = 365 * 24 * 60 * 60 * 1000;
 const RESPONSE_WINDOW_MS = 5 * 60 * 1000;
 const DEFAULT_AGENT_PASSWORD = "Agent123!";
@@ -100,6 +101,7 @@ let serviceWorkerRegistrationPromise = null;
 let notificationAudioContext = null;
 let notifiedLeadKeys = loadNotifiedLeadKeys();
 let sentFollowUpReminderKeys = loadFollowUpReminderKeys();
+let seenAdminReminderKeys = loadAdminReminderKeys();
 
 const elements = {
   sidebar: document.querySelector("#sidebar"),
@@ -146,6 +148,7 @@ const elements = {
   navLeadCount: document.querySelector("#nav-lead-count"),
   notificationCount: document.querySelector("#notification-count"),
   notificationButton: document.querySelector("#notification-button"),
+  remindAgentsButton: document.querySelector("#remind-agents-button"),
   manualLeadButtons: [
     document.querySelector("#manual-lead-button"),
     document.querySelector("#manual-lead-button-2"),
@@ -1044,6 +1047,22 @@ function saveFollowUpReminderKeys() {
   const compacted = [...sentFollowUpReminderKeys].slice(-120);
   sentFollowUpReminderKeys = new Set(compacted);
   localStorage.setItem(FOLLOW_UP_REMINDER_KEY, JSON.stringify(compacted));
+}
+
+function loadAdminReminderKeys() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(ADMIN_REMINDER_KEY) || "[]");
+    return new Set(Array.isArray(saved) ? saved : []);
+  } catch {
+    localStorage.removeItem(ADMIN_REMINDER_KEY);
+    return new Set();
+  }
+}
+
+function saveAdminReminderKeys() {
+  const compacted = [...seenAdminReminderKeys].slice(-120);
+  seenAdminReminderKeys = new Set(compacted);
+  localStorage.setItem(ADMIN_REMINDER_KEY, JSON.stringify(compacted));
 }
 
 function lockViewportZoom() {
@@ -2144,6 +2163,13 @@ function getVisibleFollowUpReminderLeads() {
   });
 }
 
+function getAgentFollowUpLeads(agentId) {
+  return state.leads.filter((lead) => {
+    if (!lead?.name && !lead?.phone && !lead?.project) return false;
+    return lead.assignedAgentId === agentId;
+  });
+}
+
 function buildFollowUpSummary(leads) {
   const counts = new Map();
   leads.forEach((lead) => {
@@ -2201,6 +2227,126 @@ async function sendFollowUpReminder(slot, leads) {
   } catch (error) {
     console.warn("Browser reminder notification failed", error);
   }
+}
+
+function normalizeAdminReminder(input) {
+  if (!input || typeof input !== "object") return null;
+  const id = String(input.id || input.reminder_id || "").trim();
+  if (!id) return null;
+  return {
+    id,
+    createdAt: parseLeadTimestamp(input.created_at || input.createdAt || Date.now(), Date.now()),
+    createdByName: String(input.created_by_name || input.createdByName || "Admin").trim() || "Admin",
+    message:
+      String(input.message || "").trim() ||
+      "Sila follow up semua lead dalam Log Lead dan kemas kini status.",
+  };
+}
+
+async function sendAdminFollowUpNotification(reminder) {
+  const user = getCurrentUser();
+  if (!user || user.role !== "agent" || !user.active) return;
+
+  const key = `${reminder.id}:${user.id}`;
+  if (seenAdminReminderKeys.has(key)) return;
+
+  const leads = getAgentFollowUpLeads(user.id);
+  const count = leads.length;
+  const summary = buildFollowUpSummary(leads);
+  const title = "Admin remind follow up";
+  const body = `${reminder.createdByName}: ${reminder.message}\n${count} lead untuk disemak.${summary ? `\n${summary}` : ""}`;
+
+  seenAdminReminderKeys.add(key);
+  saveAdminReminderKeys();
+  showToast(title, `${count} lead perlu follow up dalam Log Lead.`);
+  await playNotificationSound();
+
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+
+  const notificationOptions = {
+    body,
+    tag: `leadlaju-admin-reminder-${reminder.id}-${user.id}`,
+    renotify: true,
+    requireInteraction: true,
+    icon: NOTIFICATION_ICON,
+    badge: NOTIFICATION_BADGE,
+    data: {
+      view: "leads",
+      url: getNotificationStartUrl("leads"),
+    },
+  };
+
+  try {
+    const registration = await registerServiceWorker();
+    if (registration?.showNotification) {
+      await registration.showNotification(title, notificationOptions);
+      return;
+    }
+  } catch (error) {
+    console.warn("Admin reminder notification failed", error);
+  }
+
+  try {
+    const notification = new Notification(title, notificationOptions);
+    notification.onclick = () => {
+      window.focus();
+      switchView("leads");
+      notification.close();
+    };
+  } catch (error) {
+    console.warn("Browser admin reminder failed", error);
+  }
+}
+
+async function processAdminReminderFromSheet(input) {
+  if (document.body.classList.contains("logged-out")) return;
+  const reminder = normalizeAdminReminder(input);
+  if (!reminder) return;
+  await sendAdminFollowUpNotification(reminder);
+}
+
+async function remindAllAgentsForFollowUp() {
+  if (!isAdmin()) {
+    showToast("Admin sahaja", "Hanya admin boleh hantar reminder kepada semua agent.", "error");
+    return;
+  }
+
+  const activeAgents = getActiveAgents();
+  if (!activeAgents.length) {
+    showToast("Tiada agent aktif", "Aktifkan agent dahulu sebelum hantar reminder.", "error");
+    return;
+  }
+
+  if (elements.remindAgentsButton) elements.remindAgentsButton.disabled = true;
+  const user = getCurrentUser();
+  const reminder = {
+    id: makeId("reminder"),
+    created_at: formatSheetTimestamp(Date.now()),
+    created_by_id: user.id,
+    created_by_name: user.name || "Admin",
+    target: "agents",
+    message: "Sila follow up semua lead dalam Log Lead dan kemas kini status.",
+  };
+  let pushed = false;
+  try {
+    pushed = await postGoogleSheetAction(
+      {
+        action: "broadcast_follow_up_reminder",
+        reminder,
+      },
+      "Follow-up reminder broadcast failed",
+    );
+  } finally {
+    if (elements.remindAgentsButton) elements.remindAgentsButton.disabled = false;
+  }
+
+  showToast(
+    pushed ? "Reminder dihantar" : "Reminder belum sync",
+    pushed
+      ? `${activeAgents.length} agent aktif akan terima reminder pada sync seterusnya.`
+      : "Semak sambungan Google Sheet dan cuba lagi.",
+    pushed ? "success" : "error",
+  );
 }
 
 async function checkFollowUpReminder() {
@@ -3290,6 +3436,11 @@ async function syncGoogleSheet(options = {}) {
           : "Tiada perubahan baru ditemui.",
       );
     }
+    if (!Array.isArray(payload)) {
+      await processAdminReminderFromSheet(
+        payload.follow_up_reminder || payload.latest_reminder || payload.latestReminder || payload.reminder,
+      );
+    }
     return true;
   } catch (error) {
     state.integration.connected = false;
@@ -3334,6 +3485,7 @@ document.querySelectorAll("[data-view-link]").forEach((button) => {
 
 elements.manualLeadButtons.forEach((button) => button.addEventListener("click", openManualLeadModal));
 elements.notificationButton.addEventListener("click", requestNotifications);
+elements.remindAgentsButton?.addEventListener("click", remindAllAgentsForFollowUp);
 elements.mobileMenu.addEventListener("click", () => elements.sidebar.classList.toggle("open"));
 elements.loginForm.addEventListener("submit", handleLogin);
 elements.loginEmail.addEventListener("input", () => setLoginError(""));

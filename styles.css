@@ -921,6 +921,13 @@ svg {
   justify-content: space-between;
 }
 
+.dashboard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
 .section-kicker {
   display: block;
   margin-bottom: 7px;
@@ -984,6 +991,23 @@ svg {
   border-color: #c9d1dd;
   box-shadow: var(--shadow-sm);
   transform: translateY(-1px);
+}
+
+.primary-button:disabled,
+.secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+  transform: none;
+}
+
+.reminder-button {
+  border-color: #cfe0ff;
+  color: var(--blue-dark);
+  background: var(--blue-soft);
+}
+
+.reminder-button:hover {
+  border-color: #b7d0ff;
 }
 
 .secondary-button svg {

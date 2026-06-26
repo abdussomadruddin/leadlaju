@@ -1,9 +1,9 @@
-const CACHE_NAME = "leadlaju-pwa-v20260626-followup-reminders-v19";
+const CACHE_NAME = "leadlaju-pwa-v20260626-admin-reminder-v20";
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20260626-followup-reminders-v19",
-  "/app.js?v=20260626-followup-reminders-v19",
+  "/styles.css?v=20260626-admin-reminder-v20",
+  "/app.js?v=20260626-admin-reminder-v20",
   "/manifest.webmanifest?v=20260625-pwa-notifications",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",

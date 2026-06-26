@@ -1,6 +1,7 @@
 const SPREADSHEET_ID = "1ySHeB12lL2y4AxqpSx8dDniyujSaz2-9hoRzPlCv6TM";
 const SHEET_NAME = "Sheet1";
 const AGENTS_SHEET_NAME = "Agents";
+const REMINDERS_SHEET_NAME = "Reminders";
 const DEFAULT_SOURCE = "Manual Lead";
 const DEFAULT_AGENT_PASSWORD = "Agent123!";
 const MALAYSIA_TIME_ZONE = "Asia/Kuala_Lumpur";
@@ -67,24 +68,46 @@ const AGENT_HEADERS = [
   { field: "password", label: "Password" },
 ];
 
+const REMINDER_FIELD_ALIASES = {
+  id: ["id", "reminder id", "reminder_id"],
+  createdAt: ["tarikh & masa", "created at", "created_at", "time"],
+  createdById: ["created by id", "created_by_id", "admin id", "admin_id"],
+  createdByName: ["created by name", "created_by_name", "admin name", "admin_name"],
+  target: ["target", "sasaran"],
+  message: ["message", "mesej", "reminder"],
+};
+
+const REMINDER_HEADERS = [
+  { field: "id", label: "ID" },
+  { field: "createdAt", label: "Tarikh & Masa" },
+  { field: "createdById", label: "Created By ID" },
+  { field: "createdByName", label: "Created By Name" },
+  { field: "target", label: "Target" },
+  { field: "message", label: "Message" },
+];
+
 function doGet() {
   try {
     const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
     const sheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
     const agentsSheet = getOrCreateSheet_(spreadsheet, AGENTS_SHEET_NAME);
+    const remindersSheet = getOrCreateSheet_(spreadsheet, REMINDERS_SHEET_NAME);
     const headers = ensureRequiredHeaders_(sheet);
     const agentHeaders = ensureRequiredHeadersBySpec_(agentsSheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
+    const reminderHeaders = ensureRequiredHeadersBySpec_(remindersSheet, REMINDER_HEADERS, REMINDER_FIELD_ALIASES);
     ensureLeadIds_(sheet, headers);
     ensureLeadTimestamps_(sheet, headers);
     ensureLeadSources_(sheet, headers);
     const leads = readLeads_(sheet);
     const agents = readAgents_(agentsSheet, agentHeaders);
+    const followUpReminder = readLatestReminder_(remindersSheet, reminderHeaders);
     return jsonResponse({
       ok: true,
       spreadsheet: spreadsheet.getName(),
       sheet: sheet.getName(),
       leads,
       agents,
+      follow_up_reminder: followUpReminder,
     });
   } catch (error) {
     return jsonResponse({ ok: false, error: String(error), leads: [] });
@@ -118,11 +141,47 @@ function doPost(event) {
     if (payload.action === "send_reset_code") {
       return jsonResponse(sendResetCode_(payload));
     }
+    if (payload.action === "broadcast_follow_up_reminder") {
+      return jsonResponse(appendReminder_(payload.reminder || payload));
+    }
 
     return jsonResponse({ ok: false, error: "Action tidak disokong." });
   } catch (error) {
     return jsonResponse({ ok: false, error: String(error) });
   }
+}
+
+function appendReminder_(input) {
+  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = getOrCreateSheet_(spreadsheet, REMINDERS_SHEET_NAME);
+  const headers = ensureRequiredHeadersBySpec_(sheet, REMINDER_HEADERS, REMINDER_FIELD_ALIASES);
+  const reminder = {
+    id: String(input.id || input.reminder_id || Utilities.getUuid()).trim(),
+    createdAt: canonicalLeadTimestamp_(input.created_at || input.createdAt || new Date()),
+    createdById: String(input.created_by_id || input.createdById || "").trim(),
+    createdByName: String(input.created_by_name || input.createdByName || "Admin").trim() || "Admin",
+    target: String(input.target || "agents").trim() || "agents",
+    message:
+      String(input.message || "").trim() ||
+      "Sila follow up semua lead dalam Log Lead dan kemas kini status.",
+  };
+
+  const row = new Array(headers.length).fill("");
+  setRowValueBySpec_(headers, row, REMINDER_FIELD_ALIASES, "id", reminder.id);
+  setRowValueBySpec_(headers, row, REMINDER_FIELD_ALIASES, "createdAt", reminder.createdAt);
+  setRowValueBySpec_(headers, row, REMINDER_FIELD_ALIASES, "createdById", reminder.createdById);
+  setRowValueBySpec_(headers, row, REMINDER_FIELD_ALIASES, "createdByName", reminder.createdByName);
+  setRowValueBySpec_(headers, row, REMINDER_FIELD_ALIASES, "target", reminder.target);
+  setRowValueBySpec_(headers, row, REMINDER_FIELD_ALIASES, "message", reminder.message);
+  sheet.appendRow(row);
+
+  const maxRowsToKeep = 80;
+  const extraRows = sheet.getLastRow() - 1 - maxRowsToKeep;
+  if (extraRows > 0) {
+    sheet.deleteRows(2, extraRows);
+  }
+
+  return { ok: true, reminder };
 }
 
 function appendLead_(input) {
@@ -414,6 +473,29 @@ function readAgents_(sheet, headers) {
     .filter((agent) => agent.name && agent.email);
 }
 
+function readLatestReminder_(sheet, headers) {
+  if (!sheet) return null;
+
+  const values = sheet.getDataRange().getDisplayValues();
+  if (values.length < 2) return null;
+
+  for (let index = values.length - 1; index >= 1; index -= 1) {
+    const row = values[index];
+    const id = getCellBySpec_(headers, row, REMINDER_FIELD_ALIASES, "id");
+    if (!id) continue;
+    return {
+      id,
+      created_at: getCellBySpec_(headers, row, REMINDER_FIELD_ALIASES, "createdAt"),
+      created_by_id: getCellBySpec_(headers, row, REMINDER_FIELD_ALIASES, "createdById"),
+      created_by_name: getCellBySpec_(headers, row, REMINDER_FIELD_ALIASES, "createdByName") || "Admin",
+      target: getCellBySpec_(headers, row, REMINDER_FIELD_ALIASES, "target") || "agents",
+      message: getCellBySpec_(headers, row, REMINDER_FIELD_ALIASES, "message"),
+    };
+  }
+
+  return null;
+}
+
 function normalizeAgentActive_(value) {
   const normalized = String(value || "").trim().toLowerCase();
   if (["inactive", "tidak aktif", "false", "0", "off", "disabled"].includes(normalized)) {
@@ -540,8 +622,10 @@ function refreshSheetTemplate_() {
   const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
   const agentsSheet = getOrCreateSheet_(spreadsheet, AGENTS_SHEET_NAME);
+  const remindersSheet = getOrCreateSheet_(spreadsheet, REMINDERS_SHEET_NAME);
   const headers = ensureRequiredHeaders_(sheet);
   ensureRequiredHeadersBySpec_(agentsSheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
+  ensureRequiredHeadersBySpec_(remindersSheet, REMINDER_HEADERS, REMINDER_FIELD_ALIASES);
   ensureLeadIds_(sheet, headers);
   ensureLeadTimestamps_(sheet, headers);
   ensureLeadSources_(sheet, headers);
