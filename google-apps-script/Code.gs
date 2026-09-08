@@ -383,6 +383,16 @@ function updateLeadStatus_(input) {
 }
 
 function updateLeadRuntime_(input) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(8000)) return { ok: false, error: "Agihan lead sedang berjalan." };
+  try {
+    return updateLeadRuntimeLocked_(input);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function updateLeadRuntimeLocked_(input) {
   const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
   const headers = ensureRequiredHeaders_(sheet);
@@ -414,6 +424,21 @@ function updateLeadRuntime_(input) {
       setRowValue_(headers, nextRow, "expiresAt", input.expires_at || input.expiresAt ? canonicalLeadTimestamp_(input.expires_at || input.expiresAt) : "");
       setRowValue_(headers, nextRow, "queueState", String(input.queue_state || input.queueState || "").trim());
       setRowValue_(headers, nextRow, "passCount", String(input.pass_count ?? input.passCount ?? 0).trim());
+      const candidate = mapRow_(headers, nextRow, rowNumber);
+      if (candidate.queue_state === "active" && values.some((otherRow, index) => {
+        if (index === 0 || index === rowNumber - 1) return false;
+        const other = mapRow_(headers, otherRow, index + 1);
+        return normalizeLeadStage_(other.status) === "new" && other.queue_state !== "queued" &&
+          Boolean(findLeadAgent_([{
+            id: candidate.assigned_agent_id,
+            email: candidate.assigned_agent_email,
+            name: candidate.assigned_agent_name,
+          }], other));
+      })) {
+        holdLeadRuntimeRow_(sheet, headers, rowNumber, nextRow);
+        updated += 1;
+        continue;
+      }
       sheet.getRange(rowNumber, 1, 1, nextRow.length).setValues([nextRow]);
       updated += 1;
     }
@@ -766,6 +791,16 @@ function assignLeadRuntimeRow_(sheet, headers, rowNumber, row, agent, now) {
   };
 }
 
+function holdLeadRuntimeRow_(sheet, headers, rowNumber, row) {
+  const nextRow = row.slice(0, headers.length);
+  while (nextRow.length < headers.length) nextRow.push("");
+  ["assignedAgentId", "assignedAgentEmail", "assignedAgentName", "receivedAt", "expiresAt"].forEach(
+    (field) => setRowValue_(headers, nextRow, field, ""),
+  );
+  setRowValue_(headers, nextRow, "queueState", "queued");
+  sheet.getRange(rowNumber, 1, 1, nextRow.length).setValues([nextRow]);
+}
+
 function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(8000)) return { ok: false, error: "Push sync sedang berjalan." };
@@ -775,7 +810,6 @@ function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
     if (values.length < 2) return { ok: true, sent: 0 };
 
     const agents = getActiveAgentsForPush_(spreadsheet);
-    if (!agents.length) return { ok: true, sent: 0, reason: "no_agents" };
 
     const subscriptions = readPushSubscriptions_(spreadsheet, { agentOnly: true });
 
@@ -785,6 +819,17 @@ function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
     let sent = 0;
     let changedKeys = false;
 
+    // Reserve existing assignments before distributing any waiting rows.
+    const occupied = new Map();
+    for (let index = 1; index < values.length; index += 1) {
+      const lead = mapRow_(headers, values[index], index + 1);
+      if (!lead.name || !lead.phone || normalizeLeadStage_(lead.status) !== "new") continue;
+      const agent = lead.queue_state !== "queued" && findLeadAgent_(agents, lead);
+      if (agent && !occupied.has(agent.id)) {
+        occupied.set(agent.id, index);
+      }
+    }
+
     for (let index = 1; index < values.length; index += 1) {
       const rowNumber = index + 1;
       const row = values[index].slice(0, headers.length);
@@ -792,7 +837,8 @@ function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
       if (!lead.name || !lead.phone) continue;
       if (normalizeLeadStage_(lead.status) !== "new") continue;
 
-      let agent = findLeadAgent_(agents, lead);
+      let agent = lead.queue_state !== "queued" && findLeadAgent_(agents, lead);
+      if (agent && occupied.get(agent.id) !== index) agent = null;
       let runtime = {
         assigned_agent_id: lead.assigned_agent_id,
         assigned_agent_email: lead.assigned_agent_email,
@@ -801,9 +847,19 @@ function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
         expires_at: lead.expires_at,
       };
       if (!agent) {
-        agent = agents[roundRobinIndex % agents.length];
-        roundRobinIndex = (roundRobinIndex + 1) % agents.length;
+        for (let offset = 0; offset < agents.length; offset += 1) {
+          const candidateIndex = (roundRobinIndex + offset) % agents.length;
+          if (occupied.has(agents[candidateIndex].id)) continue;
+          agent = agents[candidateIndex];
+          roundRobinIndex = (candidateIndex + 1) % agents.length;
+          break;
+        }
+        if (!agent) {
+          holdLeadRuntimeRow_(sheet, headers, rowNumber, row);
+          continue;
+        }
         runtime = assignLeadRuntimeRow_(sheet, headers, rowNumber, row, agent, new Date());
+        occupied.set(agent.id, index);
       }
 
       const notificationKey = `${lead.id}:${agent.id}:${runtime.received_at || ""}`;

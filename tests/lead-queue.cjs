@@ -1,0 +1,88 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const { test } = require('node:test');
+
+function fixture(rows, agents = [{ id: 'a' }, { id: 'b' }]) {
+  const headers = ['id', 'name', 'phone', 'status', 'assigned_agent_id', 'queue_state', 'received_at', 'expires_at'];
+  const fields = { assignedAgentId: 'assigned_agent_id', assignedAgentEmail: 'email', assignedAgentName: 'agent_name', receivedAt: 'received_at', expiresAt: 'expires_at', queueState: 'queue_state' };
+  const values = [headers, ...rows.map(row => headers.map(key => row[key] || ''))];
+  const sheet = {
+    getDataRange: () => ({ getDisplayValues: () => values.map(row => row.slice()) }),
+    getRange: row => ({ setValues: ([value]) => { values[row - 1] = value; } }),
+  };
+  const context = vm.createContext({
+    LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: () => null, setProperty() {} }) },
+  });
+  vm.runInContext(fs.readFileSync('google-apps-script/Code.gs', 'utf8'), context);
+  Object.assign(context, {
+    SpreadsheetApp: { openById: () => ({ getSheetByName: () => sheet }) },
+    ensureRequiredHeaders_: () => headers,
+    getActiveAgentsForPush_: () => agents,
+    readPushSubscriptions_: () => [],
+    mapRow_: (headers, row) => Object.fromEntries(headers.map((key, i) => [key, row[i]])),
+    normalizeLeadStage_: value => value || 'new',
+    canonicalLeadTimestamp_: value => value.toISOString(),
+    getCell_: (headers, row, field) => row[headers.indexOf(fields[field] || field)],
+    setRowValue_: (headers, row, field, value) => {
+      const index = headers.indexOf(fields[field] || field);
+      if (index >= 0) row[index] = value;
+    },
+  });
+  return {
+    run: () => context.notifyUnsentLeadPushes_({}, sheet, headers),
+    rows: () => values.slice(1).map(row => context.mapRow_(headers, row)),
+    handled: index => { values[index + 1][3] = 'contacted'; },
+    assign: input => context.updateLeadRuntime_(input),
+  };
+}
+
+const lead = (id, extra = {}) => ({ id, name: id, phone: '0123456789', status: 'new', ...extra });
+
+test('burst assigns one per agent and holds excess without a timer', () => {
+  const f = fixture(Array.from({ length: 6 }, (_, i) => lead(String(i))));
+  f.run();
+  const rows = f.rows();
+  assert.deepEqual(rows.slice(0, 2).map(row => row.assigned_agent_id), ['a', 'b']);
+  rows.slice(2).forEach(row => {
+    assert.equal(row.queue_state, 'queued');
+    assert.equal(row.assigned_agent_id, '');
+    assert.equal(row.expires_at, '');
+  });
+  f.run();
+  assert.equal(f.rows().filter(row => row.queue_state === 'active').length, 2);
+});
+
+test('existing assignments reserve slots even below queued rows', () => {
+  const f = fixture([lead('waiting'), lead('existing', { assigned_agent_id: 'a', queue_state: 'active' })], [{ id: 'a' }]);
+  f.run();
+  assert.equal(f.rows()[0].queue_state, 'queued');
+  assert.equal(f.rows()[1].assigned_agent_id, 'a');
+  f.handled(1);
+  f.run();
+  assert.equal(f.rows()[0].assigned_agent_id, 'a');
+  assert.ok(f.rows()[0].expires_at);
+});
+
+test('legacy duplicate assignments are held and timers cleared', () => {
+  const f = fixture(['one', 'two'].map(id => lead(id, { assigned_agent_id: 'a', queue_state: 'active', expires_at: 'old' })), [{ id: 'a' }]);
+  f.run();
+  assert.equal(f.rows()[1].queue_state, 'queued');
+  assert.equal(f.rows()[1].expires_at, '');
+});
+
+test('no active agents holds all incoming leads', () => {
+  const f = fixture([lead('one')], []);
+  f.run();
+  assert.equal(f.rows()[0].queue_state, 'queued');
+});
+
+test('competing browser assignment cannot occupy a busy slot', () => {
+  const f = fixture([lead('one'), lead('two')], [{ id: 'a' }]);
+  f.assign({ id: 'one', assigned_agent_id: 'a', queue_state: 'active' });
+  f.assign({ id: 'two', assigned_agent_id: 'a', queue_state: 'active' });
+  assert.equal(f.rows()[0].assigned_agent_id, 'a');
+  assert.equal(f.rows()[1].queue_state, 'queued');
+  assert.equal(f.rows()[1].assigned_agent_id, '');
+});

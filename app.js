@@ -1667,14 +1667,14 @@ async function addLead(input, options = {}) {
 
   const initialStatus = normalizeSheetStatus(input.status);
   const now = Date.now();
-  if (options.queueIfBlocked) activateQueuedLeads({ now, notify: options.notify });
+  activateQueuedLeads({ now, notify: options.notify });
   const hasSheetAssignment = Boolean(sheetRuntime.assignedAgentId || sheetRuntime.queueState === "queued");
   const shouldDistribute = initialStatus === "new";
   const assignedAgent =
     !shouldDistribute || hasSheetAssignment ? null : selectNextAvailableAgent();
   const shouldQueue =
     sheetRuntime.queueState === "queued" ||
-    (options.queueIfBlocked && shouldDistribute && !assignedAgent && !sheetRuntime.assignedAgentId);
+    (shouldDistribute && !assignedAgent && !sheetRuntime.assignedAgentId);
   if (!assignedAgent && !shouldQueue && shouldDistribute && !sheetRuntime.assignedAgentId) {
     showToast("Tiada ejen aktif", "Aktifkan sekurang-kurangnya seorang ejen dahulu.", "error");
     return false;
@@ -3166,14 +3166,17 @@ async function toggleAgent(agentId) {
       (lead) => lead.status === "new" && lead.assignedAgentId === agent.id,
     );
     assignedLeads.forEach((lead) => {
-      const nextAgent = selectNextAgent(agent.id);
+      const nextAgent = selectNextAvailableAgent({ excludeAgentId: agent.id, ignoreLeadId: lead.id });
       if (nextAgent && nextAgent.id !== agent.id) {
         lead.assignedAgentId = nextAgent.id;
         lead.expiresAt = Date.now() + RESPONSE_WINDOW_MS;
         lead.passCount += 1;
         addActivity("passed", lead, `${agent.name} dinyahaktifkan, dipindahkan kepada ${nextAgent.name}`);
         updateLeadStatusInSheet(lead, "Passed");
+      } else {
+        queueLead(lead, Date.now(), { previousAgentId: agent.id, resetPassCount: false });
       }
+      syncLeadRuntimeInSheet(lead);
     });
   }
   saveState();
@@ -3181,7 +3184,7 @@ async function toggleAgent(agentId) {
     await persistProfile(agent);
     await Promise.all(
       state.leads
-        .filter((lead) => lead.status === "new")
+        .filter((lead) => isPendingLead(lead))
         .map((lead) => persistLead(lead)),
     );
   } catch (error) {
@@ -3224,14 +3227,18 @@ async function removeAgent(agentId) {
     renderAll();
     return;
   }
-  const replacement = selectNextAgent(agentId);
+  state.agents = state.agents.filter((item) => item.id !== agentId);
   state.leads
     .filter((lead) => lead.status === "new" && lead.assignedAgentId === agentId)
     .forEach((lead) => {
+      const replacement = selectNextAvailableAgent({ excludeAgentId: agentId, ignoreLeadId: lead.id });
       if (replacement && replacement.id !== agentId) {
         lead.assignedAgentId = replacement.id;
         lead.expiresAt = Date.now() + RESPONSE_WINDOW_MS;
+      } else {
+        queueLead(lead, Date.now(), { previousAgentId: agentId, resetPassCount: false });
       }
+      syncLeadRuntimeInSheet(lead);
     });
   state.agents = state.agents.filter((item) => item.id !== agentId);
   saveState();
