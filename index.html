@@ -26,7 +26,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="styles.css?v=20260626-web-push-v22" />
-    <script src="app.js?v=20260908-agent-count-v24" defer></script>
+    <script src="app.js?v=20260908-notes-v27" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -740,6 +740,17 @@
           <p class="reset-error" id="agent-password-error" role="alert"></p>
           <button class="primary-button full" type="submit">Simpan kata laluan</button>
         </form>
+      </div>
+    </div>
+
+    <div class="modal-backdrop" id="dial-phone-modal" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dial-phone-title">
+        <div class="modal-heading">
+          <h2 id="dial-phone-title">Panggilan Lead</h2>
+          <button class="modal-close" data-close-modal="dial-phone-modal" type="button" aria-label="Tutup">×</button>
+        </div>
+        <p id="dial-lead-name"></p>
+        <a class="primary-button" id="dial-phone-link">Call</a>
       </div>
     </div>
 

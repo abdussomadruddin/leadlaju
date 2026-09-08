@@ -1343,6 +1343,7 @@ function activateLead(lead, options = {}) {
 }
 
 function activateQueuedLeads(options = {}) {
+  enforceSingleActiveLead();
   const activated = [];
   while (true) {
     const queuedLead = state.leads
@@ -1563,6 +1564,8 @@ function applyLeadRuntimeFromSheet(lead, runtime, now = Date.now()) {
       previousAgentId: lead.lastAgentId || lead.assignedAgentId || null,
     });
     if (runtime.passCount !== null) lead.passCount = runtime.passCount;
+  } else if (runtime.assignedAgentId && hasActiveLeadForAgent(runtime.assignedAgentId, lead.id)) {
+    queueLead(lead, lead.queuedAt || now, { resetPassCount: false });
   } else if (runtime.assignedAgentId) {
     lead.status = "new";
     lead.assignedAgentId = runtime.assignedAgentId;
@@ -1672,7 +1675,7 @@ async function addLead(input, options = {}) {
   const shouldDistribute = initialStatus === "new";
   const assignedAgent =
     !shouldDistribute || hasSheetAssignment ? null : selectNextAvailableAgent();
-  const shouldQueue =
+  let shouldQueue =
     sheetRuntime.queueState === "queued" ||
     (shouldDistribute && !assignedAgent && !sheetRuntime.assignedAgentId);
   if (!assignedAgent && !shouldQueue && shouldDistribute && !sheetRuntime.assignedAgentId) {
@@ -1701,6 +1704,7 @@ async function addLead(input, options = {}) {
     notes: "",
   };
   applyLeadRuntimeFromSheet(lead, sheetRuntime, now);
+  shouldQueue = lead.status === "queued";
 
   state.leads.unshift(lead);
   saveState();
@@ -2569,13 +2573,6 @@ function dialLeadPhone(phone) {
   const callablePhone = String(phone || "").replace(/[^\d+]/g, "");
   if (!callablePhone) return false;
 
-  const link = document.createElement("a");
-  link.href = `tel:${callablePhone}`;
-  link.rel = "noopener";
-  link.style.display = "none";
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
   window.location.href = `tel:${callablePhone}`;
   return true;
 }
@@ -2624,6 +2621,21 @@ async function handleCall(leadId) {
 
     const agent = getAgent((claimedLead || lead).assignedAgentId);
     saveState();
+    const callablePhone = String(phoneToCall || "").replace(/[^\d+]/g, "");
+    if (callablePhone) {
+      const callLink = document.querySelector("#dial-phone-link");
+      callLink.href = `tel:${callablePhone}`;
+      callLink.textContent = `Call ${callablePhone}`;
+      document.querySelector("#dial-lead-name").textContent = lead.name;
+      const dialModal = document.querySelector("#dial-phone-modal");
+      dialModal.classList.add("open");
+      dialModal.setAttribute("aria-hidden", "false");
+      callLink.focus();
+      // Open before Sheet requests can consume the tap's activation window.
+      dialLeadPhone(callablePhone);
+    } else {
+      showToast("Nombor telefon tiada", "Lead ini belum ada nombor telefon yang boleh dipanggil.", "error");
+    }
     await updateLeadStatusInSheet(claimedLead || lead, "Contacted");
     await updateLeadRuntimeInSheet(claimedLead || lead);
     if (agent) await upsertAgentToSheet(agent);
@@ -2635,9 +2647,6 @@ async function handleCall(leadId) {
     );
     renderAll();
 
-    if (!dialLeadPhone(phoneToCall)) {
-      showToast("Nombor telefon tiada", "Lead ini belum ada nombor telefon yang boleh dipanggil.", "error");
-    }
   } catch (error) {
     console.error(error);
     showToast("CALL NOW gagal", error?.message || "Semak sambungan Google Sheet dan cuba lagi.", "error");
@@ -2762,7 +2771,12 @@ function renderStats() {
 }
 
 function renderActivities() {
-  const activities = state.activities.slice(0, 5);
+  const visibleLeadIds = new Set(state.leads
+    .filter((lead) => lead.assignedAgentId === state.currentUserId)
+    .map((lead) => lead.id));
+  const activities = state.activities
+    .filter((activity) => isAdmin() || visibleLeadIds.has(activity.leadId))
+    .slice(0, 5);
   elements.activityList.innerHTML = activities.length
     ? activities
         .map(
@@ -2802,7 +2816,18 @@ function renderTeam() {
     .join("");
 }
 
+const leadNoteDrafts = new Map();
+
+function leadNoteDraftKey(leadId) {
+  return `${state.currentUserId}:${leadId}`;
+}
+
 function renderLeadsTable() {
+  const focusedNote = document.activeElement;
+  if (focusedNote?.matches("[data-lead-note]") && elements.leadsTableBody.contains(focusedNote)) {
+    const lead = state.leads.find((item) => item.id === focusedNote.dataset.leadNote);
+    if (lead && canAccessLead(lead)) return;
+  }
   const search = elements.leadSearch.value.trim().toLowerCase();
   const filter = elements.leadFilter.value;
   const rows = state.leads
@@ -2879,7 +2904,7 @@ function renderLeadsTable() {
                   data-lead-note="${lead.id}"
                   rows="3"
                   placeholder="Tambah nota follow-up, minat projek, bajet atau temujanji"
-                >${escapeHtml(lead.notes || "")}</textarea>
+                >${escapeHtml(leadNoteDrafts.get(leadNoteDraftKey(lead.id)) ?? lead.notes ?? "")}</textarea>
                 <div class="lead-note-actions">
                   <button class="lead-note-save" type="button" data-lead-note-save="${lead.id}">Simpan nota</button>
                 </div>
@@ -2994,7 +3019,29 @@ function renderIntegration() {
     }</span>`;
 }
 
+function enforceSingleActiveLead() {
+  const occupied = new Set();
+  const overflow = [];
+  const active = state.leads.filter((lead) => lead.status === "new")
+    .sort((a, b) => (a.receivedAt || a.createdAt || 0) - (b.receivedAt || b.createdAt || 0)
+      || String(a.id).localeCompare(String(b.id)));
+  for (const lead of active) {
+    if (lead.assignedAgentId && !occupied.has(lead.assignedAgentId)) {
+      occupied.add(lead.assignedAgentId);
+      continue;
+    }
+    queueLead(lead, lead.queuedAt || lead.createdAt || Date.now(), { resetPassCount: false });
+    overflow.push(lead);
+  }
+  if (overflow.length) {
+    saveState();
+    overflow.forEach(syncLeadRuntimeInSheet);
+  }
+  return overflow;
+}
+
 function renderAll() {
+  enforceSingleActiveLead();
   renderUser();
   renderAdminReminderAlert();
   renderActiveLead();
@@ -3359,6 +3406,9 @@ async function saveLeadNote(leadId, button = null) {
   if (!lead || !field) return;
 
   const nextNotes = field.value.trim();
+  const draftKey = leadNoteDraftKey(leadId);
+  const submittedDraft = field.value;
+  leadNoteDrafts.set(draftKey, submittedDraft);
   if (nextNotes === String(lead.notes || "").trim()) {
     showToast("Nota tiada perubahan", "Tiada nota baru untuk disimpan.");
     return;
@@ -3381,10 +3431,10 @@ async function saveLeadNote(leadId, button = null) {
       if (data === false) throw new Error("Anda hanya boleh edit nota lead yang boleh dilihat oleh akaun ini.");
     }
     saveState();
+    if (leadNoteDrafts.get(draftKey) === submittedDraft) leadNoteDrafts.delete(draftKey);
     showToast("Nota disimpan", `Nota untuk ${lead.name} telah dikemas kini.`);
   } catch (error) {
     lead.notes = previousNotes;
-    field.value = previousNotes;
     console.error(error);
     showToast("Nota gagal disimpan", error?.message || "Semak sambungan Google Sheet dan cuba lagi.", "error");
   } finally {
@@ -3690,6 +3740,11 @@ document.addEventListener("visibilitychange", () => {
     checkFollowUpReminder();
     if (latestAdminReminder) sendAdminFollowUpNotification(latestAdminReminder);
   }
+});
+
+elements.leadsTableBody.addEventListener("input", (event) => {
+  const field = event.target.closest("[data-lead-note]");
+  if (field) leadNoteDrafts.set(leadNoteDraftKey(field.dataset.leadNote), field.value);
 });
 
 document.querySelectorAll("[data-close-modal]").forEach((button) => {
