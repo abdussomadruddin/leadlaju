@@ -60,9 +60,9 @@ test('contacted lead keeps the agent recorded by the server', () => {
   assert.equal(lead.assignmentRevision, 3);
 });
 
-test('agent cooldown lasts 30 minutes', () => {
+test('agent cooldown lasts 10 minutes', () => {
   const source = fs.readFileSync('app.js', 'utf8');
-  assert.match(source, /const AGENT_COOLDOWN_MS = 30 \* 60 \* 1000/);
+  assert.match(source, /const AGENT_COOLDOWN_MS = 10 \* 60 \* 1000/);
   assert.match(source, /Number\(agent\.cooldownUntil\) > Date\.now\(\)/);
   assert.match(source, /agent\.cooldownUntil = Date\.now\(\) \+ AGENT_COOLDOWN_MS/);
 });
