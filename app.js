@@ -155,6 +155,8 @@ const elements = {
   navLeadCount: document.querySelector("#nav-lead-count"),
   notificationCount: document.querySelector("#notification-count"),
   notificationButton: document.querySelector("#notification-button"),
+  notificationRequiredModal: document.querySelector("#notification-required-modal"),
+  enableRequiredNotifications: document.querySelector("#enable-required-notifications"),
   remindAgentsButton: document.querySelector("#remind-agents-button"),
   adminReminderAlert: document.querySelector("#admin-reminder-alert"),
   adminReminderTitle: document.querySelector("#admin-reminder-title"),
@@ -547,6 +549,7 @@ function startAuthenticatedApp(user) {
   scheduleFollowUpReminders();
   switchView(getRequestedStartView());
   renderAll();
+  enforceAgentNotificationAccess();
   if (getSheetEndpoint()) {
     syncGoogleSheet({ silent: true, notifyNewLeads: true });
   }
@@ -727,6 +730,8 @@ async function handleAgentSignup(event) {
 }
 
 async function logout() {
+  const user = getCurrentUser();
+  if (user?.role === "agent") await updateAgentPresence(false);
   try {
     const registration = await registerServiceWorker();
     const subscription = await registration?.pushManager?.getSubscription();
@@ -1604,6 +1609,8 @@ function normalizeSheetAgent(input) {
     cooldownUntil: input.cooldown_until || input.cooldownUntil
       ? parseLeadTimestamp(input.cooldown_until || input.cooldownUntil, null)
       : null,
+    online: Boolean(input.online),
+    notificationEnabled: Boolean(input.notification_enabled),
   };
 }
 
@@ -2007,6 +2014,24 @@ function agentSheetPayload(agent) {
     created_at: agent.createdAt ? new Date(agent.createdAt).toISOString() : new Date().toISOString(),
     cooldown_until: agent.cooldownUntil ? new Date(agent.cooldownUntil).toISOString() : "",
   };
+}
+
+async function updateAgentPresence(online) {
+  const user = getCurrentUser();
+  if (!user?.id || user.role !== "agent") return false;
+  return postGoogleSheetAction({
+    action: "update_agent_presence",
+    agent: { id: user.id, online, notification_enabled: Notification.permission === "granted" },
+  }, "Agent presence update failed", { waitForSend: true });
+}
+
+function enforceAgentNotificationAccess() {
+  const user = getCurrentUser();
+  if (user?.role !== "agent") return;
+  const granted = "Notification" in window && Notification.permission === "granted";
+  elements.notificationRequiredModal.classList.toggle("open", !granted);
+  elements.notificationRequiredModal.setAttribute("aria-hidden", String(granted));
+  if (granted) updateAgentPresence(true);
 }
 
 async function upsertAgentToSheet(agent) {
@@ -2513,12 +2538,16 @@ async function requestNotifications() {
   if (Notification.permission === "granted") {
     await syncPushSubscription(true).catch((error) => console.warn("Push subscription sync failed", error));
     showToast("Notifikasi aktif", "Lead baru dan reminder follow up akan keluar notifikasi sistem.");
+    enforceAgentNotificationAccess();
     return;
   }
   const permission = await Notification.requestPermission();
   if (permission === "granted") {
     await playNotificationSound();
     await syncPushSubscription(true).catch((error) => console.warn("Push subscription sync failed", error));
+    elements.notificationRequiredModal.classList.remove("open");
+    elements.notificationRequiredModal.setAttribute("aria-hidden", "true");
+    await updateAgentPresence(true);
   }
   showToast(
     permission === "granted" ? "Notifikasi diaktifkan" : "Notifikasi belum aktif",
@@ -2804,7 +2833,7 @@ function renderActivities() {
 }
 
 function renderTeam() {
-  const activeAgents = getActiveAgents();
+  const activeAgents = state.agents.filter((agent) => agent.role === "agent" && agent.online);
   elements.onlineCount.textContent = `${activeAgents.length} online`;
   elements.teamList.innerHTML = state.agents
     .filter((agent) => agent.role === "agent")
@@ -2814,9 +2843,9 @@ function renderTeam() {
           <span class="member-avatar">${initials(agent.name)}</span>
           <span>
             <strong>${escapeHtml(agent.name)}</strong>
-            <small>${agent.active ? `Giliran #${activeAgents.findIndex((item) => item.id === agent.id) + 1}` : "Tidak menerima lead"}</small>
+            <small>${agent.online ? `Online · Giliran #${activeAgents.findIndex((item) => item.id === agent.id) + 1}` : "Offline"}</small>
           </span>
-          <span class="member-state ${agent.active ? "" : "offline"}" title="${agent.active ? "Aktif" : "Tidak aktif"}"></span>
+          <span class="member-state ${agent.online ? "" : "offline"}" title="${agent.online ? "Online" : "Offline"}"></span>
         </div>`,
     )
     .join("");
@@ -3598,6 +3627,9 @@ async function syncGoogleSheet(options = {}) {
         payload.follow_up_reminder || payload.latest_reminder || payload.latestReminder || payload.reminder,
       );
     }
+    if (getCurrentUser()?.role === "agent" && Notification.permission === "granted") {
+      await updateAgentPresence(true);
+    }
     return true;
   } catch (error) {
     state.integration.connected = false;
@@ -3642,6 +3674,7 @@ document.querySelectorAll("[data-view-link]").forEach((button) => {
 
 elements.manualLeadButtons.forEach((button) => button.addEventListener("click", openManualLeadModal));
 elements.notificationButton.addEventListener("click", requestNotifications);
+elements.enableRequiredNotifications.addEventListener("click", requestNotifications);
 elements.remindAgentsButton?.addEventListener("click", remindAllAgentsForFollowUp);
 elements.dismissAdminReminderButton?.addEventListener("click", dismissAdminReminder);
 elements.mobileMenu.addEventListener("click", () => elements.sidebar.classList.toggle("open"));

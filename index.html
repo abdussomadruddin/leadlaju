@@ -26,7 +26,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="styles.css?v=20260626-web-push-v22" />
-    <script src="app.js?v=20260908-agent-analytics-v32" defer></script>
+    <script src="app.js?v=20260908-agent-presence-v33" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -751,6 +751,16 @@
         </div>
         <p id="dial-lead-name"></p>
         <a class="primary-button" id="dial-phone-link">Call</a>
+      </div>
+    </div>
+
+    <div class="modal-backdrop" id="notification-required-modal" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="notification-required-title">
+        <div class="modal-heading">
+          <div><span class="section-kicker">Tindakan diperlukan</span><h2 id="notification-required-title">Aktifkan notifikasi</h2></div>
+        </div>
+        <p>Ejen mesti mengaktifkan loceng supaya lead baharu tidak terlepas.</p>
+        <button class="primary-button" id="enable-required-notifications" type="button">Aktifkan loceng</button>
       </div>
     </div>
 

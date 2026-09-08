@@ -63,6 +63,8 @@ const AGENT_FIELD_ALIASES = {
   createdAt: ["created at", "created_at", "tarikh daftar", "tarikh & masa"],
   password: ["password", "kata laluan", "kata_laluan", "temporary password", "temporary_password"],
   cooldownUntil: ["cooldown until", "cooldown_until", "rehat sehingga"],
+  notificationEnabled: ["notification enabled", "notification_enabled", "loceng aktif"],
+  lastSeenAt: ["last seen at", "last_seen_at", "terakhir online"],
 };
 
 const AGENT_HEADERS = [
@@ -76,6 +78,8 @@ const AGENT_HEADERS = [
   { field: "createdAt", label: "Tarikh Daftar" },
   { field: "password", label: "Password" },
   { field: "cooldownUntil", label: "Cooldown Until" },
+  { field: "notificationEnabled", label: "Notification Enabled" },
+  { field: "lastSeenAt", label: "Last Seen At" },
 ];
 
 const REMINDER_FIELD_ALIASES = {
@@ -187,6 +191,9 @@ function doPost(event) {
       const result = replaceAgents_(payload.agents || []);
       if (result.ok) rebalanceLeadQueue_();
       return jsonResponse(result);
+    }
+    if (payload.action === "update_agent_presence") {
+      return jsonResponse(updateAgentPresence_(payload.agent || payload));
     }
     if (payload.action === "send_reset_code") {
       return jsonResponse(sendResetCode_(payload));
@@ -714,7 +721,27 @@ function buildAgentRow_(headers, agent, existingRow) {
     setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "password", agent.password);
   }
   setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "cooldownUntil", agent.cooldownUntil || "");
+  if (agent.notificationEnabled !== undefined) setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "notificationEnabled", agent.notificationEnabled ? "yes" : "no");
+  if (agent.lastSeenAt !== undefined) setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "lastSeenAt", agent.lastSeenAt || "");
   return row;
+}
+
+function updateAgentPresence_(input) {
+  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = getOrCreateSheet_(spreadsheet, AGENTS_SHEET_NAME);
+  const headers = ensureRequiredHeadersBySpec_(sheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
+  const values = sheet.getDataRange().getDisplayValues();
+  const id = String(input.id || "").trim();
+  for (let index = 1; index < values.length; index += 1) {
+    if (getCellBySpec_(headers, values[index], AGENT_FIELD_ALIASES, "id") !== id) continue;
+    const row = values[index].slice(0, headers.length);
+    const online = Boolean(input.online);
+    setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "notificationEnabled", input.notification_enabled ? "yes" : "no");
+    setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "lastSeenAt", online ? canonicalLeadTimestamp_(new Date()) : "");
+    sheet.getRange(index + 1, 1, 1, row.length).setValues([row]);
+    return { ok: true, online };
+  }
+  return { ok: false, error: "Ejen tidak dijumpai." };
 }
 
 function readAgents_(sheet, headers) {
@@ -735,6 +762,11 @@ function readAgents_(sheet, headers) {
       created_at: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "createdAt"),
       password: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "password"),
       cooldown_until: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "cooldownUntil"),
+      notification_enabled: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "notificationEnabled") === "yes",
+      last_seen_at: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "lastSeenAt"),
+      online: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "notificationEnabled") === "yes" &&
+        Boolean(getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "lastSeenAt")) &&
+        Date.now() - parseLeadTimestamp_(getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "lastSeenAt")).getTime() < 2 * 60 * 1000,
     }))
     .filter((agent) => agent.name && agent.email);
 }
@@ -894,6 +926,7 @@ function getActiveAgentsForPush_(spreadsheet) {
   const agentHeaders = ensureRequiredHeadersBySpec_(agentsSheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
   return readAgents_(agentsSheet, agentHeaders).filter(
     (agent) => agent.active === "active" && !roleIsAdmin_(agent.role) &&
+      agent.online &&
       (!agent.cooldown_until || parseLeadTimestamp_(agent.cooldown_until).getTime() <= Date.now()),
   );
 }
