@@ -27,6 +27,7 @@ const FIELD_ALIASES = {
   expiresAt: ["expires at", "expires_at", "tamat pada", "masa tamat"],
   queueState: ["queue state", "queue_state", "runtime state", "runtime_state"],
   passCount: ["pass count", "pass_count", "rotation count", "rotation_count"],
+  assignmentRevision: ["assignment revision", "assignment_revision", "runtime revision", "runtime_revision"],
 };
 
 const REQUIRED_HEADERS = [
@@ -46,6 +47,7 @@ const REQUIRED_HEADERS = [
   { field: "expiresAt", label: "Expires At" },
   { field: "queueState", label: "Queue State" },
   { field: "passCount", label: "Pass Count" },
+  { field: "assignmentRevision", label: "Assignment Revision" },
 ];
 
 const AGENT_FIELD_ALIASES = {
@@ -132,7 +134,6 @@ function doGet() {
     ensureLeadIds_(sheet, headers);
     ensureLeadTimestamps_(sheet, headers);
     ensureLeadSources_(sheet, headers);
-    reconcileSingleActiveLead_(sheet, headers);
     const leads = readLeads_(sheet);
     const agents = readAgents_(agentsSheet, agentHeaders);
     const followUpReminder = readLatestReminder_(remindersSheet, reminderHeaders);
@@ -157,7 +158,9 @@ function doPost(event) {
       return jsonResponse(appendLead_(payload.lead || payload));
     }
     if (payload.action === "delete_lead") {
-      return jsonResponse(deleteLead_(payload.lead || payload));
+      const result = deleteLead_(payload.lead || payload);
+      if (result.ok) rebalanceLeadQueue_();
+      return jsonResponse(result);
     }
     if (payload.action === "update_lead_status") {
       return jsonResponse(updateLeadStatus_(payload.lead || payload));
@@ -165,14 +168,23 @@ function doPost(event) {
     if (payload.action === "update_lead_runtime") {
       return jsonResponse(updateLeadRuntime_(payload.lead || payload));
     }
+    if (payload.action === "expire_lead") {
+      return jsonResponse(expireLead_(payload.lead || payload));
+    }
     if (payload.action === "add_agent") {
-      return jsonResponse(upsertAgent_(payload.agent || payload));
+      const result = upsertAgent_(payload.agent || payload);
+      if (result.ok) rebalanceLeadQueue_();
+      return jsonResponse(result);
     }
     if (payload.action === "delete_agent") {
-      return jsonResponse(deleteAgent_(payload.agent || payload));
+      const result = deleteAgent_(payload.agent || payload);
+      if (result.ok) rebalanceLeadQueue_();
+      return jsonResponse(result);
     }
     if (payload.action === "replace_agents") {
-      return jsonResponse(replaceAgents_(payload.agents || []));
+      const result = replaceAgents_(payload.agents || []);
+      if (result.ok) rebalanceLeadQueue_();
+      return jsonResponse(result);
     }
     if (payload.action === "send_reset_code") {
       return jsonResponse(sendResetCode_(payload));
@@ -351,6 +363,25 @@ function deleteLead_(input) {
 }
 
 function updateLeadStatus_(input) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(8000)) return { ok: false, error: "Agihan lead sedang berjalan." };
+  let result;
+  try {
+    result = updateLeadStatusLocked_(input);
+  } finally {
+    lock.releaseLock();
+  }
+  if (result.ok) rebalanceLeadQueue_();
+  return result;
+}
+
+function rebalanceLeadQueue_() {
+  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
+  return notifyUnsentLeadPushes_(spreadsheet, sheet, ensureRequiredHeaders_(sheet));
+}
+
+function updateLeadStatusLocked_(input) {
   const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
   const headers = ensureRequiredHeaders_(sheet);
@@ -377,12 +408,69 @@ function updateLeadStatus_(input) {
     const fallbackMatches = phone && project && rowPhone === phone && rowProject === project;
 
     if (idMatches || fallbackMatches) {
-      sheet.getRange(rowNumber, statusIndex + 1).setValue(status);
+      const currentRevision = Number(getCell_(headers, row, "assignmentRevision")) || 0;
+      const requestedRevision = Number(input.assignment_revision ?? input.assignmentRevision);
+      if (Number.isFinite(requestedRevision) && requestedRevision !== currentRevision) {
+        return { ok: false, stale: true, error: "Assignment lead telah berubah." };
+      }
+      const nextRow = row.slice(0, headers.length);
+      nextRow[statusIndex] = status;
+      if (normalizeLeadStage_(status) === "new") {
+        holdLeadRuntimeRow_(sheet, headers, rowNumber, nextRow);
+        updated += 1;
+        continue;
+      } else {
+        setRowValue_(headers, nextRow, "expiresAt", "");
+        setRowValue_(headers, nextRow, "queueState", normalizeLeadStage_(status));
+        setRowValue_(headers, nextRow, "assignmentRevision", String(currentRevision + 1));
+      }
+      sheet.getRange(rowNumber, 1, 1, nextRow.length).setValues([nextRow]);
       updated += 1;
     }
   }
 
   return { ok: true, updated, status };
+}
+
+function expireLead_(input) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(8000)) return { ok: false, error: "Agihan lead sedang berjalan." };
+  let result;
+  try {
+    const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
+    const headers = ensureRequiredHeaders_(sheet);
+    const values = sheet.getDataRange().getDisplayValues();
+    const id = String(input.id || input.lead_id || "").trim();
+    const requestedRevision = Number(input.assignment_revision ?? input.assignmentRevision);
+    for (let index = 1; index < values.length; index += 1) {
+      const lead = mapRow_(headers, values[index], index + 1);
+      if (lead.id !== id) continue;
+      const currentRevision = Number(lead.assignment_revision) || 0;
+      if (!Number.isFinite(requestedRevision) || requestedRevision !== currentRevision) {
+        result = { ok: false, stale: true, error: "Assignment lead telah berubah." };
+        break;
+      }
+      if (normalizeLeadStage_(lead.status) !== "new" || lead.queue_state === "queued") {
+        result = { ok: false, stale: true, error: "Lead bukan lagi aktif." };
+        break;
+      }
+      const row = values[index].slice(0, headers.length);
+      setRowValue_(headers, row, "passCount", String((Number(lead.pass_count) || 0) + 1));
+      holdLeadRuntimeRow_(sheet, headers, index + 1, row);
+      result = { ok: true, expired: 1 };
+      break;
+    }
+    if (!result) result = { ok: false, error: "Lead tidak dijumpai." };
+  } finally {
+    lock.releaseLock();
+  }
+  if (result.ok) {
+    const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
+    notifyUnsentLeadPushes_(spreadsheet, sheet, ensureRequiredHeaders_(sheet));
+  }
+  return result;
 }
 
 function updateLeadRuntime_(input) {
@@ -419,6 +507,11 @@ function updateLeadRuntimeLocked_(input) {
     const fallbackMatches = phone && project && rowPhone === phone && rowProject === project;
 
     if (idMatches || fallbackMatches) {
+      const currentRevision = Number(getCell_(headers, row, "assignmentRevision")) || 0;
+      const requestedRevision = Number(input.assignment_revision ?? input.assignmentRevision);
+      if (!Number.isFinite(requestedRevision) || requestedRevision !== currentRevision) {
+        return { ok: false, stale: true, error: "Assignment lead telah berubah." };
+      }
       const nextRow = row.slice(0, headers.length);
       setRowValue_(headers, nextRow, "assignedAgentId", String(input.assigned_agent_id || input.assignedAgentId || "").trim());
       setRowValue_(headers, nextRow, "assignedAgentEmail", String(input.assigned_agent_email || input.assignedAgentEmail || "").trim());
@@ -427,6 +520,7 @@ function updateLeadRuntimeLocked_(input) {
       setRowValue_(headers, nextRow, "expiresAt", input.expires_at || input.expiresAt ? canonicalLeadTimestamp_(input.expires_at || input.expiresAt) : "");
       setRowValue_(headers, nextRow, "queueState", String(input.queue_state || input.queueState || "").trim());
       setRowValue_(headers, nextRow, "passCount", String(input.pass_count ?? input.passCount ?? 0).trim());
+      setRowValue_(headers, nextRow, "assignmentRevision", String(currentRevision + 1));
       const candidate = mapRow_(headers, nextRow, rowNumber);
       if (candidate.queue_state === "active" && values.some((otherRow, index) => {
         if (index === 0 || index === rowNumber - 1) return false;
@@ -830,6 +924,8 @@ function assignLeadRuntimeRow_(sheet, headers, rowNumber, row, agent, now) {
   setRowValue_(headers, nextRow, "expiresAt", expiresAt);
   setRowValue_(headers, nextRow, "queueState", "active");
   if (!getCell_(headers, nextRow, "passCount")) setRowValue_(headers, nextRow, "passCount", "0");
+  const assignmentRevision = (Number(getCell_(headers, nextRow, "assignmentRevision")) || 0) + 1;
+  setRowValue_(headers, nextRow, "assignmentRevision", String(assignmentRevision));
   sheet.getRange(rowNumber, 1, 1, nextRow.length).setValues([nextRow]);
   return {
     assigned_agent_id: agent.id,
@@ -837,6 +933,7 @@ function assignLeadRuntimeRow_(sheet, headers, rowNumber, row, agent, now) {
     assigned_agent_name: agent.name,
     received_at: receivedAt,
     expires_at: expiresAt,
+    assignment_revision: assignmentRevision,
   };
 }
 
@@ -847,6 +944,12 @@ function holdLeadRuntimeRow_(sheet, headers, rowNumber, row) {
     (field) => setRowValue_(headers, nextRow, field, ""),
   );
   setRowValue_(headers, nextRow, "queueState", "queued");
+  setRowValue_(
+    headers,
+    nextRow,
+    "assignmentRevision",
+    String((Number(getCell_(headers, nextRow, "assignmentRevision")) || 0) + 1),
+  );
   sheet.getRange(rowNumber, 1, 1, nextRow.length).setValues([nextRow]);
 }
 
@@ -1135,6 +1238,7 @@ function mapRow_(headers, row, rowNumber) {
     expires_at: expiresAt ? canonicalLeadTimestamp_(expiresAt) : "",
     queue_state: getCell_(headers, row, "queueState"),
     pass_count: getCell_(headers, row, "passCount"),
+    assignment_revision: Number(getCell_(headers, row, "assignmentRevision")) || 0,
   };
 
   return lead;

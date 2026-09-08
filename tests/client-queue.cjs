@@ -18,27 +18,23 @@ function setup(leads) {
   return context;
 }
 
-test('six legacy NEW leads become one active and five queued', () => {
+test('client detects overflow without rewriting server assignments', () => {
   const leads = Array.from({ length: 6 }, (_, i) => ({ id: String(i), status: 'new', assignedAgentId: 'a', receivedAt: i + 1, expiresAt: 999 }));
   const app = setup(leads);
   assert.equal(app.enforceSingleActiveLead().length, 5);
-  assert.equal(leads.filter(lead => lead.status === 'new').length, 1);
-  leads.slice(1).forEach(lead => {
-    assert.equal(lead.status, 'queued');
-    assert.equal(lead.assignedAgentId, null);
-    assert.equal(lead.expiresAt, null);
-  });
-  assert.equal(app.enforceSingleActiveLead().length, 0);
+  assert.equal(leads.filter(lead => lead.status === 'new').length, 6);
+  leads.forEach(lead => assert.equal(lead.assignedAgentId, 'a'));
+  assert.equal(app.enforceSingleActiveLead().length, 5);
 });
 
-test('repeated Sheet assignments cannot restore overflow NEW leads', () => {
+test('client accepts the latest runtime assignment from the server', () => {
   const leads = [{ id: 'one', status: 'new', assignedAgentId: 'a' }];
   const app = setup(leads);
   const lead = { id: 'two', status: 'queued' };
   for (let i = 0; i < 3; i++) {
     app.applyLeadRuntimeFromSheet(lead, { hasRuntime: true, assignedAgentId: 'a', queueState: 'active' });
-    assert.equal(lead.status, 'queued');
-    assert.equal(lead.assignedAgentId, null);
+    assert.equal(lead.status, 'new');
+    assert.equal(lead.assignedAgentId, 'a');
   }
   leads[0].status = 'contacted';
   app.applyLeadRuntimeFromSheet(lead, { hasRuntime: true, assignedAgentId: 'a', queueState: 'active' });
@@ -50,4 +46,12 @@ test('agent cooldown lasts 30 minutes', () => {
   assert.match(source, /const AGENT_COOLDOWN_MS = 30 \* 60 \* 1000/);
   assert.match(source, /Number\(agent\.cooldownUntil\) > Date\.now\(\)/);
   assert.match(source, /agent\.cooldownUntil = Date\.now\(\) \+ AGENT_COOLDOWN_MS/);
+});
+
+test('client queue activation is read-only', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const start = source.indexOf('function activateQueuedLeads(');
+  const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
+  assert.match(body, /return \[\];/);
+  assert.doesNotMatch(body, /syncLeadRuntimeInSheet|assignedAgentId\s*=/);
 });

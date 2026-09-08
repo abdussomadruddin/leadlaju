@@ -4,8 +4,8 @@ const vm = require('node:vm');
 const { test } = require('node:test');
 
 function fixture(rows, agents = [{ id: 'a' }, { id: 'b' }]) {
-  const headers = ['id', 'name', 'phone', 'status', 'assigned_agent_id', 'queue_state', 'received_at', 'expires_at'];
-  const fields = { assignedAgentId: 'assigned_agent_id', assignedAgentEmail: 'email', assignedAgentName: 'agent_name', receivedAt: 'received_at', expiresAt: 'expires_at', queueState: 'queue_state' };
+  const headers = ['id', 'name', 'phone', 'status', 'assigned_agent_id', 'queue_state', 'received_at', 'expires_at', 'assignment_revision'];
+  const fields = { assignedAgentId: 'assigned_agent_id', assignedAgentEmail: 'email', assignedAgentName: 'agent_name', receivedAt: 'received_at', expiresAt: 'expires_at', queueState: 'queue_state', assignmentRevision: 'assignment_revision' };
   const values = [headers, ...rows.map(row => headers.map(key => row[key] || ''))];
   const sheet = {
     getDataRange: () => ({ getDisplayValues: () => values.map(row => row.slice()) }),
@@ -80,9 +80,17 @@ test('no active agents holds all incoming leads', () => {
 
 test('competing browser assignment cannot occupy a busy slot', () => {
   const f = fixture([lead('one'), lead('two')], [{ id: 'a' }]);
-  f.assign({ id: 'one', assigned_agent_id: 'a', queue_state: 'active' });
-  f.assign({ id: 'two', assigned_agent_id: 'a', queue_state: 'active' });
+  f.assign({ id: 'one', assigned_agent_id: 'a', queue_state: 'active', assignment_revision: 0 });
+  f.assign({ id: 'two', assigned_agent_id: 'a', queue_state: 'active', assignment_revision: 0 });
   assert.equal(f.rows()[0].assigned_agent_id, 'a');
   assert.equal(f.rows()[1].queue_state, 'queued');
   assert.equal(f.rows()[1].assigned_agent_id, '');
+});
+
+test('a stale phone cannot overwrite a newer assignment revision', () => {
+  const f = fixture([lead('one', { assigned_agent_id: 'a', queue_state: 'active', assignment_revision: '4' })], [{ id: 'a' }]);
+  const result = f.assign({ id: 'one', assigned_agent_id: 'a', queue_state: 'queued', assignment_revision: 3 });
+  assert.equal(result.stale, true);
+  assert.equal(f.rows()[0].queue_state, 'active');
+  assert.equal(f.rows()[0].assignment_revision, '4');
 });

@@ -108,6 +108,7 @@ let sentFollowUpReminderKeys = loadFollowUpReminderKeys();
 let dismissedAdminReminderKeys = loadAdminReminderKeys(ADMIN_REMINDER_DISMISSED_KEY);
 let notifiedAdminReminderKeys = loadAdminReminderKeys(ADMIN_REMINDER_NOTIFIED_KEY);
 let latestAdminReminder = null;
+const expiringLeadIds = new Set();
 
 const elements = {
   sidebar: document.querySelector("#sidebar"),
@@ -328,6 +329,7 @@ function mapLead(row) {
     expiresAt: new Date(row.expires_at).getTime(),
     status: row.status || "new",
     passCount: row.pass_count || 0,
+    assignmentRevision: Number(row.assignment_revision) || 0,
     responseMs: row.response_ms,
     contactedAt: row.contacted_at ? new Date(row.contacted_at).getTime() : null,
     notes: row.notes || "",
@@ -1356,28 +1358,7 @@ function activateLead(lead, options = {}) {
 }
 
 function activateQueuedLeads(options = {}) {
-  enforceSingleActiveLead();
-  const activated = [];
-  while (true) {
-    const queuedLead = state.leads
-      .filter((lead) => lead.status === "queued")
-      .sort((a, b) => (a.queuedAt || a.createdAt || 0) - (b.queuedAt || b.createdAt || 0))[0];
-    if (!queuedLead) break;
-
-    const agent = activateLead(queuedLead, {
-      now: options.now || Date.now(),
-      resetPassCount: false,
-    });
-    if (!agent) break;
-
-    addActivity("new", queuedLead, `${queuedLead.project} diberikan kepada ${agent.name}`);
-    syncLeadRuntimeInSheet(queuedLead);
-    if (options.notify && shouldNotifyForLead(queuedLead)) {
-      sendSystemNotification(queuedLead);
-    }
-    activated.push(queuedLead);
-  }
-  return activated;
+  return [];
 }
 
 function activateNextQueuedLead(options = {}) {
@@ -1478,24 +1459,14 @@ function applySheetStatusToLead(lead, sheetStatus, now = Date.now()) {
 
   if (nextStatus === "new") {
     if (lead.status === "new" || lead.status === "queued") return false;
-    lead.status = "new";
     lead.passCount = 0;
     lead.contactedAt = null;
     lead.responseMs = null;
     lead.statusLockedUntil = null;
-    const assignedAgent = selectNextAvailableAgent({ ignoreLeadId: lead.id });
-    if (assignedAgent) {
-      lead.assignedAgentId = assignedAgent.id;
-      lead.receivedAt = now;
-      lead.expiresAt = now + RESPONSE_WINDOW_MS;
-      lead.queuedAt = null;
-      lead.lastAgentId = null;
-    } else {
-      queueLead(lead, now, {
-        resetPassCount: false,
-        previousAgentId: lead.assignedAgentId || lead.lastAgentId || null,
-      });
-    }
+    queueLead(lead, now, {
+      resetPassCount: false,
+      previousAgentId: lead.assignedAgentId || lead.lastAgentId || null,
+    });
   } else {
     lead.status = nextStatus;
     lead.statusLockedUntil = null;
@@ -1547,7 +1518,8 @@ function readLeadRuntimeFromSheet(input) {
   const receivedRaw = pickInputValue(input, ["received_at", "receivedAt", "assigned_at", "assignedAt"]);
   const expiresRaw = pickInputValue(input, ["expires_at", "expiresAt"]);
   const passCountRaw = pickInputValue(input, ["pass_count", "passCount", "rotation_count", "rotationCount"]);
-  const hasRuntime = Boolean(assignedAgentId || queueState || receivedRaw || expiresRaw || passCountRaw);
+  const assignmentRevisionRaw = pickInputValue(input, ["assignment_revision", "assignmentRevision"]);
+  const hasRuntime = Boolean(assignedAgentId || queueState || receivedRaw || expiresRaw || passCountRaw || assignmentRevisionRaw);
 
   return {
     hasRuntime,
@@ -1556,6 +1528,7 @@ function readLeadRuntimeFromSheet(input) {
     receivedAt: receivedRaw ? parseLeadTimestamp(receivedRaw, null) : null,
     expiresAt: expiresRaw ? parseLeadTimestamp(expiresRaw, null) : null,
     passCount: passCountRaw === "" ? null : Number(passCountRaw) || 0,
+    assignmentRevision: Number(assignmentRevisionRaw) || 0,
   };
 }
 
@@ -1577,8 +1550,6 @@ function applyLeadRuntimeFromSheet(lead, runtime, now = Date.now()) {
       previousAgentId: lead.lastAgentId || lead.assignedAgentId || null,
     });
     if (runtime.passCount !== null) lead.passCount = runtime.passCount;
-  } else if (runtime.assignedAgentId && hasActiveLeadForAgent(runtime.assignedAgentId, lead.id)) {
-    queueLead(lead, lead.queuedAt || now, { resetPassCount: false });
   } else if (runtime.assignedAgentId) {
     lead.status = "new";
     lead.assignedAgentId = runtime.assignedAgentId;
@@ -1588,6 +1559,7 @@ function applyLeadRuntimeFromSheet(lead, runtime, now = Date.now()) {
     lead.lastAgentId = null;
     if (runtime.passCount !== null) lead.passCount = runtime.passCount;
   }
+  lead.assignmentRevision = runtime.assignmentRevision || 0;
 
   const after = JSON.stringify({
     status: lead.status,
@@ -1686,18 +1658,12 @@ async function addLead(input, options = {}) {
 
   const initialStatus = normalizeSheetStatus(input.status);
   const now = Date.now();
-  activateQueuedLeads({ now, notify: options.notify });
   const hasSheetAssignment = Boolean(sheetRuntime.assignedAgentId || sheetRuntime.queueState === "queued");
   const shouldDistribute = initialStatus === "new";
-  const assignedAgent =
-    !shouldDistribute || hasSheetAssignment ? null : selectNextAvailableAgent();
+  const assignedAgent = null;
   let shouldQueue =
     sheetRuntime.queueState === "queued" ||
-    (shouldDistribute && !assignedAgent && !sheetRuntime.assignedAgentId);
-  if (!assignedAgent && !shouldQueue && shouldDistribute && !sheetRuntime.assignedAgentId) {
-    showToast("Tiada ejen aktif", "Aktifkan sekurang-kurangnya seorang ejen dahulu.", "error");
-    return false;
-  }
+    (shouldDistribute && !sheetRuntime.assignedAgentId);
 
   const initialPassCount = initialStatus === "passed" ? 1 : 0;
   const lead = {
@@ -1714,6 +1680,7 @@ async function addLead(input, options = {}) {
     expiresAt: shouldDistribute && !shouldQueue ? now + RESPONSE_WINDOW_MS : null,
     status: shouldQueue ? "queued" : initialStatus,
     passCount: initialPassCount,
+    assignmentRevision: sheetRuntime.assignmentRevision || 0,
     responseMs: initialStatus === "contacted" ? 0 : null,
     contactedAt: initialStatus === "contacted" ? now : null,
     queuedAt: shouldQueue ? now : null,
@@ -1733,7 +1700,6 @@ async function addLead(input, options = {}) {
     console.error(error);
     return false;
   }
-  syncLeadRuntimeInSheet(lead);
   if (shouldQueue) {
     addActivity("new", lead, `${lead.project} disimpan dalam queue menunggu lead aktif selesai`);
   } else {
@@ -1910,13 +1876,13 @@ async function deleteLeadFromSheet(lead) {
   }
 }
 
-async function postGoogleSheetAction(payload, errorLabel) {
+async function postGoogleSheetAction(payload, errorLabel, options = {}) {
   const endpoint = getSheetEndpoint();
   if (!endpoint) return false;
 
   const body = JSON.stringify(payload);
   try {
-    if (navigator.sendBeacon) {
+    if (!options.waitForSend && navigator.sendBeacon) {
       const queued = navigator.sendBeacon(
         endpoint,
         new Blob([body], { type: "text/plain;charset=UTF-8" }),
@@ -1958,9 +1924,11 @@ async function updateLeadStatusInSheet(lead, status) {
         project: lead.project,
         name: lead.name,
         status: sheetStatus,
+        assignment_revision: Number(lead.assignmentRevision) || 0,
       },
     },
     "Lead sheet status update failed",
+    { waitForSend: true },
   );
 }
 
@@ -1978,6 +1946,7 @@ function leadRuntimePayload(lead) {
     expires_at: lead.expiresAt ? formatSheetTimestamp(lead.expiresAt) : "",
     queue_state: lead.status === "queued" ? "queued" : lead.status === "new" ? "active" : lead.status || "",
     pass_count: lead.passCount || 0,
+    assignment_revision: Number(lead.assignmentRevision) || 0,
   };
 }
 
@@ -1989,6 +1958,21 @@ async function updateLeadRuntimeInSheet(lead) {
       lead: leadRuntimePayload(lead),
     },
     "Lead sheet runtime update failed",
+  );
+}
+
+async function expireLeadInSheet(lead) {
+  if (!lead) return false;
+  return postGoogleSheetAction(
+    {
+      action: "expire_lead",
+      lead: {
+        id: lead.dedupeKey || lead.id,
+        assignment_revision: Number(lead.assignmentRevision) || 0,
+      },
+    },
+    "Lead expiry sync failed",
+    { waitForSend: true },
   );
 }
 
@@ -2140,22 +2124,6 @@ async function syncAgentsFromSheet(sheetAgentRows) {
   for (const agent of removedAgents) {
     state.agents = state.agents.filter((item) => item.id !== agent.id);
     result.removed += 1;
-  }
-
-  if (removedAgents.length) {
-    const removedAgentIds = new Set(removedAgents.map((agent) => agent.id));
-    const now = Date.now();
-    const reassignedLeads = [];
-    state.leads.forEach((lead) => {
-      if (lead.status !== "new" || !removedAgentIds.has(lead.assignedAgentId)) return;
-      queueLead(lead, now, {
-        previousAgentId: lead.assignedAgentId,
-        resetPassCount: false,
-      });
-      reassignedLeads.push(lead);
-    });
-    const activatedLeads = activateQueuedLeads({ now, notify: true });
-    [...reassignedLeads, ...activatedLeads].forEach(syncLeadRuntimeInSheet);
   }
 
   saveState();
@@ -2549,31 +2517,21 @@ async function requestNotifications() {
 
 async function processExpiredLeads() {
   const now = Date.now();
-  let changed = false;
-  const expiredLeads = state.leads.filter((lead) => lead.status === "new" && lead.expiresAt <= now);
-  expiredLeads.forEach((lead) => {
-    const previousAgent = getAgent(lead.assignedAgentId);
-    lead.passCount = (lead.passCount || 0) + 1;
-    queueLead(lead, now, {
-      previousAgentId: previousAgent?.id || null,
-      resetPassCount: false,
-    });
-    addActivity(
-      "passed",
-      lead,
-      `Masa ${previousAgent?.name || "ejen"} tamat, ${lead.project} masuk queue semula`,
-    );
-    updateLeadStatusInSheet(lead, "New");
-    syncLeadRuntimeInSheet(lead);
-    changed = true;
-  });
-
-  const activatedLeads = activateQueuedLeads({ now, notify: true });
-  if (activatedLeads.length) changed = true;
-
-  if (changed) {
-    saveState();
-    renderAll();
+  const expiredLeads = state.leads.filter(
+    (lead) =>
+      lead.status === "new" &&
+      lead.assignedAgentId === state.currentUserId &&
+      lead.expiresAt <= now &&
+      !expiringLeadIds.has(lead.id),
+  );
+  for (const lead of expiredLeads) {
+    expiringLeadIds.add(lead.id);
+    try {
+      await expireLeadInSheet(lead);
+      await syncGoogleSheet({ silent: true, notifyNewLeads: true });
+    } finally {
+      expiringLeadIds.delete(lead.id);
+    }
   }
 }
 
@@ -2656,10 +2614,8 @@ async function handleCall(leadId) {
     } else {
       showToast("Nombor telefon tiada", "Lead ini belum ada nombor telefon yang boleh dipanggil.", "error");
     }
-    if (agent) await upsertAgentToSheet(agent);
     await updateLeadStatusInSheet(claimedLead || lead, "Contacted");
-    await updateLeadRuntimeInSheet(claimedLead || lead);
-    activateQueuedLeads({ notify: true });
+    if (agent) await upsertAgentToSheet(agent);
     saveState();
     showToast(
       "Lead berjaya dikunci",
@@ -3050,12 +3006,7 @@ function enforceSingleActiveLead() {
       occupied.add(lead.assignedAgentId);
       continue;
     }
-    queueLead(lead, lead.queuedAt || lead.createdAt || Date.now(), { resetPassCount: false });
     overflow.push(lead);
-  }
-  if (overflow.length) {
-    saveState();
-    overflow.forEach(syncLeadRuntimeInSheet);
   }
   return overflow;
 }
@@ -3231,37 +3182,15 @@ async function toggleAgent(agentId) {
   if (!agent) return;
   agent.active = !agent.active;
 
-  if (!agent.active) {
-    const assignedLeads = state.leads.filter(
-      (lead) => lead.status === "new" && lead.assignedAgentId === agent.id,
-    );
-    assignedLeads.forEach((lead) => {
-      const nextAgent = selectNextAvailableAgent({ excludeAgentId: agent.id, ignoreLeadId: lead.id });
-      if (nextAgent && nextAgent.id !== agent.id) {
-        lead.assignedAgentId = nextAgent.id;
-        lead.expiresAt = Date.now() + RESPONSE_WINDOW_MS;
-        lead.passCount += 1;
-        addActivity("passed", lead, `${agent.name} dinyahaktifkan, dipindahkan kepada ${nextAgent.name}`);
-        updateLeadStatusInSheet(lead, "Passed");
-      } else {
-        queueLead(lead, Date.now(), { previousAgentId: agent.id, resetPassCount: false });
-      }
-      syncLeadRuntimeInSheet(lead);
-    });
-  }
   saveState();
   try {
     await persistProfile(agent);
-    await Promise.all(
-      state.leads
-        .filter((lead) => isPendingLead(lead))
-        .map((lead) => persistLead(lead)),
-    );
   } catch (error) {
     console.error(error);
     showToast("Perubahan belum disimpan", "Semak sambungan Google Sheet.", "error");
   }
   const agentsPushed = await upsertAgentToSheet(agent);
+  if (agentsPushed) await syncGoogleSheet({ silent: true, notifyNewLeads: true });
   showToast(
     agentsPushed ? (agent.active ? "Ejen diaktifkan" : "Ejen dinyahaktifkan") : "Status ejen belum sync",
     agentsPushed
@@ -3298,21 +3227,9 @@ async function removeAgent(agentId) {
     return;
   }
   state.agents = state.agents.filter((item) => item.id !== agentId);
-  state.leads
-    .filter((lead) => lead.status === "new" && lead.assignedAgentId === agentId)
-    .forEach((lead) => {
-      const replacement = selectNextAvailableAgent({ excludeAgentId: agentId, ignoreLeadId: lead.id });
-      if (replacement && replacement.id !== agentId) {
-        lead.assignedAgentId = replacement.id;
-        lead.expiresAt = Date.now() + RESPONSE_WINDOW_MS;
-      } else {
-        queueLead(lead, Date.now(), { previousAgentId: agentId, resetPassCount: false });
-      }
-      syncLeadRuntimeInSheet(lead);
-    });
-  state.agents = state.agents.filter((item) => item.id !== agentId);
   saveState();
   const agentsPushed = await deleteAgentFromSheet(agent);
+  if (agentsPushed) await syncGoogleSheet({ silent: true, notifyNewLeads: true });
   showToast(
     agentsPushed ? "Ejen dibuang" : "Ejen dibuang dari dashboard",
     agentsPushed
@@ -3480,13 +3397,11 @@ async function updateLeadStatusFromLog(leadId, nextStatus, field = null) {
 
   try {
     applySheetStatusToLead(lead, normalizedStatus);
-    activateQueuedLeads({ notify: true });
     await persistLead(lead);
     saveState();
     renderAll();
 
     const statusSynced = await updateLeadStatusInSheet(lead, normalizedStatus);
-    await updateLeadRuntimeInSheet(lead);
     await syncLeadHandledCountsToSheet();
     if (!statusSynced) throw new Error("Status tidak dapat disimpan ke Google Sheet.");
 
@@ -3602,7 +3517,7 @@ async function syncGoogleSheet(options = {}) {
     } else if (removedLeads.length) {
       await deleteLeads(removedLeads.map((lead) => lead.id));
     }
-    const activatedQueuedLeads = activateQueuedLeads({ notify: shouldNotifyNewLeads });
+    const activatedQueuedLeads = [];
     const handledSync = await syncLeadHandledCountsToSheet();
 
     state.integration.endpoint = endpoint;
