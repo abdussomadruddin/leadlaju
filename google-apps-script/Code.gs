@@ -66,6 +66,7 @@ const AGENT_FIELD_ALIASES = {
   cooldownUntil: ["cooldown until", "cooldown_until", "rehat sehingga"],
   notificationEnabled: ["notification enabled", "notification_enabled", "loceng aktif"],
   lastSeenAt: ["last seen at", "last_seen_at", "terakhir online"],
+  presenceNotBefore: ["presence not before", "presence_not_before", "sesi online selepas"],
 };
 
 const AGENT_HEADERS = [
@@ -81,6 +82,7 @@ const AGENT_HEADERS = [
   { field: "cooldownUntil", label: "Cooldown Until" },
   { field: "notificationEnabled", label: "Notification Enabled" },
   { field: "lastSeenAt", label: "Last Seen At" },
+  { field: "presenceNotBefore", label: "Presence Not Before" },
 ];
 
 const REMINDER_FIELD_ALIASES = {
@@ -195,6 +197,11 @@ function doPost(event) {
     }
     if (payload.action === "update_agent_presence") {
       return jsonResponse(updateAgentPresence_(payload.agent || payload));
+    }
+    if (payload.action === "force_agent_offline") {
+      const result = forceAgentOffline_(payload.agent || payload);
+      if (result.ok) rebalanceLeadQueue_();
+      return jsonResponse(result);
     }
     if (payload.action === "send_reset_code") {
       return jsonResponse(sendResetCode_(payload));
@@ -724,6 +731,7 @@ function buildAgentRow_(headers, agent, existingRow) {
   setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "cooldownUntil", agent.cooldownUntil || "");
   if (agent.notificationEnabled !== undefined) setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "notificationEnabled", agent.notificationEnabled ? "yes" : "no");
   if (agent.lastSeenAt !== undefined) setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "lastSeenAt", agent.lastSeenAt || "");
+  if (agent.presenceNotBefore !== undefined) setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "presenceNotBefore", agent.presenceNotBefore || "");
   return row;
 }
 
@@ -737,10 +745,35 @@ function updateAgentPresence_(input) {
     if (getCellBySpec_(headers, values[index], AGENT_FIELD_ALIASES, "id") !== id) continue;
     const row = values[index].slice(0, headers.length);
     const online = Boolean(input.online);
+    const sessionStartedRaw = String(input.session_started_at || input.sessionStartedAt || "").trim();
+    const sessionStartedAt = sessionStartedRaw ? parseLeadTimestamp_(sessionStartedRaw).getTime() : 0;
+    const presenceNotBefore = getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "presenceNotBefore");
+    if (online && presenceNotBefore && (!sessionStartedAt || sessionStartedAt < parseLeadTimestamp_(presenceNotBefore).getTime())) {
+      return { ok: false, revoked: true, error: "Sesi ini telah dipaksa offline oleh admin." };
+    }
     setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "notificationEnabled", input.notification_enabled ? "yes" : "no");
     setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "lastSeenAt", online ? canonicalLeadTimestamp_(new Date()) : "");
     sheet.getRange(index + 1, 1, 1, row.length).setValues([row]);
     return { ok: true, online };
+  }
+  return { ok: false, error: "Ejen tidak dijumpai." };
+}
+
+function forceAgentOffline_(input) {
+  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = getOrCreateSheet_(spreadsheet, AGENTS_SHEET_NAME);
+  const headers = ensureRequiredHeadersBySpec_(sheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
+  const values = sheet.getDataRange().getDisplayValues();
+  const id = String(input.id || "").trim();
+  for (let index = 1; index < values.length; index += 1) {
+    if (getCellBySpec_(headers, values[index], AGENT_FIELD_ALIASES, "id") !== id) continue;
+    const row = values[index].slice(0, headers.length);
+    const now = canonicalLeadTimestamp_(new Date());
+    setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "notificationEnabled", "no");
+    setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "lastSeenAt", "");
+    setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "presenceNotBefore", now);
+    sheet.getRange(index + 1, 1, 1, row.length).setValues([row]);
+    return { ok: true, id, forced_offline_at: now };
   }
   return { ok: false, error: "Ejen tidak dijumpai." };
 }

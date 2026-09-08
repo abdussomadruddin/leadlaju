@@ -1,9 +1,9 @@
-const CACHE_NAME = "leadlaju-pwa-v20260908-presence-v37";
+const CACHE_NAME = "leadlaju-pwa-v20260908-force-offline-v38";
 const APP_SHELL = [
   "/",
   "/index.html",
   "/styles.css?v=20260626-web-push-v22",
-  "/app.js?v=20260908-presence-v37",
+  "/app.js?v=20260908-force-offline-v38",
   "/manifest.webmanifest?v=20260625-pwa-notifications",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",

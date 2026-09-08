@@ -1930,6 +1930,12 @@ td small {
   border-color: #ffd2d2;
 }
 
+.agent-card-actions .force-offline {
+  color: #9c3f00;
+  background: #fff5e8;
+  border-color: #ffd7ad;
+}
+
 .agent-card-actions .remove-agent {
   flex: 0 0 37px;
   color: var(--red);

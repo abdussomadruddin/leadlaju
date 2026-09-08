@@ -73,6 +73,13 @@ test('agent presence heartbeat runs at five-minute intervals', () => {
   assert.match(source, /now - lastAgentPresenceHeartbeatAt < AGENT_PRESENCE_HEARTBEAT_MS/);
 });
 
+test('force offline action revokes stale agent sessions', () => {
+  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  assert.match(source, /payload\.action === "force_agent_offline"/);
+  assert.match(source, /function forceAgentOffline_\(input\)/);
+  assert.match(source, /!sessionStartedAt \|\| sessionStartedAt < parseLeadTimestamp_\(presenceNotBefore\)\.getTime\(\)/);
+});
+
 test('client queue activation is read-only', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const start = source.indexOf('function activateQueuedLeads(');

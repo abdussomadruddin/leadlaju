@@ -105,6 +105,7 @@ let claimingLeadId = null;
 let serviceWorkerRegistrationPromise = null;
 let notificationAudioContext = null;
 let lastAgentPresenceHeartbeatAt = 0;
+let agentPresenceSessionStartedAt = 0;
 let notifiedLeadKeys = loadNotifiedLeadKeys();
 let sentFollowUpReminderKeys = loadFollowUpReminderKeys();
 let dismissedAdminReminderKeys = loadAdminReminderKeys(ADMIN_REMINDER_DISMISSED_KEY);
@@ -530,6 +531,7 @@ function getSessionUser() {
 
 function startAuthenticatedApp(user) {
   state.currentUserId = user.id;
+  if (user.role === "agent") agentPresenceSessionStartedAt = Date.now();
   saveState();
   document.body.classList.remove("auth-pending", "logged-out");
   document.body.classList.add("authenticated");
@@ -2027,7 +2029,12 @@ async function updateAgentPresence(online, force = false) {
   }
   const updated = await postGoogleSheetAction({
     action: "update_agent_presence",
-    agent: { id: user.id, online, notification_enabled: Notification.permission === "granted" },
+    agent: {
+      id: user.id,
+      online,
+      notification_enabled: Notification.permission === "granted",
+      session_started_at: agentPresenceSessionStartedAt,
+    },
   }, "Agent presence update failed", { waitForSend: true });
   if (updated) lastAgentPresenceHeartbeatAt = online ? now : 0;
   return updated;
@@ -2064,6 +2071,15 @@ async function deleteAgentFromSheet(agent) {
       },
     },
     "Agent sheet delete failed",
+  );
+}
+
+async function forceAgentOfflineInSheet(agent) {
+  if (!agent?.id) return false;
+  return postGoogleSheetAction(
+    { action: "force_agent_offline", agent: { id: agent.id } },
+    "Force offline ejen gagal",
+    { waitForSend: true },
   );
 }
 
@@ -2977,6 +2993,7 @@ function renderAgents() {
           : `
             <button class="edit-agent" type="button" data-agent-edit="${agent.id}">Edit details</button>
             <button class="edit-password" type="button" data-agent-password="${agent.id}">Edit password</button>
+            ${agent.role === "agent" && agent.online ? `<button class="force-offline" type="button" data-agent-force-offline="${agent.id}">Force offline</button>` : ""}
             ${
               agent.id !== state.currentUserId
                 ? `<button class="remove-agent" type="button" data-agent-remove="${agent.id}" aria-label="Buang ${escapeHtml(agent.name)}">×</button>`
@@ -3309,6 +3326,24 @@ async function removeAgent(agentId) {
     agentsPushed ? "success" : "error",
   );
   renderAll();
+}
+
+async function forceAgentOffline(agentId) {
+  if (!isAdmin()) return;
+  const agent = getAgent(agentId);
+  if (!agent || agent.role !== "agent") return;
+  if (!window.confirm(`Paksa ${agent.name} keluar daripada semua sesi aktif?`)) return;
+  const forced = await forceAgentOfflineInSheet(agent);
+  if (!forced) {
+    showToast("Force offline gagal", "Semak sambungan Google Sheet dan cuba semula.", "error");
+    return;
+  }
+  agent.online = false;
+  agent.notificationEnabled = false;
+  saveState();
+  renderAll();
+  await syncGoogleSheet({ silent: true, agentsOnly: true });
+  showToast("Ejen dipaksa offline", `${agent.name} perlu login semula dan aktifkan loceng.`);
 }
 
 function openAgentPasswordModal(agentId) {
@@ -3788,12 +3823,14 @@ elements.agentsGrid.addEventListener("click", (event) => {
   const reject = event.target.closest("[data-agent-reject]");
   const remove = event.target.closest("[data-agent-remove]");
   const password = event.target.closest("[data-agent-password]");
+  const forceOffline = event.target.closest("[data-agent-force-offline]");
   const edit = event.target.closest("[data-agent-edit]");
   if (toggle) toggleAgent(toggle.dataset.agentToggle);
   if (approve) approveAgent(approve.dataset.agentApprove);
   if (reject) rejectAgent(reject.dataset.agentReject);
   if (remove) removeAgent(remove.dataset.agentRemove);
   if (password) openAgentPasswordModal(password.dataset.agentPassword);
+  if (forceOffline) forceAgentOffline(forceOffline.dataset.agentForceOffline);
   if (edit) openAgentModal(edit.dataset.agentEdit);
 });
 
