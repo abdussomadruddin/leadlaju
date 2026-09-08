@@ -722,6 +722,16 @@ async function handleAgentSignup(event) {
 }
 
 async function logout() {
+  try {
+    const registration = await registerServiceWorker();
+    const subscription = await registration?.pushManager?.getSubscription();
+    if (subscription) await subscription.unsubscribe();
+    const notifications = await registration?.getNotifications();
+    notifications?.forEach((notification) => notification.close());
+  } catch (error) {
+    console.error("Push logout cleanup failed", error);
+  }
+  localStorage.removeItem("leadlaju-push-subscription-owner");
   if (remoteDatabaseClient) {
     await remoteDatabaseClient.auth.signOut();
   }
@@ -1106,7 +1116,7 @@ function leadNotificationKey(lead) {
 function shouldNotifyForLead(lead) {
   if (!lead || lead.status !== "new") return false;
   if (Number(lead.expiresAt) && lead.expiresAt <= Date.now()) return false;
-  return isAdmin() || lead.assignedAgentId === state.currentUserId;
+  return Boolean(state.currentUserId) && lead.assignedAgentId === state.currentUserId;
 }
 
 function markLeadNotificationSeen(lead) {
@@ -1185,8 +1195,8 @@ async function syncPushSubscription(force = false) {
   const endpoint = subscriptionPayload.endpoint || subscription.endpoint;
   if (!endpoint) return false;
 
-  const storageKey = `leadlaju-push-subscription-${user.id}`;
-  const fingerprint = `${endpoint}:${subscriptionPayload.keys?.p256dh || ""}:${user.email}:${user.active}`;
+  const storageKey = "leadlaju-push-subscription-owner";
+  const fingerprint = `${user.id}:${endpoint}:${subscriptionPayload.keys?.p256dh || ""}:${user.email}:${user.active}`;
   if (!force && localStorage.getItem(storageKey) === fingerprint) return true;
 
   const pushed = await postGoogleSheetAction(
@@ -2165,7 +2175,7 @@ async function syncAgentsFromSheet(sheetAgentRows) {
 }
 
 async function sendSystemNotification(lead, options = {}) {
-  if (!options.force && !shouldNotifyForLead(lead)) return;
+  if (!shouldNotifyForLead(lead)) return;
   const key = leadNotificationKey(lead);
   if (!options.force && notifiedLeadKeys.has(key)) return;
 

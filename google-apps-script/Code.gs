@@ -764,8 +764,8 @@ function filterSubscriptionsForAgent_(subscriptions, agent) {
   const agentId = String(agent.id || "").trim();
   const agentEmail = String(agent.email || "").trim().toLowerCase();
   return subscriptions.filter((subscription) => {
-    if (agentId && subscription.agentId === agentId) return true;
-    return agentEmail && subscription.agentEmail === agentEmail;
+    if (subscription.agentId) return Boolean(agentId) && subscription.agentId === agentId;
+    return Boolean(agentEmail) && subscription.agentEmail === agentEmail;
   });
 }
 
