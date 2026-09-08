@@ -6,6 +6,7 @@ const ADMIN_REMINDER_DISMISSED_KEY = "leadlaju-admin-reminder-dismissed-v2";
 const ADMIN_REMINDER_NOTIFIED_KEY = "leadlaju-admin-reminder-notified-v2";
 const SESSION_DURATION_MS = 365 * 24 * 60 * 60 * 1000;
 const RESPONSE_WINDOW_MS = 5 * 60 * 1000;
+const AGENT_COOLDOWN_MS = 30 * 60 * 1000;
 const DEFAULT_AGENT_PASSWORD = "Agent123!";
 const NOTIFICATION_ICON = "/assets/icon-192.png";
 const NOTIFICATION_BADGE = "/assets/badge-96.png";
@@ -308,6 +309,7 @@ function mapProfile(row) {
     active: row.active !== false,
     leadsHandled: row.leads_handled || 0,
     createdAt: row.created_at ? new Date(row.created_at).getTime() : null,
+    cooldownUntil: row.cooldown_until ? new Date(row.cooldown_until).getTime() : null,
   };
 }
 
@@ -1311,6 +1313,7 @@ function selectNextAvailableAgent(options = {}) {
   for (let offset = 0; offset < activeAgents.length; offset += 1) {
     const index = (state.roundRobinIndex + offset) % activeAgents.length;
     const agent = activeAgents[index];
+    if (Number(agent.cooldownUntil) > Date.now()) continue;
     const isPreviousAgent = options.excludeAgentId && agent.id === options.excludeAgentId;
     if (isPreviousAgent && activeAgents.length > 1) continue;
     if (hasActiveLeadForAgent(agent.id, options.ignoreLeadId || null)) continue;
@@ -1613,6 +1616,9 @@ function normalizeSheetAgent(input) {
     leadsHandled: Number(input.leads_handled ?? input.leadsHandled ?? 0) || 0,
     password: String(input.password || input.kata_laluan || input.temporary_password || "").trim(),
     createdAt: input.created_at || input.createdAt ? new Date(input.created_at || input.createdAt).getTime() : null,
+    cooldownUntil: input.cooldown_until || input.cooldownUntil
+      ? parseLeadTimestamp(input.cooldown_until || input.cooldownUntil, null)
+      : null,
   };
 }
 
@@ -2001,6 +2007,7 @@ function agentSheetPayload(agent) {
     leadsHandled: agent.leadsHandled || 0,
     password: agent.password || "",
     created_at: agent.createdAt ? new Date(agent.createdAt).toISOString() : new Date().toISOString(),
+    cooldown_until: agent.cooldownUntil ? new Date(agent.cooldownUntil).toISOString() : "",
   };
 }
 
@@ -2087,6 +2094,7 @@ async function syncAgentsFromSheet(sheetAgentRows) {
         email: sheetAgent.email,
         active: nextActive,
         leadsHandled: sheetAgent.leadsHandled,
+        cooldownUntil: sheetAgent.cooldownUntil,
       };
       if (sheetAgent.password.length >= 8) {
         updates.password = sheetAgent.password;
@@ -2116,6 +2124,7 @@ async function syncAgentsFromSheet(sheetAgentRows) {
       role: "agent",
       active: sheetAgent.active,
       leadsHandled: sheetAgent.leadsHandled,
+      cooldownUntil: sheetAgent.cooldownUntil,
     });
     result.added += 1;
     result.backfilled += sheetAgent.id && sheetAgent.password ? 0 : 1;
@@ -2192,7 +2201,7 @@ async function sendSystemNotification(lead, options = {}) {
   const title = `Lead baru: ${lead.project || "Projek baru"}`;
   const notificationOptions = {
     body: `${lead.name}\nNombor dibuka selepas CALL NOW. Diberikan kepada ${agent?.name || "ejen"}.`,
-    tag: key,
+    tag: `leadlaju-active-${lead.assignedAgentId}`,
     renotify: true,
     requireInteraction: true,
     icon: NOTIFICATION_ICON,
@@ -2630,6 +2639,7 @@ async function handleCall(leadId) {
     }
 
     const agent = getAgent((claimedLead || lead).assignedAgentId);
+    if (agent) agent.cooldownUntil = Date.now() + AGENT_COOLDOWN_MS;
     saveState();
     const callablePhone = String(phoneToCall || "").replace(/[^\d+]/g, "");
     if (callablePhone) {
@@ -2646,9 +2656,9 @@ async function handleCall(leadId) {
     } else {
       showToast("Nombor telefon tiada", "Lead ini belum ada nombor telefon yang boleh dipanggil.", "error");
     }
+    if (agent) await upsertAgentToSheet(agent);
     await updateLeadStatusInSheet(claimedLead || lead, "Contacted");
     await updateLeadRuntimeInSheet(claimedLead || lead);
-    if (agent) await upsertAgentToSheet(agent);
     activateQueuedLeads({ notify: true });
     saveState();
     showToast(

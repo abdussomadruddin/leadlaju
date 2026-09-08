@@ -1,9 +1,9 @@
-const CACHE_NAME = "leadlaju-pwa-v20260908-notifications-v28";
+const CACHE_NAME = "leadlaju-pwa-v20260908-cooldown-v29";
 const APP_SHELL = [
   "/",
   "/index.html",
   "/styles.css?v=20260626-web-push-v22",
-  "/app.js?v=20260908-notifications-v28",
+  "/app.js?v=20260908-cooldown-v29",
   "/manifest.webmanifest?v=20260625-pwa-notifications",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",
@@ -81,6 +81,15 @@ async function showLeadNotification(payload = {}) {
       view: payload.view || null
     }
   };
+  if (String(options.tag).startsWith("leadlaju-active-")) {
+    const existing = await self.registration.getNotifications();
+    existing
+      .filter((notification) =>
+        notification.tag.startsWith("leadlaju-lead-") ||
+        notification.tag === options.tag,
+      )
+      .forEach((notification) => notification.close());
+  }
   await self.registration.showNotification(title, options);
 }
 

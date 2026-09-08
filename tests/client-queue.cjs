@@ -44,3 +44,10 @@ test('repeated Sheet assignments cannot restore overflow NEW leads', () => {
   app.applyLeadRuntimeFromSheet(lead, { hasRuntime: true, assignedAgentId: 'a', queueState: 'active' });
   assert.equal(lead.status, 'new');
 });
+
+test('agent cooldown lasts 30 minutes', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  assert.match(source, /const AGENT_COOLDOWN_MS = 30 \* 60 \* 1000/);
+  assert.match(source, /Number\(agent\.cooldownUntil\) > Date\.now\(\)/);
+  assert.match(source, /agent\.cooldownUntil = Date\.now\(\) \+ AGENT_COOLDOWN_MS/);
+});

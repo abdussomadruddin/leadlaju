@@ -58,6 +58,7 @@ const AGENT_FIELD_ALIASES = {
   leadsHandled: ["leads handled", "lead dikendalikan", "leads_handled"],
   createdAt: ["created at", "created_at", "tarikh daftar", "tarikh & masa"],
   password: ["password", "kata laluan", "kata_laluan", "temporary password", "temporary_password"],
+  cooldownUntil: ["cooldown until", "cooldown_until", "rehat sehingga"],
 };
 
 const AGENT_HEADERS = [
@@ -70,6 +71,7 @@ const AGENT_HEADERS = [
   { field: "leadsHandled", label: "Leads Handled" },
   { field: "createdAt", label: "Tarikh Daftar" },
   { field: "password", label: "Password" },
+  { field: "cooldownUntil", label: "Cooldown Until" },
 ];
 
 const REMINDER_FIELD_ALIASES = {
@@ -471,6 +473,7 @@ function replaceAgents_(agentsInput) {
       leadsHandled: String(input.leads_handled ?? input.leadsHandled ?? 0).trim(),
       createdAt: String(input.created_at || input.createdAt || new Date().toISOString()).trim(),
       password: String(input.password || input.kata_laluan || input.temporary_password || "").trim(),
+      cooldownUntil: String(input.cooldown_until || input.cooldownUntil || "").trim(),
     }))
     .filter((agent) => agent.id && agent.name && agent.email)
     .map((agent) => buildAgentRow_(headers, agent));
@@ -496,6 +499,7 @@ function upsertAgent_(input) {
     leadsHandled: String(input.leads_handled ?? input.leadsHandled ?? 0).trim(),
     createdAt: String(input.created_at || input.createdAt || new Date().toISOString()).trim(),
     password: String(input.password || input.kata_laluan || input.temporary_password || "").trim(),
+    cooldownUntil: String(input.cooldown_until || input.cooldownUntil || "").trim(),
   };
 
   if (!agent.name || !agent.email) {
@@ -567,6 +571,7 @@ function buildAgentRow_(headers, agent, existingRow) {
   if (agent.password) {
     setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "password", agent.password);
   }
+  setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "cooldownUntil", agent.cooldownUntil || "");
   return row;
 }
 
@@ -587,6 +592,7 @@ function readAgents_(sheet, headers) {
       leads_handled: Number(getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "leadsHandled")) || 0,
       created_at: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "createdAt"),
       password: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "password"),
+      cooldown_until: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "cooldownUntil"),
     }))
     .filter((agent) => agent.name && agent.email);
 }
@@ -745,7 +751,8 @@ function getActiveAgentsForPush_(spreadsheet) {
   const agentsSheet = getOrCreateSheet_(spreadsheet, AGENTS_SHEET_NAME);
   const agentHeaders = ensureRequiredHeadersBySpec_(agentsSheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
   return readAgents_(agentsSheet, agentHeaders).filter(
-    (agent) => agent.active === "active" && !roleIsAdmin_(agent.role),
+    (agent) => agent.active === "active" && !roleIsAdmin_(agent.role) &&
+      (!agent.cooldown_until || parseLeadTimestamp_(agent.cooldown_until).getTime() <= Date.now()),
   );
 }
 
@@ -871,7 +878,7 @@ function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
       const result = sendPushViaApi_(spreadsheet, targetSubscriptions, {
         title: `Lead baru: ${lead.project || "Projek baru"}`,
         body: `${lead.name}\nNombor dibuka selepas CALL NOW. Diberikan kepada ${agent.name}.`,
-        tag: `leadlaju-lead-${lead.id}-${agent.id}`,
+        tag: `leadlaju-active-${agent.id}`,
         leadId: lead.id,
         url: "/",
         requireInteraction: true,
