@@ -28,6 +28,7 @@ const FIELD_ALIASES = {
   queueState: ["queue state", "queue_state", "runtime state", "runtime_state"],
   passCount: ["pass count", "pass_count", "rotation count", "rotation_count"],
   assignmentRevision: ["assignment revision", "assignment_revision", "runtime revision", "runtime_revision"],
+  assignmentHistory: ["assignment history", "assignment_history", "sejarah assignment"],
 };
 
 const REQUIRED_HEADERS = [
@@ -48,6 +49,7 @@ const REQUIRED_HEADERS = [
   { field: "queueState", label: "Queue State" },
   { field: "passCount", label: "Pass Count" },
   { field: "assignmentRevision", label: "Assignment Revision" },
+  { field: "assignmentHistory", label: "Assignment History" },
 ];
 
 const AGENT_FIELD_ALIASES = {
@@ -420,6 +422,9 @@ function updateLeadStatusLocked_(input) {
         updated += 1;
         continue;
       } else {
+        if (normalizeLeadStage_(status) === "contacted") {
+          markLatestAssignmentOutcome_(headers, nextRow, "contacted", new Date());
+        }
         setRowValue_(headers, nextRow, "expiresAt", "");
         setRowValue_(headers, nextRow, "queueState", normalizeLeadStage_(status));
         setRowValue_(headers, nextRow, "assignmentRevision", String(currentRevision + 1));
@@ -456,6 +461,7 @@ function expireLead_(input) {
         break;
       }
       const row = values[index].slice(0, headers.length);
+      markLatestAssignmentOutcome_(headers, row, "missed", new Date());
       setRowValue_(headers, row, "passCount", String((Number(lead.pass_count) || 0) + 1));
       holdLeadRuntimeRow_(sheet, headers, index + 1, row);
       result = { ok: true, expired: 1 };
@@ -926,6 +932,9 @@ function assignLeadRuntimeRow_(sheet, headers, rowNumber, row, agent, now) {
   if (!getCell_(headers, nextRow, "passCount")) setRowValue_(headers, nextRow, "passCount", "0");
   const assignmentRevision = (Number(getCell_(headers, nextRow, "assignmentRevision")) || 0) + 1;
   setRowValue_(headers, nextRow, "assignmentRevision", String(assignmentRevision));
+  const history = parseAssignmentHistory_(headers, nextRow);
+  history.push({ agentId: agent.id, agentName: agent.name, assignedAt: now.toISOString(), outcome: "pending", resolvedAt: "" });
+  setRowValue_(headers, nextRow, "assignmentHistory", JSON.stringify(history));
   sheet.getRange(rowNumber, 1, 1, nextRow.length).setValues([nextRow]);
   return {
     assigned_agent_id: agent.id,
@@ -935,6 +944,39 @@ function assignLeadRuntimeRow_(sheet, headers, rowNumber, row, agent, now) {
     expires_at: expiresAt,
     assignment_revision: assignmentRevision,
   };
+}
+
+function parseAssignmentHistory_(headers, row) {
+  try {
+    const parsed = JSON.parse(getCell_(headers, row, "assignmentHistory") || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function markLatestAssignmentOutcome_(headers, row, outcome, resolvedAt) {
+  const history = parseAssignmentHistory_(headers, row);
+  const agentId = getCell_(headers, row, "assignedAgentId");
+  const agentName = getCell_(headers, row, "assignedAgentName");
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    if (history[index].agentId === agentId && history[index].outcome === "pending") {
+      history[index].outcome = outcome;
+      history[index].resolvedAt = resolvedAt.toISOString();
+      setRowValue_(headers, row, "assignmentHistory", JSON.stringify(history));
+      return;
+    }
+  }
+  if (agentId) {
+    history.push({
+      agentId,
+      agentName,
+      assignedAt: parseLeadTimestamp_(getCell_(headers, row, "receivedAt")).toISOString(),
+      outcome,
+      resolvedAt: resolvedAt.toISOString(),
+    });
+    setRowValue_(headers, row, "assignmentHistory", JSON.stringify(history));
+  }
 }
 
 function holdLeadRuntimeRow_(sheet, headers, rowNumber, row) {
@@ -1239,6 +1281,7 @@ function mapRow_(headers, row, rowNumber) {
     queue_state: getCell_(headers, row, "queueState"),
     pass_count: getCell_(headers, row, "passCount"),
     assignment_revision: Number(getCell_(headers, row, "assignmentRevision")) || 0,
+    assignment_history: parseAssignmentHistory_(headers, row),
   };
 
   return lead;

@@ -330,6 +330,7 @@ function mapLead(row) {
     status: row.status || "new",
     passCount: row.pass_count || 0,
     assignmentRevision: Number(row.assignment_revision) || 0,
+    assignmentHistory: Array.isArray(row.assignment_history) ? row.assignment_history : [],
     responseMs: row.response_ms,
     contactedAt: row.contacted_at ? new Date(row.contacted_at).getTime() : null,
     notes: row.notes || "",
@@ -1519,7 +1520,8 @@ function readLeadRuntimeFromSheet(input) {
   const expiresRaw = pickInputValue(input, ["expires_at", "expiresAt"]);
   const passCountRaw = pickInputValue(input, ["pass_count", "passCount", "rotation_count", "rotationCount"]);
   const assignmentRevisionRaw = pickInputValue(input, ["assignment_revision", "assignmentRevision"]);
-  const hasRuntime = Boolean(assignedAgentId || queueState || receivedRaw || expiresRaw || passCountRaw || assignmentRevisionRaw);
+  const assignmentHistoryRaw = pickInputValue(input, ["assignment_history", "assignmentHistory"]);
+  const hasRuntime = Boolean(assignedAgentId || queueState || receivedRaw || expiresRaw || passCountRaw || assignmentRevisionRaw || assignmentHistoryRaw);
 
   return {
     hasRuntime,
@@ -1529,6 +1531,7 @@ function readLeadRuntimeFromSheet(input) {
     expiresAt: expiresRaw ? parseLeadTimestamp(expiresRaw, null) : null,
     passCount: passCountRaw === "" ? null : Number(passCountRaw) || 0,
     assignmentRevision: Number(assignmentRevisionRaw) || 0,
+    assignmentHistory: Array.isArray(assignmentHistoryRaw) ? assignmentHistoryRaw : [],
   };
 }
 
@@ -1567,6 +1570,7 @@ function applyLeadRuntimeFromSheet(lead, runtime, now = Date.now()) {
     if (runtime.passCount !== null) lead.passCount = runtime.passCount;
   }
   lead.assignmentRevision = runtime.assignmentRevision || 0;
+  lead.assignmentHistory = runtime.assignmentHistory || [];
 
   const after = JSON.stringify({
     status: lead.status,
@@ -1576,6 +1580,7 @@ function applyLeadRuntimeFromSheet(lead, runtime, now = Date.now()) {
     queuedAt: lead.queuedAt,
     passCount: lead.passCount,
     assignmentRevision: lead.assignmentRevision,
+    assignmentHistory: lead.assignmentHistory,
   });
   return before !== after;
 }
@@ -1689,6 +1694,7 @@ async function addLead(input, options = {}) {
     status: shouldQueue ? "queued" : initialStatus,
     passCount: initialPassCount,
     assignmentRevision: sheetRuntime.assignmentRevision || 0,
+    assignmentHistory: sheetRuntime.assignmentHistory || [],
     responseMs: initialStatus === "contacted" ? 0 : null,
     contactedAt: initialStatus === "contacted" ? now : null,
     queuedAt: shouldQueue ? now : null,
@@ -2734,23 +2740,39 @@ function updateCountdown() {
 
 function renderStats() {
   const today = todayKey();
-  const todayLeads = state.leads.filter((lead) => todayKey(lead.createdAt || lead.receivedAt) === today);
-  const contacted = todayLeads.filter((lead) => lead.status === "contacted");
-  const responseValues = contacted.map((lead) => lead.responseMs).filter(Number.isFinite);
+  const user = getCurrentUser();
+  const assignments = state.leads.flatMap((lead) => {
+    const history = Array.isArray(lead.assignmentHistory) ? lead.assignmentHistory : [];
+    if (history.length) return history;
+    if (!lead.assignedAgentId) return [];
+    return [{
+      agentId: lead.assignedAgentId,
+      assignedAt: new Date(lead.receivedAt || lead.createdAt).toISOString(),
+      outcome: lead.status === "contacted" ? "contacted" : lead.status === "passed" ? "missed" : "pending",
+      resolvedAt: lead.contactedAt ? new Date(lead.contactedAt).toISOString() : "",
+    }];
+  }).filter((assignment) =>
+    (isAdmin() || assignment.agentId === user?.id) && todayKey(new Date(assignment.assignedAt).getTime()) === today,
+  );
+  const contacted = assignments.filter((assignment) => assignment.outcome === "contacted");
+  const missed = assignments.filter((assignment) => assignment.outcome === "missed");
+  const responseValues = contacted.map((assignment) =>
+    new Date(assignment.resolvedAt).getTime() - new Date(assignment.assignedAt).getTime(),
+  ).filter((value) => Number.isFinite(value) && value >= 0);
   const averageResponse = responseValues.length
     ? responseValues.reduce((total, value) => total + value, 0) / responseValues.length
     : null;
 
-  elements.statToday.textContent = todayLeads.length;
-  elements.statContacted.textContent = contacted.length;
-  elements.contactRate.textContent = todayLeads.length
-    ? `${Math.round((contacted.length / todayLeads.length) * 100)}%`
+  elements.statToday.textContent = assignments.length;
+  elements.statContacted.textContent = missed.length;
+  elements.contactRate.textContent = assignments.length
+    ? `${Math.round((contacted.length / assignments.length) * 100)}%`
     : "0%";
-  elements.statResponse.textContent = averageResponse
+  elements.statResponse.textContent = averageResponse !== null
     ? `${Math.floor(averageResponse / 60000)}m ${Math.floor((averageResponse % 60000) / 1000)}s`
     : "--";
-  elements.statConversion.textContent = todayLeads.length
-    ? `${Math.round((contacted.length / todayLeads.length) * 100)}%`
+  elements.statConversion.textContent = assignments.length
+    ? `${Math.round((contacted.length / assignments.length) * 100)}% (${contacted.length} call / ${missed.length} missed)`
     : "0%";
 }
 
