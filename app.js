@@ -7,6 +7,7 @@ const ADMIN_REMINDER_NOTIFIED_KEY = "leadlaju-admin-reminder-notified-v2";
 const SESSION_DURATION_MS = 365 * 24 * 60 * 60 * 1000;
 const RESPONSE_WINDOW_MS = 5 * 60 * 1000;
 const AGENT_COOLDOWN_MS = 5 * 60 * 1000;
+const AGENT_PRESENCE_HEARTBEAT_MS = 5 * 60 * 1000;
 const DEFAULT_AGENT_PASSWORD = "Agent123!";
 const NOTIFICATION_ICON = "/assets/icon-192.png";
 const NOTIFICATION_BADGE = "/assets/badge-96.png";
@@ -103,6 +104,7 @@ let remoteDatabaseMode = false;
 let claimingLeadId = null;
 let serviceWorkerRegistrationPromise = null;
 let notificationAudioContext = null;
+let lastAgentPresenceHeartbeatAt = 0;
 let notifiedLeadKeys = loadNotifiedLeadKeys();
 let sentFollowUpReminderKeys = loadFollowUpReminderKeys();
 let dismissedAdminReminderKeys = loadAdminReminderKeys(ADMIN_REMINDER_DISMISSED_KEY);
@@ -2016,13 +2018,19 @@ function agentSheetPayload(agent) {
   };
 }
 
-async function updateAgentPresence(online) {
+async function updateAgentPresence(online, force = false) {
   const user = getCurrentUser();
   if (!user?.id || user.role !== "agent") return false;
-  return postGoogleSheetAction({
+  const now = Date.now();
+  if (online && !force && now - lastAgentPresenceHeartbeatAt < AGENT_PRESENCE_HEARTBEAT_MS) {
+    return true;
+  }
+  const updated = await postGoogleSheetAction({
     action: "update_agent_presence",
     agent: { id: user.id, online, notification_enabled: Notification.permission === "granted" },
   }, "Agent presence update failed", { waitForSend: true });
+  if (updated) lastAgentPresenceHeartbeatAt = online ? now : 0;
+  return updated;
 }
 
 function enforceAgentNotificationAccess() {
@@ -2551,7 +2559,7 @@ async function requestNotifications() {
     await syncPushSubscription(true).catch((error) => console.warn("Push subscription sync failed", error));
     elements.notificationRequiredModal.classList.remove("open");
     elements.notificationRequiredModal.setAttribute("aria-hidden", "true");
-    await updateAgentPresence(true);
+    await updateAgentPresence(true, true);
   }
   showToast(
     permission === "granted" ? "Notifikasi diaktifkan" : "Notifikasi belum aktif",

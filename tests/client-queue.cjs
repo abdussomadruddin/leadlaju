@@ -67,6 +67,12 @@ test('agent cooldown lasts 5 minutes', () => {
   assert.match(source, /agent\.cooldownUntil = Date\.now\(\) \+ AGENT_COOLDOWN_MS/);
 });
 
+test('agent presence heartbeat runs at five-minute intervals', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  assert.match(source, /const AGENT_PRESENCE_HEARTBEAT_MS = 5 \* 60 \* 1000/);
+  assert.match(source, /now - lastAgentPresenceHeartbeatAt < AGENT_PRESENCE_HEARTBEAT_MS/);
+});
+
 test('client queue activation is read-only', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const start = source.indexOf('function activateQueuedLeads(');
