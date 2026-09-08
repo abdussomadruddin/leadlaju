@@ -9,6 +9,7 @@ const MALAYSIA_TIME_ZONE = "Asia/Kuala_Lumpur";
 const PUSH_API_URL = "https://leadlaju.vercel.app/api/push";
 const PUSH_NOTIFY_SECRET = "leadlaju-push-notify-v1";
 const RESPONSE_WINDOW_MINUTES = 5;
+const AGENT_PRESENCE_TIMEOUT_MINUTES = 60;
 
 const FIELD_ALIASES = {
   id: ["id", "lead id", "lead_id", "tiktok lead id", "meta lead id"],
@@ -766,7 +767,7 @@ function readAgents_(sheet, headers) {
       last_seen_at: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "lastSeenAt"),
       online: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "notificationEnabled") === "yes" &&
         Boolean(getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "lastSeenAt")) &&
-        Date.now() - parseLeadTimestamp_(getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "lastSeenAt")).getTime() < 2 * 60 * 1000,
+        Date.now() - parseLeadTimestamp_(getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "lastSeenAt")).getTime() < AGENT_PRESENCE_TIMEOUT_MINUTES * 60 * 1000,
     }))
     .filter((agent) => agent.name && agent.email);
 }
