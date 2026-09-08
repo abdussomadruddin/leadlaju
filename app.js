@@ -1533,7 +1533,7 @@ function readLeadRuntimeFromSheet(input) {
 }
 
 function applyLeadRuntimeFromSheet(lead, runtime, now = Date.now()) {
-  if (!runtime?.hasRuntime || !isActiveLeadStatus(lead.status)) return false;
+  if (!runtime?.hasRuntime) return false;
 
   const before = JSON.stringify({
     status: lead.status,
@@ -1542,9 +1542,16 @@ function applyLeadRuntimeFromSheet(lead, runtime, now = Date.now()) {
     expiresAt: lead.expiresAt,
     queuedAt: lead.queuedAt,
     passCount: lead.passCount,
+    assignmentRevision: lead.assignmentRevision,
   });
 
-  if (runtime.queueState === "queued") {
+  if (!isActiveLeadStatus(lead.status)) {
+    if (runtime.assignedAgentId) lead.assignedAgentId = runtime.assignedAgentId;
+    if (runtime.receivedAt) lead.receivedAt = runtime.receivedAt;
+    lead.expiresAt = null;
+    lead.queuedAt = null;
+    if (runtime.passCount !== null) lead.passCount = runtime.passCount;
+  } else if (runtime.queueState === "queued") {
     queueLead(lead, runtime.receivedAt || lead.queuedAt || now, {
       resetPassCount: false,
       previousAgentId: lead.lastAgentId || lead.assignedAgentId || null,
@@ -1568,6 +1575,7 @@ function applyLeadRuntimeFromSheet(lead, runtime, now = Date.now()) {
     expiresAt: lead.expiresAt,
     queuedAt: lead.queuedAt,
     passCount: lead.passCount,
+    assignmentRevision: lead.assignmentRevision,
   });
   return before !== after;
 }

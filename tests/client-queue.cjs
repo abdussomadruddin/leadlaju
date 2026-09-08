@@ -41,6 +41,25 @@ test('client accepts the latest runtime assignment from the server', () => {
   assert.equal(lead.status, 'new');
 });
 
+test('contacted lead keeps the agent recorded by the server', () => {
+  const lead = { id: 'done', status: 'contacted', assignedAgentId: null, expiresAt: null };
+  const app = setup([lead]);
+  app.applyLeadRuntimeFromSheet(lead, {
+    hasRuntime: true,
+    assignedAgentId: 'agent-shakir',
+    queueState: 'contacted',
+    receivedAt: 100,
+    expiresAt: 200,
+    passCount: 0,
+    assignmentRevision: 3,
+  });
+  assert.equal(lead.status, 'contacted');
+  assert.equal(lead.assignedAgentId, 'agent-shakir');
+  assert.equal(lead.receivedAt, 100);
+  assert.equal(lead.expiresAt, null);
+  assert.equal(lead.assignmentRevision, 3);
+});
+
 test('agent cooldown lasts 30 minutes', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   assert.match(source, /const AGENT_COOLDOWN_MS = 30 \* 60 \* 1000/);
