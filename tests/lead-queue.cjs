@@ -4,16 +4,17 @@ const vm = require('node:vm');
 const { test } = require('node:test');
 
 function fixture(rows, agents = [{ id: 'a' }, { id: 'b' }]) {
-  const headers = ['id', 'name', 'phone', 'status', 'assigned_agent_id', 'queue_state', 'received_at', 'expires_at', 'assignment_revision'];
-  const fields = { assignedAgentId: 'assigned_agent_id', assignedAgentEmail: 'email', assignedAgentName: 'agent_name', receivedAt: 'received_at', expiresAt: 'expires_at', queueState: 'queue_state', assignmentRevision: 'assignment_revision' };
+  const headers = ['id', 'name', 'phone', 'status', 'assigned_agent_id', 'queue_state', 'received_at', 'expires_at', 'queued_at', 'pass_count', 'retry_after_cycle', 'assignment_revision', 'assignment_history'];
+  const fields = { assignedAgentId: 'assigned_agent_id', assignedAgentEmail: 'email', assignedAgentName: 'agent_name', receivedAt: 'received_at', expiresAt: 'expires_at', queueState: 'queue_state', queuedAt: 'queued_at', passCount: 'pass_count', retryAfterCycle: 'retry_after_cycle', assignmentRevision: 'assignment_revision', assignmentHistory: 'assignment_history' };
   const values = [headers, ...rows.map(row => headers.map(key => row[key] || ''))];
+  const properties = new Map();
   const sheet = {
     getDataRange: () => ({ getDisplayValues: () => values.map(row => row.slice()) }),
     getRange: row => ({ setValues: ([value]) => { values[row - 1] = value; } }),
   };
   const context = vm.createContext({
     LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: () => null, setProperty() {} }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: key => properties.get(key) || null, setProperty: (key, value) => properties.set(key, String(value)) }) },
   });
   vm.runInContext(fs.readFileSync('google-apps-script/Code.gs', 'utf8'), context);
   Object.assign(context, {
@@ -21,9 +22,13 @@ function fixture(rows, agents = [{ id: 'a' }, { id: 'b' }]) {
     ensureRequiredHeaders_: () => headers,
     getActiveAgentsForPush_: () => agents,
     readPushSubscriptions_: () => [],
-    mapRow_: (headers, row) => Object.fromEntries(headers.map((key, i) => [key, row[i]])),
+    mapRow_: (headers, row) => {
+      const mapped = Object.fromEntries(headers.map((key, i) => [key, row[i]]));
+      try { mapped.assignment_history = JSON.parse(mapped.assignment_history || '[]'); } catch { mapped.assignment_history = []; }
+      return mapped;
+    },
     normalizeLeadStage_: value => value || 'new',
-    canonicalLeadTimestamp_: value => value.toISOString(),
+    canonicalLeadTimestamp_: value => new Date(value).toISOString(),
     getCell_: (headers, row, field) => row[headers.indexOf(fields[field] || field)],
     setRowValue_: (headers, row, field, value) => {
       const index = headers.indexOf(fields[field] || field);
@@ -33,6 +38,7 @@ function fixture(rows, agents = [{ id: 'a' }, { id: 'b' }]) {
   return {
     run: () => context.notifyUnsentLeadPushes_({}, sheet, headers),
     rows: () => values.slice(1).map(row => context.mapRow_(headers, row)),
+    properties,
     handled: index => { values[index + 1][3] = 'contacted'; },
     assign: input => context.updateLeadRuntime_(input),
   };
@@ -76,6 +82,31 @@ test('no active agents holds all incoming leads', () => {
   const f = fixture([lead('one')], []);
   f.run();
   assert.equal(f.rows()[0].queue_state, 'queued');
+});
+
+test('fresh queued leads are assigned before missed retry leads', () => {
+  const f = fixture([
+    lead('retry', { queue_state: 'queued', queued_at: '2026-09-08 10:00:00', pass_count: '1', retry_after_cycle: '99' }),
+    lead('fresh', { queue_state: 'queued' }),
+  ], [{ id: 'a' }]);
+  f.run();
+  assert.equal(f.rows()[1].assigned_agent_id, 'a');
+  assert.equal(f.rows()[0].queue_state, 'queued');
+});
+
+test('missed retry lead prefers an online agent who has not tried it', () => {
+  const f = fixture([
+    lead('retry', {
+      queue_state: 'queued',
+      queued_at: '2026-09-08 10:00:00',
+      pass_count: '1',
+      retry_after_cycle: '8',
+      assignment_history: JSON.stringify([{ agentId: 'a', outcome: 'missed', retryCycle: 7 }]),
+    }),
+  ], [{ id: 'a' }, { id: 'b' }]);
+  f.properties.set('leadlaju_queue_cycle', '7');
+  f.run();
+  assert.equal(f.rows()[0].assigned_agent_id, 'b');
 });
 
 test('competing browser assignment cannot occupy a busy slot', () => {

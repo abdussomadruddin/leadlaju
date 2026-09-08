@@ -27,7 +27,9 @@ const FIELD_ALIASES = {
   receivedAt: ["received at", "received_at", "assigned at", "assigned_at", "masa aktif"],
   expiresAt: ["expires at", "expires_at", "tamat pada", "masa tamat"],
   queueState: ["queue state", "queue_state", "runtime state", "runtime_state"],
+  queuedAt: ["queued at", "queued_at", "masa queue"],
   passCount: ["pass count", "pass_count", "rotation count", "rotation_count"],
+  retryAfterCycle: ["retry after cycle", "retry_after_cycle", "pusingan retry selepas"],
   assignmentRevision: ["assignment revision", "assignment_revision", "runtime revision", "runtime_revision"],
   assignmentHistory: ["assignment history", "assignment_history", "sejarah assignment"],
 };
@@ -48,7 +50,9 @@ const REQUIRED_HEADERS = [
   { field: "receivedAt", label: "Received At" },
   { field: "expiresAt", label: "Expires At" },
   { field: "queueState", label: "Queue State" },
+  { field: "queuedAt", label: "Queued At" },
   { field: "passCount", label: "Pass Count" },
+  { field: "retryAfterCycle", label: "Retry After Cycle" },
   { field: "assignmentRevision", label: "Assignment Revision" },
   { field: "assignmentHistory", label: "Assignment History" },
 ];
@@ -476,9 +480,14 @@ function expireLead_(input) {
         break;
       }
       const row = values[index].slice(0, headers.length);
-      markLatestAssignmentOutcome_(headers, row, "missed", new Date());
+      const currentQueueCycle = Number(
+        PropertiesService.getScriptProperties().getProperty("leadlaju_queue_cycle") || 0,
+      );
+      markLatestAssignmentOutcome_(headers, row, "missed", new Date(), currentQueueCycle);
       setRowValue_(headers, row, "passCount", String((Number(lead.pass_count) || 0) + 1));
-      holdLeadRuntimeRow_(sheet, headers, index + 1, row);
+      const retryAfterCycle = currentQueueCycle + 1;
+      setRowValue_(headers, row, "retryAfterCycle", String(retryAfterCycle));
+      holdLeadRuntimeRow_(sheet, headers, index + 1, row, { queuedAt: new Date() });
       result = { ok: true, expired: 1 };
       break;
     }
@@ -985,7 +994,7 @@ function filterSubscriptionsForAgent_(subscriptions, agent) {
   });
 }
 
-function assignLeadRuntimeRow_(sheet, headers, rowNumber, row, agent, now) {
+function assignLeadRuntimeRow_(sheet, headers, rowNumber, row, agent, now, retryCycle) {
   const receivedAt = canonicalLeadTimestamp_(now);
   const expiresAt = canonicalLeadTimestamp_(new Date(now.getTime() + RESPONSE_WINDOW_MINUTES * 60 * 1000));
   const nextRow = row.slice(0, headers.length);
@@ -996,11 +1005,20 @@ function assignLeadRuntimeRow_(sheet, headers, rowNumber, row, agent, now) {
   setRowValue_(headers, nextRow, "receivedAt", receivedAt);
   setRowValue_(headers, nextRow, "expiresAt", expiresAt);
   setRowValue_(headers, nextRow, "queueState", "active");
+  setRowValue_(headers, nextRow, "queuedAt", "");
+  setRowValue_(headers, nextRow, "retryAfterCycle", "");
   if (!getCell_(headers, nextRow, "passCount")) setRowValue_(headers, nextRow, "passCount", "0");
   const assignmentRevision = (Number(getCell_(headers, nextRow, "assignmentRevision")) || 0) + 1;
   setRowValue_(headers, nextRow, "assignmentRevision", String(assignmentRevision));
   const history = parseAssignmentHistory_(headers, nextRow);
-  history.push({ agentId: agent.id, agentName: agent.name, assignedAt: now.toISOString(), outcome: "pending", resolvedAt: "" });
+  history.push({
+    agentId: agent.id,
+    agentName: agent.name,
+    assignedAt: now.toISOString(),
+    outcome: "pending",
+    resolvedAt: "",
+    retryCycle: Number(getCell_(headers, row, "passCount")) > 0 ? Number(retryCycle || 0) : 0,
+  });
   setRowValue_(headers, nextRow, "assignmentHistory", JSON.stringify(history));
   sheet.getRange(rowNumber, 1, 1, nextRow.length).setValues([nextRow]);
   return {
@@ -1022,7 +1040,7 @@ function parseAssignmentHistory_(headers, row) {
   }
 }
 
-function markLatestAssignmentOutcome_(headers, row, outcome, resolvedAt) {
+function markLatestAssignmentOutcome_(headers, row, outcome, resolvedAt, retryCycle) {
   const history = parseAssignmentHistory_(headers, row);
   const agentId = getCell_(headers, row, "assignedAgentId");
   const agentName = getCell_(headers, row, "assignedAgentName");
@@ -1030,6 +1048,7 @@ function markLatestAssignmentOutcome_(headers, row, outcome, resolvedAt) {
     if (history[index].agentId === agentId && history[index].outcome === "pending") {
       history[index].outcome = outcome;
       history[index].resolvedAt = resolvedAt.toISOString();
+      if (outcome === "missed") history[index].retryCycle = Number(retryCycle || 0);
       setRowValue_(headers, row, "assignmentHistory", JSON.stringify(history));
       return;
     }
@@ -1041,18 +1060,21 @@ function markLatestAssignmentOutcome_(headers, row, outcome, resolvedAt) {
       assignedAt: parseLeadTimestamp_(getCell_(headers, row, "receivedAt")).toISOString(),
       outcome,
       resolvedAt: resolvedAt.toISOString(),
+      retryCycle: outcome === "missed" ? Number(retryCycle || 0) : 0,
     });
     setRowValue_(headers, row, "assignmentHistory", JSON.stringify(history));
   }
 }
 
-function holdLeadRuntimeRow_(sheet, headers, rowNumber, row) {
+function holdLeadRuntimeRow_(sheet, headers, rowNumber, row, options) {
   const nextRow = row.slice(0, headers.length);
   while (nextRow.length < headers.length) nextRow.push("");
   ["assignedAgentId", "assignedAgentEmail", "assignedAgentName", "receivedAt", "expiresAt"].forEach(
     (field) => setRowValue_(headers, nextRow, field, ""),
   );
   setRowValue_(headers, nextRow, "queueState", "queued");
+  const queuedAt = options?.queuedAt || getCell_(headers, nextRow, "queuedAt") || new Date();
+  setRowValue_(headers, nextRow, "queuedAt", canonicalLeadTimestamp_(queuedAt));
   setRowValue_(
     headers,
     nextRow,
@@ -1060,6 +1082,34 @@ function holdLeadRuntimeRow_(sheet, headers, rowNumber, row) {
     String((Number(getCell_(headers, nextRow, "assignmentRevision")) || 0) + 1),
   );
   sheet.getRange(rowNumber, 1, 1, nextRow.length).setValues([nextRow]);
+}
+
+function missedAgentIdsForRetryCycle_(lead, queueCycle) {
+  return new Set(
+    (lead.assignment_history || [])
+      .filter((assignment) => assignment.outcome === "missed" && Number(assignment.retryCycle || 0) === queueCycle)
+      .map((assignment) => String(assignment.agentId || "").trim())
+      .filter(Boolean),
+  );
+}
+
+function nextAvailableAgentForLead_(lead, agents, occupied, roundRobinIndex, queueCycle) {
+  const ordered = [];
+  for (let offset = 0; offset < agents.length; offset += 1) {
+    const index = (roundRobinIndex + offset) % agents.length;
+    const agent = agents[index];
+    if (!occupied.has(agent.id)) ordered.push({ agent, index });
+  }
+  if (!ordered.length) return null;
+
+  if ((Number(lead.pass_count) || 0) > 0) {
+    const missedAgentIds = missedAgentIdsForRetryCycle_(lead, queueCycle);
+    const untried = ordered.find(({ agent }) => !missedAgentIds.has(agent.id));
+    if (untried) return untried;
+    if (queueCycle < (Number(lead.retry_after_cycle) || 0)) return null;
+  }
+
+  return ordered[0];
 }
 
 function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
@@ -1078,6 +1128,7 @@ function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
     const notifiedKeys = getLeadPushKeys_();
     const properties = PropertiesService.getScriptProperties();
     let roundRobinIndex = Number(properties.getProperty("leadlaju_push_round_robin_index") || 0);
+    let queueCycle = Number(properties.getProperty("leadlaju_queue_cycle") || 0);
     let sent = 0;
     let changedKeys = false;
 
@@ -1092,15 +1143,26 @@ function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
       }
     }
 
-    for (let index = 1; index < values.length; index += 1) {
-      const rowNumber = index + 1;
-      const row = values[index].slice(0, headers.length);
-      const lead = mapRow_(headers, row, rowNumber);
+    const candidates = values.slice(1)
+      .map((row, index) => ({ rowNumber: index + 2, row: row.slice(0, headers.length), lead: mapRow_(headers, row, index + 2) }))
+      .filter(({ lead }) => lead.name && lead.phone && normalizeLeadStage_(lead.status) === "new")
+      .sort((a, b) => {
+        const aAssigned = a.lead.queue_state !== "queued" && Boolean(a.lead.assigned_agent_id);
+        const bAssigned = b.lead.queue_state !== "queued" && Boolean(b.lead.assigned_agent_id);
+        const aPriority = aAssigned ? 0 : (Number(a.lead.pass_count) || 0) > 0 ? 2 : 1;
+        const bPriority = bAssigned ? 0 : (Number(b.lead.pass_count) || 0) > 0 ? 2 : 1;
+        if (aPriority !== bPriority) return aPriority - bPriority;
+        const aTime = aPriority === 2 ? parseLeadTimestamp_(a.lead.queued_at).getTime() : parseLeadTimestamp_(a.lead.created_at).getTime();
+        const bTime = bPriority === 2 ? parseLeadTimestamp_(b.lead.queued_at).getTime() : parseLeadTimestamp_(b.lead.created_at).getTime();
+        return aTime - bTime || a.rowNumber - b.rowNumber;
+      });
+
+    for (const candidate of candidates) {
+      const { rowNumber, row, lead } = candidate;
       if (!lead.name || !lead.phone) continue;
-      if (normalizeLeadStage_(lead.status) !== "new") continue;
 
       let agent = lead.queue_state !== "queued" && findLeadAgent_(agents, lead);
-      if (agent && occupied.get(agent.id) !== index) agent = null;
+      if (agent && occupied.get(agent.id) !== rowNumber - 1) agent = null;
       let runtime = {
         assigned_agent_id: lead.assigned_agent_id,
         assigned_agent_email: lead.assigned_agent_email,
@@ -1109,19 +1171,16 @@ function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
         expires_at: lead.expires_at,
       };
       if (!agent) {
-        for (let offset = 0; offset < agents.length; offset += 1) {
-          const candidateIndex = (roundRobinIndex + offset) % agents.length;
-          if (occupied.has(agents[candidateIndex].id)) continue;
-          agent = agents[candidateIndex];
-          roundRobinIndex = (candidateIndex + 1) % agents.length;
-          break;
-        }
+        const next = nextAvailableAgentForLead_(lead, agents, occupied, roundRobinIndex, queueCycle);
+        agent = next?.agent || null;
+        if (next) roundRobinIndex = (next.index + 1) % agents.length;
         if (!agent) {
           holdLeadRuntimeRow_(sheet, headers, rowNumber, row);
           continue;
         }
-        runtime = assignLeadRuntimeRow_(sheet, headers, rowNumber, row, agent, new Date());
-        occupied.set(agent.id, index);
+        if ((Number(lead.pass_count) || 0) === 0) queueCycle += 1;
+        runtime = assignLeadRuntimeRow_(sheet, headers, rowNumber, row, agent, new Date(), queueCycle);
+        occupied.set(agent.id, rowNumber - 1);
       }
 
       const notificationKey = `${lead.id}:${agent.id}:${runtime.received_at || ""}`;
@@ -1146,6 +1205,7 @@ function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
     }
 
     properties.setProperty("leadlaju_push_round_robin_index", String(roundRobinIndex));
+    properties.setProperty("leadlaju_queue_cycle", String(queueCycle));
     if (changedKeys) saveLeadPushKeys_(notifiedKeys);
     return { ok: true, sent };
   } finally {
@@ -1346,7 +1406,9 @@ function mapRow_(headers, row, rowNumber) {
     received_at: receivedAt ? canonicalLeadTimestamp_(receivedAt) : "",
     expires_at: expiresAt ? canonicalLeadTimestamp_(expiresAt) : "",
     queue_state: getCell_(headers, row, "queueState"),
+    queued_at: getCell_(headers, row, "queuedAt"),
     pass_count: getCell_(headers, row, "passCount"),
+    retry_after_cycle: Number(getCell_(headers, row, "retryAfterCycle")) || 0,
     assignment_revision: Number(getCell_(headers, row, "assignmentRevision")) || 0,
     assignment_history: parseAssignmentHistory_(headers, row),
   };
