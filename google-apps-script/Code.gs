@@ -132,6 +132,7 @@ function doGet() {
     ensureLeadIds_(sheet, headers);
     ensureLeadTimestamps_(sheet, headers);
     ensureLeadSources_(sheet, headers);
+    reconcileSingleActiveLead_(sheet, headers);
     const leads = readLeads_(sheet);
     const agents = readAgents_(agentsSheet, agentHeaders);
     const followUpReminder = readLatestReminder_(remindersSheet, reminderHeaders);
@@ -446,7 +447,48 @@ function updateLeadRuntimeLocked_(input) {
     }
   }
 
+  reconcileSingleActiveLead_(sheet, headers);
   return { ok: true, updated };
+}
+
+function leadAgentKey_(lead) {
+  const id = String(lead.assigned_agent_id || "").trim();
+  if (id) return `id:${id}`;
+  const email = String(lead.assigned_agent_email || "").trim().toLowerCase();
+  if (email) return `email:${email}`;
+  const name = String(lead.assigned_agent_name || "").trim().toLowerCase();
+  return name ? `name:${name}` : "";
+}
+
+function reconcileSingleActiveLead_(sheet, headers) {
+  const values = sheet.getDataRange().getDisplayValues();
+  if (values.length < 2) return { queued: 0 };
+
+  const candidates = [];
+  for (let index = 1; index < values.length; index += 1) {
+    const lead = mapRow_(headers, values[index], index + 1);
+    const agentKey = leadAgentKey_(lead);
+    if (!agentKey || normalizeLeadStage_(lead.status) !== "new" || lead.queue_state === "queued") continue;
+    candidates.push({
+      agentKey,
+      rowNumber: index + 1,
+      row: values[index].slice(0, headers.length),
+      receivedAt: lead.received_at ? parseLeadTimestamp_(lead.received_at).getTime() : Number.MAX_SAFE_INTEGER,
+    });
+  }
+
+  candidates.sort((a, b) => a.receivedAt - b.receivedAt || a.rowNumber - b.rowNumber);
+  const occupied = new Set();
+  let queued = 0;
+  candidates.forEach((candidate) => {
+    if (!occupied.has(candidate.agentKey)) {
+      occupied.add(candidate.agentKey);
+      return;
+    }
+    holdLeadRuntimeRow_(sheet, headers, candidate.rowNumber, candidate.row);
+    queued += 1;
+  });
+  return { queued };
 }
 
 function replaceAgents_(agentsInput) {
@@ -813,6 +855,7 @@ function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
   if (!lock.tryLock(8000)) return { ok: false, error: "Push sync sedang berjalan." };
 
   try {
+    reconcileSingleActiveLead_(sheet, headers);
     const values = sheet.getDataRange().getDisplayValues();
     if (values.length < 2) return { ok: true, sent: 0 };
 
