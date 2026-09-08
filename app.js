@@ -2670,9 +2670,12 @@ function displayLeadPhone(lead) {
 
 function renderActiveLead() {
   const lead = getVisibleActiveLead();
-  const newLeadCount = state.leads.filter(isPendingLead).length;
+  const visibleLeads = isAdmin()
+    ? state.leads
+    : state.leads.filter((item) => item.assignedAgentId === state.currentUserId);
+  const newLeadCount = visibleLeads.filter(isPendingLead).length;
   elements.queueLabel.textContent = `${newLeadCount} lead menunggu`;
-  elements.navLeadCount.textContent = newLeadCount;
+  elements.navLeadCount.textContent = isAdmin() ? newLeadCount : visibleLeads.length;
   elements.notificationCount.textContent = newLeadCount;
   elements.notificationCount.style.display = newLeadCount ? "grid" : "none";
 
@@ -3553,7 +3556,7 @@ async function syncGoogleSheet(options = {}) {
       (agentSync.updated || 0) +
       (agentSync.removed || 0) +
       (handledSync.updated || 0);
-    if (!options.silent || added || updated || removed || agentChanges) {
+    if (isAdmin() && (!options.silent || added || updated || removed || agentChanges)) {
       const title =
         [
           added ? `${added} lead baru` : "",
