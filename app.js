@@ -2118,6 +2118,8 @@ async function syncAgentsFromSheet(sheetAgentRows) {
         active: nextActive,
         leadsHandled: sheetAgent.leadsHandled,
         cooldownUntil: sheetAgent.cooldownUntil,
+        online: sheetAgent.online,
+        notificationEnabled: sheetAgent.notificationEnabled,
       };
       if (sheetAgent.password.length >= 8) {
         updates.password = sheetAgent.password;
@@ -2148,6 +2150,8 @@ async function syncAgentsFromSheet(sheetAgentRows) {
       active: sheetAgent.active,
       leadsHandled: sheetAgent.leadsHandled,
       cooldownUntil: sheetAgent.cooldownUntil,
+      online: sheetAgent.online,
+      notificationEnabled: sheetAgent.notificationEnabled,
     });
     result.added += 1;
     result.backfilled += sheetAgent.id && sheetAgent.password ? 0 : 1;
