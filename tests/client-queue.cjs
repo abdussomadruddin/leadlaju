@@ -104,3 +104,10 @@ test('lead notes are written to the shared sheet and protected during sync', () 
   assert.match(source, /shouldMigrateLocalNotes/);
   assert.match(source, /await updateLeadNotesInSheet\(existingLead, existingLead\.notes\)/);
 });
+
+test('contacted status sends the acting agent identity to the server', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  assert.match(source, /acting_agent_id: actingAgent\?\.id \|\| ""/);
+  assert.match(source, /acting_agent_name: actingAgent\?\.name \|\| ""/);
+  assert.match(source, /acting_agent_email: actingAgent\?\.email \|\| ""/);
+});

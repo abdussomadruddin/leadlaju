@@ -173,3 +173,12 @@ test('server persists and returns lead notes through the sheet', () => {
   assert.match(source, /function updateLeadNotes_\(input\)/);
   assert.match(source, /notes: getCell_\(headers, row, "notes"\)/);
 });
+
+test('contacted status records an acting agent when assignment fields are empty', () => {
+  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const start = source.indexOf('function updateLeadStatusLocked_(');
+  const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
+  assert.match(body, /actingAgentId/);
+  assert.match(body, /setRowValue_\(headers, nextRow, "assignedAgentId", actingAgentId\)/);
+  assert.match(body, /actingAgentId !== currentAgentId/);
+});

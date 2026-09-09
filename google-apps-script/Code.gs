@@ -498,6 +498,9 @@ function updateLeadStatusLocked_(input) {
   const phoneIndex = headers.findIndex((header) => FIELD_ALIASES.phone.includes(header));
   const projectIndex = headers.findIndex((header) => FIELD_ALIASES.project.includes(header));
   const statusIndex = headers.findIndex((header) => FIELD_ALIASES.status.includes(header));
+  const actingAgentId = String(input.acting_agent_id || input.actingAgentId || "").trim();
+  const actingAgentName = String(input.acting_agent_name || input.actingAgentName || "").trim();
+  const actingAgentEmail = String(input.acting_agent_email || input.actingAgentEmail || "").trim().toLowerCase();
   if (statusIndex < 0) return { ok: false, error: "Kolum Status tidak dijumpai." };
 
   let updated = 0;
@@ -523,6 +526,15 @@ function updateLeadStatusLocked_(input) {
         continue;
       } else {
         if (normalizeLeadStage_(status) === "contacted") {
+          const currentAgentId = getCell_(headers, nextRow, "assignedAgentId");
+          if (actingAgentId && currentAgentId && actingAgentId !== currentAgentId) {
+            return { ok: false, error: "Lead ini telah dimiliki ejen lain." };
+          }
+          if (actingAgentId) {
+            setRowValue_(headers, nextRow, "assignedAgentId", actingAgentId);
+            if (actingAgentName) setRowValue_(headers, nextRow, "assignedAgentName", actingAgentName);
+            if (actingAgentEmail) setRowValue_(headers, nextRow, "assignedAgentEmail", actingAgentEmail);
+          }
           markLatestAssignmentOutcome_(headers, nextRow, "contacted", new Date());
         }
         setRowValue_(headers, nextRow, "expiresAt", "");

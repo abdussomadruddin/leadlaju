@@ -2006,6 +2006,8 @@ async function postGoogleSheetAction(payload, errorLabel, options = {}) {
 async function updateLeadStatusInSheet(lead, status) {
   if (!lead) return false;
   const sheetStatus = formatSheetStatus(normalizeSheetStatus(status));
+  const currentUser = getCurrentUser();
+  const actingAgent = currentUser?.role === "agent" ? currentUser : null;
   return postGoogleSheetAction(
     {
       action: "update_lead_status",
@@ -2016,6 +2018,9 @@ async function updateLeadStatusInSheet(lead, status) {
         name: lead.name,
         status: sheetStatus,
         assignment_revision: Number(lead.assignmentRevision) || 0,
+        acting_agent_id: actingAgent?.id || "",
+        acting_agent_name: actingAgent?.name || "",
+        acting_agent_email: actingAgent?.email || "",
       },
     },
     "Lead sheet status update failed",
