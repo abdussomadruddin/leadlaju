@@ -24,6 +24,7 @@ const FIELD_ALIASES = {
   project: ["projek", "project", "nama projek", "project name", "project_name", "campaign", "campaign name"],
   status: ["status"],
   source: ["source", "sumber", "platform"],
+  notes: ["nota", "notes", "catatan"],
   assignedAgentId: ["assigned agent id", "assigned_agent_id", "agent id", "agent_id", "id ejen"],
   assignedAgentEmail: ["assigned agent email", "assigned_agent_email", "agent email", "email ejen"],
   assignedAgentName: ["assigned agent name", "assigned_agent_name", "agent name", "nama ejen"],
@@ -46,6 +47,7 @@ const REQUIRED_HEADERS = [
   { field: "project", label: "Projek" },
   { field: "status", label: "Status" },
   { field: "source", label: "Sumber" },
+  { field: "notes", label: "Nota" },
   { field: "id", label: "ID" },
   { field: "assignedAgentId", label: "Assigned Agent ID" },
   { field: "assignedAgentEmail", label: "Assigned Agent Email" },
@@ -202,6 +204,9 @@ function doPost(event) {
     }
     if (payload.action === "update_lead_status") {
       return jsonResponse(updateLeadStatus_(payload.lead || payload));
+    }
+    if (payload.action === "update_lead_notes") {
+      return jsonResponse(updateLeadNotes_(payload.lead || payload));
     }
     if (payload.action === "update_lead_runtime") {
       return jsonResponse(updateLeadRuntime_(payload.lead || payload));
@@ -429,6 +434,47 @@ function updateLeadStatus_(input) {
   }
   if (result.ok) rebalanceLeadQueue_();
   return result;
+}
+
+function updateLeadNotes_(input) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(8000)) return { ok: false, error: "Agihan lead sedang berjalan." };
+  try {
+    const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
+    const headers = ensureRequiredHeaders_(sheet);
+    const values = sheet.getDataRange().getDisplayValues();
+    const id = String(input.id || input.lead_id || "").trim();
+    const phone = String(input.phone || input.phone_number || "").trim();
+    const project = String(input.project || input.projek || "").trim();
+    const requestedAgentId = String(input.assigned_agent_id || input.assignedAgentId || "").trim();
+    const requestedRevision = Number(input.assignment_revision ?? input.assignmentRevision);
+
+    for (let rowNumber = 2; rowNumber <= values.length; rowNumber += 1) {
+      const row = values[rowNumber - 1];
+      const rowId = getCell_(headers, row, "id");
+      const fallbackMatches = !id && phone && project && getCell_(headers, row, "phone") === phone &&
+        getCell_(headers, row, "project") === project;
+      if (!(id && rowId === id) && !fallbackMatches) continue;
+
+      const currentRevision = Number(getCell_(headers, row, "assignmentRevision")) || 0;
+      if (Number.isFinite(requestedRevision) && requestedRevision !== currentRevision) {
+        return { ok: false, stale: true, error: "Assignment lead telah berubah." };
+      }
+      const currentAgentId = getCell_(headers, row, "assignedAgentId");
+      if (requestedAgentId && currentAgentId && requestedAgentId !== currentAgentId) {
+        return { ok: false, error: "Lead ini milik ejen lain." };
+      }
+
+      const nextRow = row.slice(0, headers.length);
+      setRowValue_(headers, nextRow, "notes", String(input.notes ?? input.nota ?? "").trim());
+      sheet.getRange(rowNumber, 1, 1, nextRow.length).setValues([nextRow]);
+      return { ok: true, updated: 1 };
+    }
+    return { ok: false, error: "Lead tidak dijumpai." };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function rebalanceLeadQueue_() {
@@ -1583,6 +1629,7 @@ function mapRow_(headers, row, rowNumber) {
     city: getCell_(headers, row, "city"),
     project: getCell_(headers, row, "project"),
     source: canonicalLeadSource_(getCell_(headers, row, "source") || DEFAULT_SOURCE),
+    notes: getCell_(headers, row, "notes"),
     status: getCell_(headers, row, "status") || "new",
     created_at: canonicalLeadTimestamp_(getCell_(headers, row, "createdAt")),
     assigned_agent_id: getCell_(headers, row, "assignedAgentId"),

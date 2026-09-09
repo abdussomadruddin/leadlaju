@@ -107,6 +107,7 @@ let remoteDatabaseClient = null;
 let remoteDatabaseMode = false;
 let claimingLeadId = null;
 const pendingLeadStatusUpdates = new Map();
+const pendingLeadNoteUpdates = new Map();
 let serviceWorkerRegistrationPromise = null;
 let notificationAudioContext = null;
 let lastAgentPresenceHeartbeatAt = 0;
@@ -1709,6 +1710,9 @@ async function addLead(input, options = {}) {
 
     let changed = false;
     const updates = { name, phone, email, project, source, createdAt: parsedCreatedAt };
+    const incomingNotes = String(input.notes || input.nota || "");
+    const pendingNotes = pendingLeadNoteUpdates.get(existingLead.id)?.notes;
+    if (pendingNotes === undefined || pendingNotes === incomingNotes) updates.notes = incomingNotes;
     Object.entries(updates).forEach(([key, value]) => {
       if (existingLead[key] !== value) {
         existingLead[key] = value;
@@ -1764,7 +1768,7 @@ async function addLead(input, options = {}) {
     responseMs: initialStatus === "contacted" ? 0 : null,
     contactedAt: initialStatus === "contacted" ? now : null,
     queuedAt: shouldQueue ? now : null,
-    notes: "",
+    notes: String(input.notes || input.nota || ""),
   };
   applyLeadRuntimeFromSheet(lead, sheetRuntime, now);
   shouldQueue = lead.status === "queued";
@@ -2008,6 +2012,25 @@ async function updateLeadStatusInSheet(lead, status) {
       },
     },
     "Lead sheet status update failed",
+    { waitForSend: true },
+  );
+}
+
+async function updateLeadNotesInSheet(lead, notes) {
+  if (!lead) return false;
+  return postGoogleSheetAction(
+    {
+      action: "update_lead_notes",
+      lead: {
+        id: lead.dedupeKey || lead.id,
+        phone: lead.phone,
+        project: lead.project,
+        notes,
+        assigned_agent_id: lead.assignedAgentId || "",
+        assignment_revision: Number(lead.assignmentRevision) || 0,
+      },
+    },
+    "Lead sheet note update failed",
     { waitForSend: true },
   );
 }
@@ -3582,6 +3605,10 @@ async function updateContact(event) {
   }
   try {
     await persistLead(lead);
+    if (!remoteDatabaseMode) {
+      const noteSynced = await updateLeadNotesInSheet(lead, lead.notes);
+      if (!noteSynced) throw new Error("Nota tidak dapat disimpan ke Google Sheet.");
+    }
     saveState();
     closeModal(elements.contactModal);
     showToast("Rekod pelanggan disimpan", `${lead.name} telah dikemas kini.`);
@@ -3610,6 +3637,8 @@ async function saveLeadNote(leadId, button = null) {
 
   const previousNotes = lead.notes || "";
   lead.notes = nextNotes;
+  const updateToken = Symbol("lead-note-update");
+  pendingLeadNoteUpdates.set(leadId, { notes: nextNotes, token: updateToken });
   if (button) {
     button.disabled = true;
     button.textContent = "Menyimpan...";
@@ -3623,6 +3652,9 @@ async function saveLeadNote(leadId, button = null) {
       });
       if (error) throw error;
       if (data === false) throw new Error("Anda hanya boleh edit nota lead yang boleh dilihat oleh akaun ini.");
+    } else {
+      const noteSynced = await updateLeadNotesInSheet(lead, nextNotes);
+      if (!noteSynced) throw new Error("Nota tidak dapat disimpan ke Google Sheet.");
     }
     saveState();
     if (leadNoteDrafts.get(draftKey) === submittedDraft) leadNoteDrafts.delete(draftKey);
@@ -3632,6 +3664,7 @@ async function saveLeadNote(leadId, button = null) {
     console.error(error);
     showToast("Nota gagal disimpan", error?.message || "Semak sambungan Google Sheet dan cuba lagi.", "error");
   } finally {
+    if (pendingLeadNoteUpdates.get(leadId)?.token === updateToken) pendingLeadNoteUpdates.delete(leadId);
     if (button) {
       button.disabled = false;
       button.textContent = "Simpan nota";

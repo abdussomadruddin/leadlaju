@@ -165,3 +165,11 @@ test('ordinary status changes do not advance the assignment revision', () => {
   const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
   assert.doesNotMatch(body, /assignmentRevision[^\n]*currentRevision \+ 1/);
 });
+
+test('server persists and returns lead notes through the sheet', () => {
+  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  assert.match(source, /notes: \["nota", "notes", "catatan"\]/);
+  assert.match(source, /payload\.action === "update_lead_notes"/);
+  assert.match(source, /function updateLeadNotes_\(input\)/);
+  assert.match(source, /notes: getCell_\(headers, row, "notes"\)/);
+});

@@ -95,3 +95,10 @@ test('pending status update is protected from stale sheet sync', () => {
   assert.match(source, /pendingLeadStatusUpdates\.get\(existingLead\.id\)\?\.status/);
   assert.match(source, /pendingLeadStatusUpdates\.set\(leadId, \{ status: normalizedStatus, token: updateToken \}\)/);
 });
+
+test('lead notes are written to the shared sheet and protected during sync', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  assert.match(source, /action: "update_lead_notes"/);
+  assert.match(source, /pendingLeadNoteUpdates\.get\(existingLead\.id\)\?\.notes/);
+  assert.match(source, /await updateLeadNotesInSheet\(lead, nextNotes\)/);
+});
