@@ -1960,19 +1960,42 @@ td small {
 }
 
 .project-checkbox {
-  display: flex;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   margin: 0;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
   color: var(--ink-700);
+  background: #fff;
   font-size: 12px;
   font-weight: 700;
+  cursor: pointer;
 }
 
-.project-checkbox input {
-  width: 16px;
-  height: 16px;
+.modal .project-checkbox input[type="checkbox"] {
+  appearance: auto;
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
   accent-color: var(--blue);
+}
+
+.project-checkbox span {
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.project-checkbox:has(input:checked) {
+  border-color: #bcd0f8;
+  background: #f5f8ff;
 }
 
 .agent-card-actions {

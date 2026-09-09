@@ -1,9 +1,9 @@
-const CACHE_NAME = "leadlaju-pwa-v20260909-cooldown-cleanup-v40";
+const CACHE_NAME = "leadlaju-pwa-v20260909-project-checkbox-v41";
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20260909-cooldown-cleanup-v40",
-  "/app.js?v=20260909-cooldown-cleanup-v40",
+  "/styles.css?v=20260909-project-checkbox-v41",
+  "/app.js?v=20260909-project-checkbox-v41",
   "/manifest.webmanifest?v=20260625-pwa-notifications",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",
