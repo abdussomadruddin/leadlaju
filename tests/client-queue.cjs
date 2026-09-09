@@ -164,3 +164,13 @@ test('lead and agent deletion require two confirmations', () => {
   assert.match(source, /if \(!confirmPermanentDelete\("ejen", agent\.name\)\) return/);
   assert.match(source, /if \(!confirmPermanentDelete\("lead", lead\.name\)\) return/);
 });
+
+test('only admins can see or trigger lead deletion', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const html = fs.readFileSync('index.html', 'utf8');
+  assert.match(html, /class="danger-button full admin-only" id="contact-delete-button"[^>]*hidden disabled/);
+  assert.match(source, /const deleteButton = isAdmin\(\)/);
+  assert.match(source, /elements\.contactDeleteButton\.disabled = !adminCanDelete/);
+  assert.match(source, /if \(remove && isAdmin\(\)\) deleteLeadEverywhere/);
+  assert.match(source, /if \(!isAdmin\(\)\) \{\s*showToast\("Admin sahaja"/);
+});

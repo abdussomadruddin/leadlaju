@@ -25,8 +25,8 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260909-double-delete-v51" />
-    <script src="app.js?v=20260909-double-delete-v51" defer></script>
+    <link rel="stylesheet" href="styles.css?v=20260909-admin-delete-v52" />
+    <script src="app.js?v=20260909-admin-delete-v52" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -822,7 +822,7 @@
           <textarea id="contact-notes" rows="4" placeholder="Contoh: Berminat untuk site visit hujung minggu"></textarea>
           <p class="reset-error" id="contact-form-error" role="alert"></p>
           <button class="primary-button full" type="submit">Simpan perubahan</button>
-          <button class="danger-button full" id="contact-delete-button" type="button">Padam lead</button>
+          <button class="danger-button full admin-only" id="contact-delete-button" type="button" hidden disabled>Padam lead</button>
         </form>
       </div>
     </div>

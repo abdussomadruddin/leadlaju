@@ -3720,8 +3720,10 @@ function openContactModal(leadId) {
   elements.contactProject.value = lead.project || "";
   elements.contactNotes.value = lead.notes || "";
   elements.contactFormError.textContent = "";
-  elements.contactDeleteButton.hidden = !isAdmin();
-  if (isAdmin()) {
+  const adminCanDelete = isAdmin();
+  elements.contactDeleteButton.hidden = !adminCanDelete;
+  elements.contactDeleteButton.disabled = !adminCanDelete;
+  if (adminCanDelete) {
     elements.contactDeleteButton.dataset.contactDelete = lead.id;
   } else {
     delete elements.contactDeleteButton.dataset.contactDelete;
