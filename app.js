@@ -108,6 +108,7 @@ let remoteDatabaseClient = null;
 let remoteDatabaseMode = false;
 let claimingLeadId = null;
 const pendingLeadStatusUpdates = new Map();
+const leadStatusWriteTimes = new Map();
 const pendingLeadNoteUpdates = new Map();
 let serviceWorkerRegistrationPromise = null;
 let notificationAudioContext = null;
@@ -1784,6 +1785,8 @@ async function addLead(input, options = {}) {
 
   if (existingLead) {
     if (!options.updateExisting) return false;
+    if (pendingLeadStatusUpdates.has(existingLead.id)) return false;
+    if (options.syncStartedAt && options.syncStartedAt <= (leadStatusWriteTimes.get(existingLead.id) || 0)) return false;
 
     let changed = false;
     const updates = { name, phone, email, project, source, createdAt: parsedCreatedAt };
@@ -2123,7 +2126,7 @@ async function waitForLeadStatusInSheet(lead, expectedStatus, timeoutMs = 15000)
         const rows = Array.isArray(payload) ? payload : payload.leads || payload.data || [];
         const sheetLead = rows.find((row) => {
           const rowId = String(row.id || row.lead_id || "").trim();
-          if (targetId && rowId === targetId) return true;
+          if (targetId) return rowId === targetId;
           return String(row.phone || row.phone_number || "").trim() === String(lead.phone || "").trim() &&
             String(row.project || row.projek || "").trim().toLowerCase() === String(lead.project || "").trim().toLowerCase();
         });
@@ -3862,6 +3865,7 @@ async function updateLeadStatusFromLog(leadId, nextStatus, field = null) {
   const previousLead = { ...lead };
   const updateToken = Symbol("lead-status-update");
   pendingLeadStatusUpdates.set(leadId, { status: normalizedStatus, token: updateToken });
+  leadStatusWriteTimes.set(leadId, Date.now());
   if (field) {
     field.disabled = true;
     field.classList.add("is-saving");
@@ -3887,6 +3891,7 @@ async function updateLeadStatusFromLog(leadId, nextStatus, field = null) {
     showToast("Status gagal disimpan", error?.message || "Semak sambungan Google Sheet dan cuba lagi.", "error");
     return false;
   } finally {
+    leadStatusWriteTimes.set(leadId, Date.now());
     if (pendingLeadStatusUpdates.get(leadId)?.token === updateToken) pendingLeadStatusUpdates.delete(leadId);
     if (field) {
       field.disabled = false;
@@ -3927,6 +3932,7 @@ async function deleteLeadEverywhere(leadId) {
 }
 
 async function syncGoogleSheet(options = {}) {
+  const syncStartedAt = Date.now();
   const endpoint = getSheetEndpoint();
   if (!endpoint) {
     showToast("URL diperlukan", "Masukkan Google Apps Script Web App URL.", "error");
@@ -3968,6 +3974,7 @@ async function syncGoogleSheet(options = {}) {
     const sheetKeys = new Set(rows.map(sheetDedupeKey).filter(Boolean));
     for (const row of rows) {
       const result = await addLead(row, {
+        syncStartedAt,
         silent: true,
         updateExisting: true,
         notify: shouldNotifyNewLeads,

@@ -3,6 +3,27 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
+test('delayed sync cannot overwrite a completed or pending status edit', async () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const start = source.indexOf('async function addLead(');
+  const end = source.indexOf('\nfunction ', start + 1);
+  const lead = { id: 'local', dedupeKey: 'sheet-id', status: 'potential' };
+  const pending = new Map();
+  const context = vm.createContext({
+    state: { leads: [lead] }, pendingLeadStatusUpdates: pending,
+    leadStatusWriteTimes: new Map([['local', 200]]),
+    sheetDedupeKey: () => 'sheet-id', normalizeLeadSource: () => 'Manual Lead',
+    parseLeadTimestamp: () => 1, readLeadRuntimeFromSheet: () => ({}),
+  });
+  vm.runInContext(source.slice(start, end), context);
+  const row = { name: 'Test', phone: '601234', status: 'Contacted' };
+  assert.equal(await context.addLead(row, { updateExisting: true, syncStartedAt: 100 }), false);
+  assert.equal(lead.status, 'potential');
+  pending.set('local', { status: 'potential' });
+  assert.equal(await context.addLead(row, { updateExisting: true, syncStartedAt: 300 }), false);
+  assert.equal(lead.status, 'potential');
+});
+
 function setup(leads) {
   const source = fs.readFileSync('app.js', 'utf8');
   const context = vm.createContext({
