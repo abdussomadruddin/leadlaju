@@ -1570,9 +1570,20 @@ function pickInputValue(input, keys) {
 }
 
 function readLeadRuntimeFromSheet(input) {
-  const assignedAgentId = String(
+  const rawAssignedAgentId = String(
     pickInputValue(input, ["assigned_agent_id", "assignedAgentId", "assigned_agent", "agent_id"]),
   ).trim();
+  const assignedAgentName = String(pickInputValue(input, ["assigned_agent_name", "assignedAgentName"])).trim();
+  const assignedAgentEmail = String(pickInputValue(input, ["assigned_agent_email", "assignedAgentEmail"]))
+    .trim()
+    .toLowerCase();
+  const matchedAgent = state.agents.find(
+    (agent) =>
+      agent.id === rawAssignedAgentId ||
+      (assignedAgentEmail && agent.email.toLowerCase() === assignedAgentEmail) ||
+      (assignedAgentName && agent.name.toLowerCase() === assignedAgentName.toLowerCase()),
+  );
+  const assignedAgentId = matchedAgent?.id || rawAssignedAgentId;
   const queueState = String(
     pickInputValue(input, ["queue_state", "queueState", "runtime_state", "runtimeState"]),
   )
@@ -1588,6 +1599,8 @@ function readLeadRuntimeFromSheet(input) {
   return {
     hasRuntime,
     assignedAgentId,
+    assignedAgentName: matchedAgent?.name || assignedAgentName,
+    assignedAgentEmail: matchedAgent?.email || assignedAgentEmail,
     queueState,
     receivedAt: receivedRaw ? parseLeadTimestamp(receivedRaw, null) : null,
     expiresAt: expiresRaw ? parseLeadTimestamp(expiresRaw, null) : null,
@@ -1603,6 +1616,7 @@ function applyLeadRuntimeFromSheet(lead, runtime, now = Date.now()) {
   const before = JSON.stringify({
     status: lead.status,
     assignedAgentId: lead.assignedAgentId,
+    assignedAgentName: lead.assignedAgentName,
     receivedAt: lead.receivedAt,
     expiresAt: lead.expiresAt,
     queuedAt: lead.queuedAt,
@@ -1612,6 +1626,7 @@ function applyLeadRuntimeFromSheet(lead, runtime, now = Date.now()) {
 
   if (!isActiveLeadStatus(lead.status)) {
     if (runtime.assignedAgentId) lead.assignedAgentId = runtime.assignedAgentId;
+    if (runtime.assignedAgentName) lead.assignedAgentName = runtime.assignedAgentName;
     if (runtime.receivedAt) lead.receivedAt = runtime.receivedAt;
     lead.expiresAt = null;
     lead.queuedAt = null;
@@ -1625,6 +1640,7 @@ function applyLeadRuntimeFromSheet(lead, runtime, now = Date.now()) {
   } else if (runtime.assignedAgentId) {
     lead.status = "new";
     lead.assignedAgentId = runtime.assignedAgentId;
+    lead.assignedAgentName = runtime.assignedAgentName || lead.assignedAgentName || "";
     lead.receivedAt = runtime.receivedAt || lead.receivedAt || now;
     lead.expiresAt = runtime.expiresAt || lead.expiresAt || lead.receivedAt + RESPONSE_WINDOW_MS;
     lead.queuedAt = null;
@@ -1632,11 +1648,13 @@ function applyLeadRuntimeFromSheet(lead, runtime, now = Date.now()) {
     if (runtime.passCount !== null) lead.passCount = runtime.passCount;
   }
   lead.assignmentRevision = runtime.assignmentRevision || 0;
+  if (runtime.assignedAgentName) lead.assignedAgentName = runtime.assignedAgentName;
   lead.assignmentHistory = runtime.assignmentHistory || [];
 
   const after = JSON.stringify({
     status: lead.status,
     assignedAgentId: lead.assignedAgentId,
+    assignedAgentName: lead.assignedAgentName,
     receivedAt: lead.receivedAt,
     expiresAt: lead.expiresAt,
     queuedAt: lead.queuedAt,
@@ -1767,6 +1785,7 @@ async function addLead(input, options = {}) {
     createdAt: Number.isFinite(parsedCreatedAt) ? parsedCreatedAt : now,
     receivedAt: shouldDistribute && !shouldQueue ? now : null,
     assignedAgentId: assignedAgent?.id || null,
+    assignedAgentName: sheetRuntime.assignedAgentName || assignedAgent?.name || "",
     expiresAt: shouldDistribute && !shouldQueue ? now + RESPONSE_WINDOW_MS : null,
     status: shouldQueue ? "queued" : initialStatus,
     passCount: initialPassCount,
@@ -3030,7 +3049,7 @@ function renderLeadsTable() {
             : "";
           const actionButtons = [editButton, deleteButton].filter(Boolean).join("");
           const assignedAgentLabel = lead.assignedAgentId
-            ? getAgent(lead.assignedAgentId)?.name || "Tiada ejen"
+            ? getAgent(lead.assignedAgentId)?.name || lead.assignedAgentName || "Tiada ejen"
             : "Belum diagih";
           const activeTime = lead.receivedAt
             ? `<small>Aktif ${formatDateTime(lead.receivedAt)}</small>`

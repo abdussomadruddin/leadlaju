@@ -170,11 +170,12 @@ function doGet() {
     ensureLeadIds_(sheet, headers);
     ensureLeadTimestamps_(sheet, headers);
     ensureLeadSources_(sheet, headers);
-    const leads = readLeads_(sheet);
+    let leads = readLeads_(sheet);
     const projects = ensureProjectsFromLeads_(projectsSheet, projectHeaders, leads);
     ensureAgentProjectEligibility_(agentsSheet, agentHeaders, projects);
     clearExpiredAgentCooldowns_(agentsSheet, agentHeaders);
     const agents = readAgents_(agentsSheet, agentHeaders);
+    if (reconcileLeadAgentReferences_(sheet, headers, agents)) leads = readLeads_(sheet);
     const followUpReminder = readLatestReminder_(remindersSheet, reminderHeaders);
     return jsonResponse({
       ok: true,
@@ -189,6 +190,37 @@ function doGet() {
   } catch (error) {
     return jsonResponse({ ok: false, error: String(error), leads: [] });
   }
+}
+
+function reconcileLeadAgentReferences_(sheet, headers, agents) {
+  const values = sheet.getDataRange().getDisplayValues();
+  if (values.length < 2) return 0;
+  const agentsById = new Map(agents.map((agent) => [String(agent.id || "").trim(), agent]));
+  const agentsByEmail = new Map(
+    agents.filter((agent) => agent.email).map((agent) => [String(agent.email).trim().toLowerCase(), agent]),
+  );
+  const agentsByName = new Map(
+    agents.filter((agent) => agent.name).map((agent) => [normalizeProjectName_(agent.name), agent]),
+  );
+  let updated = 0;
+
+  for (let rowNumber = 2; rowNumber <= values.length; rowNumber += 1) {
+    const row = values[rowNumber - 1];
+    const assignedId = getCell_(headers, row, "assignedAgentId");
+    if (!assignedId || agentsById.has(assignedId)) continue;
+    const assignedEmail = getCell_(headers, row, "assignedAgentEmail").toLowerCase();
+    const assignedName = normalizeProjectName_(getCell_(headers, row, "assignedAgentName"));
+    const matchedAgent = agentsByEmail.get(assignedEmail) || agentsByName.get(assignedName);
+    if (!matchedAgent) continue;
+
+    const nextRow = row.slice(0, headers.length);
+    setRowValue_(headers, nextRow, "assignedAgentId", matchedAgent.id);
+    setRowValue_(headers, nextRow, "assignedAgentName", matchedAgent.name);
+    setRowValue_(headers, nextRow, "assignedAgentEmail", matchedAgent.email);
+    sheet.getRange(rowNumber, 1, 1, nextRow.length).setValues([nextRow]);
+    updated += 1;
+  }
+  return updated;
 }
 
 function doPost(event) {

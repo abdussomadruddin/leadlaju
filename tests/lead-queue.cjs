@@ -182,3 +182,10 @@ test('contacted status records an acting agent when assignment fields are empty'
   assert.match(body, /setRowValue_\(headers, nextRow, "assignedAgentId", actingAgentId\)/);
   assert.match(body, /actingAgentId !== currentAgentId/);
 });
+
+test('server reconciles obsolete lead agent IDs by email or name', () => {
+  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  assert.match(source, /function reconcileLeadAgentReferences_\(sheet, headers, agents\)/);
+  assert.match(source, /agentsByEmail\.get\(assignedEmail\) \|\| agentsByName\.get\(assignedName\)/);
+  assert.match(source, /setRowValue_\(headers, nextRow, "assignedAgentId", matchedAgent\.id\)/);
+});

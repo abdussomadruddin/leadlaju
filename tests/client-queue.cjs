@@ -111,3 +111,9 @@ test('contacted status sends the acting agent identity to the server', () => {
   assert.match(source, /acting_agent_name: actingAgent\?\.name \|\| ""/);
   assert.match(source, /acting_agent_email: actingAgent\?\.email \|\| ""/);
 });
+
+test('lead display falls back to the server agent name', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  assert.match(source, /getAgent\(lead\.assignedAgentId\)\?\.name \|\| lead\.assignedAgentName/);
+  assert.match(source, /matchedAgent\?\.id \|\| rawAssignedAgentId/);
+});
