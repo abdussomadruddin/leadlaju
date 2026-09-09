@@ -11,6 +11,8 @@ const PUSH_API_URL = "https://leadlaju.vercel.app/api/push";
 const PUSH_NOTIFY_SECRET = "leadlaju-push-notify-v1";
 const RESPONSE_WINDOW_MINUTES = 5;
 const AGENT_PRESENCE_TIMEOUT_MINUTES = 60;
+// Used only when a legacy sheet has no lead rows to seed the first project list.
+const INITIAL_PROJECT_NAMES = ["Armani Putrajaya", "BBSAP Sitiawan"];
 
 const FIELD_ALIASES = {
   id: ["id", "lead id", "lead_id", "tiktok lead id", "meta lead id"],
@@ -890,6 +892,16 @@ function ensureProjectsFromLeads_(sheet, headers, leads) {
     knownNames.add(key);
     additions.push({ id: `project-${Utilities.getUuid()}`, name, active: true, created_at: canonicalLeadTimestamp_(new Date()) });
   });
+  // The original rollout has two known projects. Keep the migration usable even
+  // when a legacy sheet was cleared before this version is first opened.
+  if (!additions.length) {
+    INITIAL_PROJECT_NAMES.forEach((name) => {
+      const key = normalizeProjectName_(name);
+      if (knownNames.has(key)) return;
+      knownNames.add(key);
+      additions.push({ id: `project-${Utilities.getUuid()}`, name, active: true, created_at: canonicalLeadTimestamp_(new Date()) });
+    });
+  }
   if (additions.length) {
     const rows = additions.map((project) => buildProjectRow_(headers, project));
     sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, headers.length).setValues(rows);
