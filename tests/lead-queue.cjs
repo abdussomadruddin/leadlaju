@@ -10,6 +10,7 @@ function fixture(rows, agents = [{ id: 'a', eligible_project_ids: ['project-arma
   const properties = new Map();
   const sheet = {
     getDataRange: () => ({ getDisplayValues: () => values.map(row => row.slice()) }),
+    getLastRow: () => values.length,
     getRange: row => ({ setValues: ([value]) => { values[row - 1] = value; } }),
   };
   const context = vm.createContext({
@@ -49,6 +50,12 @@ function fixture(rows, agents = [{ id: 'a', eligible_project_ids: ['project-arma
 }
 
 const lead = (id, extra = {}) => ({ id, name: id, phone: '0123456789', project: 'Armani Putrajaya', status: 'new', ...extra });
+
+test('server clears expired cooldown values before assignment', () => {
+  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  assert.match(source, /function clearExpiredAgentCooldowns_\(sheet, headers, now\)/);
+  assert.match(source, /clearExpiredAgentCooldowns_\(queueAgentsSheet, queueAgentHeaders\)/);
+});
 
 test('burst assigns one per agent and holds excess without a timer', () => {
   const f = fixture(Array.from({ length: 6 }, (_, i) => lead(String(i))));

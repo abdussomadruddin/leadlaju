@@ -171,6 +171,7 @@ function doGet() {
     const leads = readLeads_(sheet);
     const projects = ensureProjectsFromLeads_(projectsSheet, projectHeaders, leads);
     ensureAgentProjectEligibility_(agentsSheet, agentHeaders, projects);
+    clearExpiredAgentCooldowns_(agentsSheet, agentHeaders);
     const agents = readAgents_(agentsSheet, agentHeaders);
     const followUpReminder = readLatestReminder_(remindersSheet, reminderHeaders);
     return jsonResponse({
@@ -857,6 +858,22 @@ function readAgents_(sheet, headers) {
     .filter((agent) => agent.name && agent.email);
 }
 
+function clearExpiredAgentCooldowns_(sheet, headers, now) {
+  if (!sheet || sheet.getLastRow() < 2) return 0;
+  const values = sheet.getDataRange().getDisplayValues();
+  const currentTime = now instanceof Date ? now.getTime() : Date.now();
+  let cleared = 0;
+  values.slice(1).forEach((value, index) => {
+    const cooldown = getCellBySpec_(headers, value, AGENT_FIELD_ALIASES, "cooldownUntil");
+    if (!cooldown || parseLeadTimestamp_(cooldown).getTime() > currentTime) return;
+    const row = value.slice(0, headers.length);
+    setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "cooldownUntil", "");
+    sheet.getRange(index + 2, 1, 1, row.length).setValues([row]);
+    cleared += 1;
+  });
+  return cleared;
+}
+
 function normalizeProjectIds_(value) {
   const raw = Array.isArray(value) ? value : (() => {
     try { return JSON.parse(String(value || "[]")); } catch (error) { return String(value || "").split(","); }
@@ -1285,6 +1302,7 @@ function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
     const queueAgentsSheet = getOrCreateSheet_(spreadsheet, AGENTS_SHEET_NAME);
     const queueAgentHeaders = ensureRequiredHeadersBySpec_(queueAgentsSheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
     ensureAgentProjectEligibility_(queueAgentsSheet, queueAgentHeaders, projects);
+    clearExpiredAgentCooldowns_(queueAgentsSheet, queueAgentHeaders);
     const agents = getActiveAgentsForPush_(spreadsheet);
 
     const subscriptions = readPushSubscriptions_(spreadsheet, { agentOnly: true });

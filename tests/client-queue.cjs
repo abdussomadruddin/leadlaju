@@ -65,6 +65,8 @@ test('agent cooldown lasts 5 minutes', () => {
   assert.match(source, /const AGENT_COOLDOWN_MS = 5 \* 60 \* 1000/);
   assert.match(source, /Number\(agent\.cooldownUntil\) > Date\.now\(\)/);
   assert.match(source, /agent\.cooldownUntil = Date\.now\(\) \+ AGENT_COOLDOWN_MS/);
+  assert.match(source, /function clearExpiredLocalCooldowns\(now = Date\.now\(\)\)/);
+  assert.match(source, /cooldownUntil: normalizeCooldownUntil\(input\.cooldown_until \|\| input\.cooldownUntil\)/);
 });
 
 test('agent presence heartbeat runs at five-minute intervals', () => {

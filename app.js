@@ -576,6 +576,7 @@ function startAuthenticatedApp(user) {
 
   window.clearInterval(tickTimer);
   tickTimer = window.setInterval(() => {
+    clearExpiredLocalCooldowns();
     processExpiredLeads();
     updateCountdown();
   }, 1000);
@@ -1021,6 +1022,23 @@ function parseLeadTimestamp(value, fallback = Date.now()) {
 
   const parsed = new Date(raw).getTime();
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function normalizeCooldownUntil(value, now = Date.now()) {
+  if (!value) return null;
+  const parsed = parseLeadTimestamp(value, null);
+  return Number.isFinite(parsed) && parsed > now ? parsed : null;
+}
+
+function clearExpiredLocalCooldowns(now = Date.now()) {
+  let changed = false;
+  state.agents.forEach((agent) => {
+    if (!agent.cooldownUntil || Number(agent.cooldownUntil) > now) return;
+    agent.cooldownUntil = null;
+    changed = true;
+  });
+  if (changed) saveState();
+  return changed;
 }
 
 function malaysiaDateParts(value) {
@@ -1643,9 +1661,7 @@ function normalizeSheetAgent(input) {
     leadsHandled: Number(input.leads_handled ?? input.leadsHandled ?? 0) || 0,
     password: String(input.password || input.kata_laluan || input.temporary_password || "").trim(),
     createdAt: input.created_at || input.createdAt ? new Date(input.created_at || input.createdAt).getTime() : null,
-    cooldownUntil: input.cooldown_until || input.cooldownUntil
-      ? parseLeadTimestamp(input.cooldown_until || input.cooldownUntil, null)
-      : null,
+    cooldownUntil: normalizeCooldownUntil(input.cooldown_until || input.cooldownUntil),
     online: Boolean(input.online),
     notificationEnabled: Boolean(input.notification_enabled),
     eligibleProjectIds: normalizeProjectIds(input.eligible_project_ids || input.eligibleProjectIds),
@@ -2050,7 +2066,9 @@ function agentSheetPayload(agent) {
     leadsHandled: agent.leadsHandled || 0,
     password: agent.password || "",
     created_at: agent.createdAt ? new Date(agent.createdAt).toISOString() : new Date().toISOString(),
-    cooldown_until: agent.cooldownUntil ? new Date(agent.cooldownUntil).toISOString() : "",
+    cooldown_until: normalizeCooldownUntil(agent.cooldownUntil)
+      ? new Date(normalizeCooldownUntil(agent.cooldownUntil)).toISOString()
+      : "",
     eligible_project_ids: normalizeProjectIds(agent.eligibleProjectIds),
   };
 }
