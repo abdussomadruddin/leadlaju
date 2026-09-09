@@ -101,4 +101,6 @@ test('lead notes are written to the shared sheet and protected during sync', () 
   assert.match(source, /action: "update_lead_notes"/);
   assert.match(source, /pendingLeadNoteUpdates\.get\(existingLead\.id\)\?\.notes/);
   assert.match(source, /await updateLeadNotesInSheet\(lead, nextNotes\)/);
+  assert.match(source, /shouldMigrateLocalNotes/);
+  assert.match(source, /await updateLeadNotesInSheet\(existingLead, existingLead\.notes\)/);
 });

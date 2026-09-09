@@ -1710,9 +1710,12 @@ async function addLead(input, options = {}) {
 
     let changed = false;
     const updates = { name, phone, email, project, source, createdAt: parsedCreatedAt };
-    const incomingNotes = String(input.notes || input.nota || "");
+    const incomingNotes = String(input.notes ?? input.nota ?? "");
     const pendingNotes = pendingLeadNoteUpdates.get(existingLead.id)?.notes;
-    if (pendingNotes === undefined || pendingNotes === incomingNotes) updates.notes = incomingNotes;
+    const shouldMigrateLocalNotes = !incomingNotes && Boolean(String(existingLead.notes || "").trim());
+    if (!shouldMigrateLocalNotes && (pendingNotes === undefined || pendingNotes === incomingNotes)) {
+      updates.notes = incomingNotes;
+    }
     Object.entries(updates).forEach(([key, value]) => {
       if (existingLead[key] !== value) {
         existingLead[key] = value;
@@ -1727,7 +1730,11 @@ async function addLead(input, options = {}) {
     }
     if (applyLeadRuntimeFromSheet(existingLead, sheetRuntime)) changed = true;
 
-    if (!changed) return false;
+    if (shouldMigrateLocalNotes && !pendingLeadNoteUpdates.has(existingLead.id)) {
+      const migrated = await updateLeadNotesInSheet(existingLead, existingLead.notes);
+      if (!migrated) console.warn("Legacy local lead note could not be migrated", existingLead.id);
+    }
+    if (!changed && !shouldMigrateLocalNotes) return false;
     saveState();
     try {
       await persistLead(existingLead);
