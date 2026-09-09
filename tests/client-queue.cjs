@@ -117,3 +117,11 @@ test('lead display falls back to the server agent name', () => {
   assert.match(source, /getAgent\(lead\.assignedAgentId\)\?\.name \|\| lead\.assignedAgentName/);
   assert.match(source, /matchedAgent\?\.id \|\| rawAssignedAgentId/);
 });
+
+test('admin log lead supports filtering by agent', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const html = fs.readFileSync('index.html', 'utf8');
+  assert.match(html, /id="lead-agent-filter"/);
+  assert.match(source, /agentFilter === "unassigned" \? !lead\.assignedAgentId : lead\.assignedAgentId === agentFilter/);
+  assert.match(source, /leadAgentFilter\?\.addEventListener\("change", renderLeadsTable\)/);
+});

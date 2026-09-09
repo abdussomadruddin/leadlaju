@@ -189,6 +189,7 @@ const elements = {
   leadsTableBody: document.querySelector("#leads-table-body"),
   leadSearch: document.querySelector("#lead-search"),
   leadFilter: document.querySelector("#lead-filter"),
+  leadAgentFilter: document.querySelector("#lead-agent-filter"),
   leadLogCount: document.querySelector("#lead-log-count"),
   contactModal: document.querySelector("#contact-modal"),
   contactForm: document.querySelector("#contact-form"),
@@ -3009,9 +3010,28 @@ function renderLeadsTable() {
   }
   const search = elements.leadSearch.value.trim().toLowerCase();
   const filter = elements.leadFilter.value;
+  const selectedAgentId = elements.leadAgentFilter?.value || "all";
+  if (elements.leadAgentFilter && isAdmin()) {
+    elements.leadAgentFilter.innerHTML = [
+      '<option value="all">Semua ejen</option>',
+      ...state.agents
+        .filter((agent) => agent.role === "agent")
+        .map((agent) => `<option value="${escapeHtml(agent.id)}">${escapeHtml(agent.name)}</option>`),
+      '<option value="unassigned">Belum / tiada ejen</option>',
+    ].join("");
+    elements.leadAgentFilter.value =
+      [...elements.leadAgentFilter.options].some((option) => option.value === selectedAgentId)
+        ? selectedAgentId
+        : "all";
+  }
+  const agentFilter = elements.leadAgentFilter?.value || "all";
   const rows = state.leads
     .filter((lead) => {
       if (!isAdmin() && lead.assignedAgentId !== state.currentUserId) return false;
+      const matchesAgent =
+        !isAdmin() ||
+        agentFilter === "all" ||
+        (agentFilter === "unassigned" ? !lead.assignedAgentId : lead.assignedAgentId === agentFilter);
       const matchesSearch =
         lead.name.toLowerCase().includes(search) ||
         displayLeadPhone(lead).toLowerCase().includes(search) ||
@@ -3021,7 +3041,7 @@ function renderLeadsTable() {
         formatSheetStatus(getLeadVisualStatus(lead)).toLowerCase().includes(search) ||
         String(lead.notes || "").toLowerCase().includes(search);
       const visualStatus = getLeadVisualStatus(lead);
-      return matchesSearch && (filter === "all" || visualStatus === filter);
+      return matchesAgent && matchesSearch && (filter === "all" || visualStatus === filter);
     })
     .sort((a, b) => (b.receivedAt || 0) - (a.receivedAt || 0));
 
@@ -3973,6 +3993,7 @@ elements.sidebarSettings.addEventListener("click", logout);
 elements.logoutButton.addEventListener("click", logout);
 elements.leadSearch.addEventListener("input", renderLeadsTable);
 elements.leadFilter.addEventListener("change", renderLeadsTable);
+elements.leadAgentFilter?.addEventListener("change", renderLeadsTable);
 elements.leadsTableBody.addEventListener("click", (event) => {
   const edit = event.target.closest("[data-lead-edit]");
   const remove = event.target.closest("[data-lead-delete]");

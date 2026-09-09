@@ -25,8 +25,8 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260909-agent-reference-v46" />
-    <script src="app.js?v=20260909-agent-reference-v46" defer></script>
+    <link rel="stylesheet" href="styles.css?v=20260909-agent-filter-v47" />
+    <script src="app.js?v=20260909-agent-filter-v47" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -475,6 +475,9 @@
                 <option value="need_follow_up">Need Follow Up</option>
                 <option value="potential">Potential</option>
                 <option value="client">Client</option>
+              </select>
+              <select class="admin-only" id="lead-agent-filter" aria-label="Tapis ejen">
+                <option value="all">Semua ejen</option>
               </select>
               <span class="queue-label" id="lead-log-count">0 lead</span>
             </div>
