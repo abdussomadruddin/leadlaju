@@ -2848,7 +2848,7 @@ function renderActiveLead() {
     : state.leads.filter((item) => item.assignedAgentId === state.currentUserId);
   const newLeadCount = visibleLeads.filter(isPendingLead).length;
   elements.queueLabel.textContent = `${newLeadCount} lead menunggu`;
-  elements.navLeadCount.textContent = isAdmin() ? newLeadCount : visibleLeads.length;
+  elements.navLeadCount.textContent = visibleLeads.length;
   elements.notificationCount.textContent = newLeadCount;
   elements.notificationCount.style.display = newLeadCount ? "grid" : "none";
 

@@ -125,3 +125,9 @@ test('admin log lead supports filtering by agent', () => {
   assert.match(source, /agentFilter === "unassigned" \? !lead\.assignedAgentId : lead\.assignedAgentId === agentFilter/);
   assert.match(source, /leadAgentFilter\?\.addEventListener\("change", renderLeadsTable\)/);
 });
+
+test('log lead navigation badge counts all visible records', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  assert.match(source, /navLeadCount\.textContent = visibleLeads\.length/);
+  assert.doesNotMatch(source, /navLeadCount\.textContent = isAdmin\(\) \? newLeadCount/);
+});
