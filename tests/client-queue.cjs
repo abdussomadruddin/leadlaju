@@ -154,3 +154,13 @@ test('agent signup requires and syncs active project choices', () => {
   assert.match(server, /agent\.role !== "admin" && !agent\.eligibleProjectIds\.length/);
   assert.match(server, /Pilihan projek tidak sah atau projek sudah dinyahaktifkan/);
 });
+
+test('lead and agent deletion require two confirmations', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const helperStart = source.indexOf('function confirmPermanentDelete(');
+  const helperEnd = source.indexOf('\nasync function ', helperStart + 1);
+  const helper = source.slice(helperStart, helperEnd);
+  assert.equal((helper.match(/window\.confirm\(/g) || []).length, 2);
+  assert.match(source, /if \(!confirmPermanentDelete\("ejen", agent\.name\)\) return/);
+  assert.match(source, /if \(!confirmPermanentDelete\("lead", lead\.name\)\) return/);
+});

@@ -3569,8 +3569,6 @@ async function toggleProject(projectId) {
 async function rejectAgent(agentId) {
   const agent = getAgent(agentId);
   if (!agent) return;
-  const confirmed = window.confirm(`Reject permohonan ${agent.name}? Akaun ini akan dipadam.`);
-  if (!confirmed) return;
   await removeAgent(agentId);
 }
 
@@ -3603,6 +3601,7 @@ async function toggleAgent(agentId) {
 async function removeAgent(agentId) {
   const agent = getAgent(agentId);
   if (!agent) return;
+  if (!confirmPermanentDelete("ejen", agent.name)) return;
   if (remoteDatabaseMode) {
     const agentsPushed = await deleteAgentFromSheet(agent);
     const { data, error } = await remoteDatabaseClient.functions.invoke("admin-manage-agent", {
@@ -3635,6 +3634,16 @@ async function removeAgent(agentId) {
     agentsPushed ? "success" : "error",
   );
   renderAll();
+}
+
+function confirmPermanentDelete(itemType, itemName) {
+  const firstConfirmed = window.confirm(
+    `Padam ${itemType} ${itemName}? Data ini akan dibuang daripada dashboard dan Google Sheet.`,
+  );
+  if (!firstConfirmed) return false;
+  return window.confirm(
+    `Pengesahan terakhir: anda pasti mahu padam ${itemType} ${itemName} secara kekal? Tindakan ini tidak boleh dibatalkan.`,
+  );
 }
 
 async function forceAgentOffline(agentId) {
@@ -3862,10 +3871,7 @@ async function deleteLeadEverywhere(leadId) {
   const lead = state.leads.find((item) => item.id === leadId);
   if (!lead) return;
 
-  const confirmed = window.confirm(
-    `Padam lead ${lead.name}? Tindakan ini akan buang lead daripada Google Sheet dan dashboard.`,
-  );
-  if (!confirmed) return;
+  if (!confirmPermanentDelete("lead", lead.name)) return;
 
   const sheetDeleted = await deleteLeadFromSheet(lead);
   if (!sheetDeleted) {
