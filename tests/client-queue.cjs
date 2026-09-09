@@ -131,3 +131,11 @@ test('log lead navigation badge counts all visible records', () => {
   assert.match(source, /navLeadCount\.textContent = visibleLeads\.length/);
   assert.doesNotMatch(source, /navLeadCount\.textContent = isAdmin\(\) \? newLeadCount/);
 });
+
+test('lead status and agent filter options show live counts', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  assert.match(source, /Semua status \(\$\{visibleLeads\.length\}\)/);
+  assert.match(source, /\$\{status\.label\} \(\$\{statusCounts\[status\.value\] \|\| 0\}\)/);
+  assert.match(source, /\$\{escapeHtml\(agent\.name\)\} \(\$\{agentCounts\.get\(agent\.id\) \|\| 0\}\)/);
+  assert.match(source, /Belum \/ tiada ejen \(\$\{unassignedCount\}\)/);
+});

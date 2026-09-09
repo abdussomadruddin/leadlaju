@@ -3009,15 +3009,41 @@ function renderLeadsTable() {
     if (lead && canAccessLead(lead)) return;
   }
   const search = elements.leadSearch.value.trim().toLowerCase();
-  const filter = elements.leadFilter.value;
+  const selectedStatus = elements.leadFilter.value || "all";
   const selectedAgentId = elements.leadAgentFilter?.value || "all";
+  const visibleLeads = isAdmin()
+    ? state.leads
+    : state.leads.filter((lead) => lead.assignedAgentId === state.currentUserId);
+  const statusCounts = Object.fromEntries(LEAD_STATUS_OPTIONS.map((status) => [status.value, 0]));
+  const agentCounts = new Map();
+  let unassignedCount = 0;
+  visibleLeads.forEach((lead) => {
+    const visualStatus = getLeadVisualStatus(lead);
+    statusCounts[visualStatus] = (statusCounts[visualStatus] || 0) + 1;
+    if (lead.assignedAgentId) {
+      agentCounts.set(lead.assignedAgentId, (agentCounts.get(lead.assignedAgentId) || 0) + 1);
+    } else {
+      unassignedCount += 1;
+    }
+  });
+  elements.leadFilter.innerHTML = [
+    `<option value="all">Semua status (${visibleLeads.length})</option>`,
+    ...LEAD_STATUS_OPTIONS.map(
+      (status) => `<option value="${status.value}">${status.label} (${statusCounts[status.value] || 0})</option>`,
+    ),
+  ].join("");
+  elements.leadFilter.value = selectedStatus;
+  const filter = elements.leadFilter.value || "all";
   if (elements.leadAgentFilter && isAdmin()) {
     elements.leadAgentFilter.innerHTML = [
-      '<option value="all">Semua ejen</option>',
+      `<option value="all">Semua ejen (${visibleLeads.length})</option>`,
       ...state.agents
         .filter((agent) => agent.role === "agent")
-        .map((agent) => `<option value="${escapeHtml(agent.id)}">${escapeHtml(agent.name)}</option>`),
-      '<option value="unassigned">Belum / tiada ejen</option>',
+        .map(
+          (agent) =>
+            `<option value="${escapeHtml(agent.id)}">${escapeHtml(agent.name)} (${agentCounts.get(agent.id) || 0})</option>`,
+        ),
+      `<option value="unassigned">Belum / tiada ejen (${unassignedCount})</option>`,
     ].join("");
     elements.leadAgentFilter.value =
       [...elements.leadAgentFilter.options].some((option) => option.value === selectedAgentId)
