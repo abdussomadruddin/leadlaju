@@ -1786,6 +1786,7 @@ async function addLead(input, options = {}) {
   if (existingLead) {
     if (!options.updateExisting) return false;
     if (pendingLeadStatusUpdates.has(existingLead.id)) return false;
+    if ((Number(input.status_revision) || 0) < (existingLead.statusRevision || 0)) return false;
     if (options.syncStartedAt && options.syncStartedAt <= (leadStatusWriteTimes.get(existingLead.id) || 0)) return false;
 
     let changed = false;
@@ -1809,6 +1810,8 @@ async function addLead(input, options = {}) {
       changed = true;
     }
     if (applyLeadRuntimeFromSheet(existingLead, sheetRuntime)) changed = true;
+    existingLead.statusRevision = Number(input.status_revision) || 0;
+    existingLead.statusUpdatedAt = input.status_updated_at || null;
 
     if (shouldMigrateLocalNotes && !pendingLeadNoteUpdates.has(existingLead.id)) {
       const migrated = await updateLeadNotesInSheet(existingLead, existingLead.notes);
@@ -1839,6 +1842,8 @@ async function addLead(input, options = {}) {
   const lead = {
     id: crypto.randomUUID?.() || makeId("lead"),
     dedupeKey,
+    statusRevision: Number(input.status_revision) || 0,
+    statusUpdatedAt: input.status_updated_at || null,
     name,
     phone,
     email,
@@ -2130,7 +2135,11 @@ async function waitForLeadStatusInSheet(lead, expectedStatus, timeoutMs = 15000)
           return String(row.phone || row.phone_number || "").trim() === String(lead.phone || "").trim() &&
             String(row.project || row.projek || "").trim().toLowerCase() === String(lead.project || "").trim().toLowerCase();
         });
-        if (sheetLead && normalizeSheetStatus(sheetLead.status) === expected) return true;
+        if (sheetLead && normalizeSheetStatus(sheetLead.status) === expected) {
+          lead.statusRevision = Number(sheetLead.status_revision) || 0;
+          lead.statusUpdatedAt = sheetLead.status_updated_at || null;
+          return true;
+        }
       }
     } catch (error) {
       console.warn("Lead status confirmation retry", error);

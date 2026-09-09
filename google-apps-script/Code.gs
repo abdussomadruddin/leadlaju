@@ -23,6 +23,8 @@ const FIELD_ALIASES = {
   city: ["bandar", "city", "location"],
   project: ["projek", "project", "nama projek", "project name", "project_name", "campaign", "campaign name"],
   status: ["status"],
+  statusRevision: ["status revision", "status_revision"],
+  statusUpdatedAt: ["status updated at", "status_updated_at"],
   source: ["source", "sumber", "platform"],
   notes: ["nota", "notes", "catatan"],
   assignedAgentId: ["assigned agent id", "assigned_agent_id", "agent id", "agent_id", "id ejen"],
@@ -46,6 +48,8 @@ const REQUIRED_HEADERS = [
   { field: "city", label: "Bandar" },
   { field: "project", label: "Projek" },
   { field: "status", label: "Status" },
+  { field: "statusRevision", label: "Status Revision" },
+  { field: "statusUpdatedAt", label: "Status Updated At" },
   { field: "source", label: "Sumber" },
   { field: "notes", label: "Nota" },
   { field: "id", label: "ID" },
@@ -556,7 +560,7 @@ function updateLeadStatusLocked_(input) {
     const rowPhone = phoneIndex >= 0 ? String(row[phoneIndex] || "").trim() : "";
     const rowProject = projectIndex >= 0 ? String(row[projectIndex] || "").trim() : "";
     const idMatches = id && rowId === id;
-    const fallbackMatches = phone && project && rowPhone === phone && rowProject === project;
+    const fallbackMatches = !id && phone && project && rowPhone === phone && rowProject === project;
 
     if (idMatches || fallbackMatches) {
       const currentRevision = Number(getCell_(headers, row, "assignmentRevision")) || 0;
@@ -566,6 +570,9 @@ function updateLeadStatusLocked_(input) {
       }
       const nextRow = row.slice(0, headers.length);
       nextRow[statusIndex] = status;
+      const statusRevision = (Number(getCell_(headers, row, "statusRevision")) || 0) + 1;
+      setRowValue_(headers, nextRow, "statusRevision", String(statusRevision));
+      setRowValue_(headers, nextRow, "statusUpdatedAt", new Date().toISOString());
       if (normalizeLeadStage_(status) === "new") {
         holdLeadRuntimeRow_(sheet, headers, rowNumber, nextRow);
         updated += 1;
@@ -1699,6 +1706,8 @@ function mapRow_(headers, row, rowNumber) {
     source: canonicalLeadSource_(getCell_(headers, row, "source") || DEFAULT_SOURCE),
     notes: getCell_(headers, row, "notes"),
     status: getCell_(headers, row, "status") || "new",
+    status_revision: Number(getCell_(headers, row, "statusRevision")) || 0,
+    status_updated_at: getCell_(headers, row, "statusUpdatedAt"),
     created_at: canonicalLeadTimestamp_(getCell_(headers, row, "createdAt")),
     assigned_agent_id: getCell_(headers, row, "assignedAgentId"),
     assigned_agent_email: getCell_(headers, row, "assignedAgentEmail"),
