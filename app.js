@@ -78,6 +78,10 @@ const defaultState = {
     },
   ],
   leads: [],
+  projects: [
+    { id: "project-armani", name: "Armani Putrajaya", active: true },
+    { id: "project-bbsap", name: "BBSAP Sitiawan", active: true },
+  ],
   activities: [],
   roundRobinIndex: 0,
   integration: {
@@ -194,6 +198,9 @@ const elements = {
   contactFormError: document.querySelector("#contact-form-error"),
   contactDeleteButton: document.querySelector("#contact-delete-button"),
   agentsGrid: document.querySelector("#agents-grid"),
+  projectsList: document.querySelector("#projects-list"),
+  projectForm: document.querySelector("#project-form"),
+  projectName: document.querySelector("#project-name"),
   addAgentButton: document.querySelector("#add-agent-button"),
   agentModal: document.querySelector("#agent-modal"),
   agentForm: document.querySelector("#agent-form"),
@@ -203,6 +210,7 @@ const elements = {
   agentPhone: document.querySelector("#agent-phone"),
   agentEmail: document.querySelector("#agent-email"),
   agentPassword: document.querySelector("#agent-password"),
+  agentProjectCheckboxes: document.querySelector("#agent-project-checkboxes"),
   agentPasswordLabel: document.querySelector("#agent-password-label"),
   agentSubmitButton: document.querySelector("#agent-submit-button"),
   agentPasswordModal: document.querySelector("#agent-password-modal"),
@@ -241,6 +249,28 @@ function normalizeIntegration(input = {}) {
   };
 }
 
+function normalizeProjectIds(value) {
+  const raw = Array.isArray(value) ? value : (() => {
+    try { return JSON.parse(String(value || "[]")); } catch { return String(value || "").split(","); }
+  })();
+  return [...new Set((Array.isArray(raw) ? raw : []).map((id) => String(id || "").trim()).filter(Boolean))];
+}
+
+function sameProjectIds(first, second) {
+  const left = normalizeProjectIds(first).sort();
+  const right = normalizeProjectIds(second).sort();
+  return left.length === right.length && left.every((id, index) => id === right[index]);
+}
+
+function normalizeProjects(rows) {
+  return (Array.isArray(rows) ? rows : []).map((project) => ({
+    id: String(project.id || project.project_id || "").trim(),
+    name: String(project.name || project.project || project.nama || "").trim(),
+    active: project.active !== false && !["inactive", "false", "0", "off"].includes(String(project.status || "").toLowerCase()),
+    createdAt: project.created_at || project.createdAt || null,
+  })).filter((project) => project.id && project.name);
+}
+
 function getSheetEndpoint() {
   return (
     elements.sheetEndpoint?.value?.trim() ||
@@ -265,7 +295,9 @@ function loadState() {
     merged.agents = merged.agents.map((agent) => ({
       ...agent,
       password: agent.password || (agent.role === "admin" ? "Admin123!" : "Agent123!"),
+      eligibleProjectIds: normalizeProjectIds(agent.eligibleProjectIds || agent.eligible_project_ids),
     }));
+    merged.projects = normalizeProjects(saved.projects).length ? normalizeProjects(saved.projects) : structuredClone(defaultState.projects);
     merged.leads = merged.leads.map((lead) => ({
       ...lead,
       email: lead.email || "",
@@ -316,6 +348,7 @@ function mapProfile(row) {
     leadsHandled: row.leads_handled || 0,
     createdAt: row.created_at ? new Date(row.created_at).getTime() : null,
     cooldownUntil: row.cooldown_until ? new Date(row.cooldown_until).getTime() : null,
+    eligibleProjectIds: normalizeProjectIds(row.eligible_project_ids),
   };
 }
 
@@ -1615,6 +1648,7 @@ function normalizeSheetAgent(input) {
       : null,
     online: Boolean(input.online),
     notificationEnabled: Boolean(input.notification_enabled),
+    eligibleProjectIds: normalizeProjectIds(input.eligible_project_ids || input.eligibleProjectIds),
   };
 }
 
@@ -2017,6 +2051,7 @@ function agentSheetPayload(agent) {
     password: agent.password || "",
     created_at: agent.createdAt ? new Date(agent.createdAt).toISOString() : new Date().toISOString(),
     cooldown_until: agent.cooldownUntil ? new Date(agent.cooldownUntil).toISOString() : "",
+    eligible_project_ids: normalizeProjectIds(agent.eligibleProjectIds),
   };
 }
 
@@ -2144,12 +2179,15 @@ async function syncAgentsFromSheet(sheetAgentRows) {
         cooldownUntil: sheetAgent.cooldownUntil,
         online: sheetAgent.online,
         notificationEnabled: sheetAgent.notificationEnabled,
+        eligibleProjectIds: sheetAgent.eligibleProjectIds,
       };
       if (sheetAgent.password.length >= 8) {
         updates.password = sheetAgent.password;
       }
       const needsPasswordBackfill = !sheetAgent.password && Boolean(existingAgent.password);
-      const changed = Object.entries(updates).some(([key, value]) => existingAgent[key] !== value);
+      const changed = Object.entries(updates).some(([key, value]) =>
+        key === "eligibleProjectIds" ? !sameProjectIds(existingAgent[key], value) : existingAgent[key] !== value,
+      );
       if (changed) {
         Object.assign(existingAgent, updates);
         await persistProfile(existingAgent);
@@ -2176,6 +2214,7 @@ async function syncAgentsFromSheet(sheetAgentRows) {
       cooldownUntil: sheetAgent.cooldownUntil,
       online: sheetAgent.online,
       notificationEnabled: sheetAgent.notificationEnabled,
+      eligibleProjectIds: sheetAgent.eligibleProjectIds,
     });
     result.added += 1;
     result.backfilled += sheetAgent.id && sheetAgent.password ? 0 : 1;
@@ -2985,6 +3024,9 @@ function renderAgents() {
       (agent) => {
         const isPendingAgent = agent.role === "agent" && !agent.active;
         const roleLabel = agent.role === "admin" ? "Administrator" : isPendingAgent ? "Menunggu approval" : "Property Agent";
+        const projectNames = normalizeProjectIds(agent.eligibleProjectIds)
+          .map((projectId) => state.projects.find((project) => project.id === projectId)?.name)
+          .filter(Boolean);
         const actionButtons = isPendingAgent
           ? `
             <button class="edit-agent" type="button" data-agent-edit="${agent.id}">Edit details</button>
@@ -3024,6 +3066,7 @@ function renderAgents() {
             <span>Telefon <b>${escapeHtml(agent.phone)}</b></span>
             <span>Emel <b>${escapeHtml(agent.email)}</b></span>
             <span>Lead dikendalikan <b>${agent.leadsHandled || 0}</b></span>
+            <span>Projek <b>${escapeHtml(projectNames.join(", ") || "Belum dipilih")}</b></span>
           </div>
           <div class="agent-card-actions">
             ${actionButtons}
@@ -3032,6 +3075,22 @@ function renderAgents() {
       },
     )
     .join("");
+}
+
+function renderProjects() {
+  if (!elements.projectsList) return;
+  const projects = state.projects || [];
+  elements.projectsList.innerHTML = projects.length
+    ? projects.map((project) => `
+      <article class="project-row">
+        <span>
+          <strong>${escapeHtml(project.name)}</strong>
+          <small>${project.active ? "Aktif untuk agihan" : "Tidak menerima lead baharu"}</small>
+        </span>
+        <button class="switch ${project.active ? "active" : ""}" type="button"
+          data-project-toggle="${project.id}" aria-label="${project.active ? "Nyahaktifkan" : "Aktifkan"} ${escapeHtml(project.name)}"></button>
+      </article>`).join("")
+    : '<p class="empty-state">Belum ada projek. Tambah projek sebelum meluluskan ejen.</p>';
 }
 
 function escapeHtml(value) {
@@ -3058,7 +3117,7 @@ function renderUser() {
   document.querySelectorAll(".admin-only").forEach((item) => {
     item.style.display = isAdmin() ? "flex" : "none";
   });
-  if (!isAdmin() && (activeView === "agents" || activeView === "integration")) {
+  if (!isAdmin() && (activeView === "agents" || activeView === "projects" || activeView === "integration")) {
     switchView("dashboard");
   }
 }
@@ -3109,17 +3168,19 @@ function renderAll() {
   renderTeam();
   renderLeadsTable();
   renderAgents();
+  renderProjects();
   renderIntegration();
 }
 
 const viewTitles = {
   leads: "Log Lead",
   agents: "Pengurusan Ejen",
+  projects: "Projek",
   integration: "Google Sheets Sync",
 };
 
 function switchView(viewName) {
-  if ((viewName === "agents" || viewName === "integration") && !isAdmin()) return;
+  if ((viewName === "agents" || viewName === "projects" || viewName === "integration") && !isAdmin()) return;
   activeView = viewName;
   document.querySelectorAll(".view").forEach((view) => view.classList.remove("active"));
   document.querySelector(`#${viewName}-view`)?.classList.add("active");
@@ -3149,6 +3210,15 @@ function openAgentModal(agentId = null) {
   elements.agentPassword.required = !agent;
   elements.agentPassword.placeholder = agent ? "Biarkan kosong jika tidak mahu tukar" : "Minimum 8 aksara";
   elements.agentSubmitButton.textContent = agent ? "Simpan perubahan" : "Daftar ejen";
+  const selectedProjectIds = new Set(normalizeProjectIds(agent?.eligibleProjectIds));
+  const activeProjects = state.projects.filter((project) => project.active);
+  elements.agentProjectCheckboxes.innerHTML = activeProjects.length
+    ? activeProjects.map((project) => `
+      <label class="project-checkbox">
+        <input type="checkbox" name="agent-project" value="${project.id}" ${selectedProjectIds.has(project.id) ? "checked" : ""} />
+        <span>${escapeHtml(project.name)}</span>
+      </label>`).join("")
+    : '<p class="field-error">Tambah projek aktif dahulu.</p>';
   if (agent) {
     elements.agentName.value = agent.name;
     elements.agentPhone.value = agent.phone || "";
@@ -3170,9 +3240,15 @@ async function addAgent(event) {
   const phone = elements.agentPhone.value.trim();
   const email = elements.agentEmail.value.trim();
   const password = elements.agentPassword.value;
+  const eligibleProjectIds = [...elements.agentProjectCheckboxes.querySelectorAll('input[name="agent-project"]:checked')]
+    .map((input) => input.value);
   const editingAgent = editingAgentId ? getAgent(editingAgentId) : null;
   if (!name || !phone || !email) return;
   if (!editingAgent && password.length < 8) return;
+  if (!eligibleProjectIds.length) {
+    showToast("Pilih projek", "Pilih sekurang-kurangnya satu projek untuk ejen ini.", "error");
+    return;
+  }
   if (editingAgent && password && password.length < 8) {
     showToast("Password terlalu pendek", "Kata laluan mesti sekurang-kurangnya 8 aksara.", "error");
     return;
@@ -3191,6 +3267,7 @@ async function addAgent(event) {
     editingAgent.phone = phone;
     editingAgent.email = email.toLowerCase();
     if (password) editingAgent.password = password;
+    editingAgent.eligibleProjectIds = eligibleProjectIds;
   } else {
     state.agents.push({
       id: makeId("agent"),
@@ -3202,6 +3279,7 @@ async function addAgent(event) {
       active: true,
       leadsHandled: 0,
       createdAt: Date.now(),
+      eligibleProjectIds,
     });
   }
   saveState();
@@ -3223,6 +3301,11 @@ async function addAgent(event) {
 async function approveAgent(agentId) {
   const agent = getAgent(agentId);
   if (!agent || agent.active) return;
+  if (!normalizeProjectIds(agent.eligibleProjectIds).length) {
+    showToast("Pilih projek dahulu", `Edit ${agent.name} dan tick sekurang-kurangnya satu projek sebelum approve.`, "error");
+    openAgentModal(agentId);
+    return;
+  }
   agent.active = true;
   saveState();
   try {
@@ -3255,6 +3338,51 @@ async function approveAgent(agentId) {
     agentsPushed ? "success" : "error",
   );
   renderAll();
+}
+
+async function saveProject(project) {
+  return postGoogleSheetAction(
+    { action: project.id ? "update_project" : "add_project", project },
+    "Project sheet sync failed",
+    { waitForSend: true },
+  );
+}
+
+async function addProject(event) {
+  event.preventDefault();
+  if (!isAdmin()) return;
+  const name = elements.projectName.value.trim().replace(/\s+/g, " ");
+  if (!name) return;
+  if (state.projects.some((project) => project.name.toLowerCase() === name.toLowerCase())) {
+    showToast("Projek sudah ada", "Gunakan nama projek lain.", "error");
+    return;
+  }
+  const project = { id: makeId("project"), name, active: true, createdAt: Date.now() };
+  if (!await saveProject(project)) {
+    showToast("Projek tidak disimpan", "Semak sambungan Google Sheet.", "error");
+    return;
+  }
+  state.projects.push(project);
+  elements.projectForm.reset();
+  saveState();
+  renderAll();
+  showToast("Projek ditambah", `${name} kini boleh dipilih untuk ejen.`);
+}
+
+async function toggleProject(projectId) {
+  if (!isAdmin()) return;
+  const project = state.projects.find((item) => item.id === projectId);
+  if (!project) return;
+  const previous = project.active;
+  project.active = !project.active;
+  if (!await saveProject(project)) {
+    project.active = previous;
+    showToast("Status projek gagal", "Semak sambungan Google Sheet.", "error");
+    return;
+  }
+  saveState();
+  renderAll();
+  showToast(project.active ? "Projek diaktifkan" : "Projek dinyahaktifkan", project.active ? `${project.name} menerima lead baharu.` : `${project.name} tidak menerima assignment baharu.`);
 }
 
 async function rejectAgent(agentId) {
@@ -3583,6 +3711,10 @@ async function syncGoogleSheet(options = {}) {
     if (!Array.isArray(rows)) throw new Error("Format JSON tidak sah");
 
     const agentSync = Array.isArray(payload) ? { added: 0, updated: 0, removed: 0 } : await syncAgentsFromSheet(payload.agents);
+    if (!Array.isArray(payload)) {
+      const projects = normalizeProjects(payload.projects);
+      if (projects.length) state.projects = projects;
+    }
     if (options.agentsOnly) {
       state.integration.endpoint = endpoint;
       state.integration.interval = DEFAULT_SYNC_INTERVAL_SECONDS;
@@ -3764,6 +3896,7 @@ elements.manualLeadPhone.addEventListener("input", () => {
 });
 elements.addAgentButton.addEventListener("click", () => openAgentModal());
 elements.agentForm.addEventListener("submit", addAgent);
+elements.projectForm?.addEventListener("submit", addProject);
 elements.agentPasswordForm.addEventListener("submit", updateAgentPassword);
 elements.contactForm.addEventListener("submit", updateContact);
 elements.integrationForm.addEventListener("submit", saveIntegration);
@@ -3832,6 +3965,11 @@ elements.agentsGrid.addEventListener("click", (event) => {
   if (password) openAgentPasswordModal(password.dataset.agentPassword);
   if (forceOffline) forceAgentOffline(forceOffline.dataset.agentForceOffline);
   if (edit) openAgentModal(edit.dataset.agentEdit);
+});
+
+elements.projectsList?.addEventListener("click", (event) => {
+  const toggle = event.target.closest("[data-project-toggle]");
+  if (toggle) toggleProject(toggle.dataset.projectToggle);
 });
 
 elements.contactDeleteButton.addEventListener("click", () => {

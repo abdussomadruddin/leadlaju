@@ -1,6 +1,7 @@
 const SPREADSHEET_ID = "1ySHeB12lL2y4AxqpSx8dDniyujSaz2-9hoRzPlCv6TM";
 const SHEET_NAME = "Sheet1";
 const AGENTS_SHEET_NAME = "Agents";
+const PROJECTS_SHEET_NAME = "Projects";
 const REMINDERS_SHEET_NAME = "Reminders";
 const PUSH_SUBSCRIPTIONS_SHEET_NAME = "PushSubscriptions";
 const DEFAULT_SOURCE = "Manual Lead";
@@ -71,6 +72,7 @@ const AGENT_FIELD_ALIASES = {
   notificationEnabled: ["notification enabled", "notification_enabled", "loceng aktif"],
   lastSeenAt: ["last seen at", "last_seen_at", "terakhir online"],
   presenceNotBefore: ["presence not before", "presence_not_before", "sesi online selepas"],
+  eligibleProjectIds: ["eligible projects", "eligible_project_ids", "projek layak", "project ids"],
 };
 
 const AGENT_HEADERS = [
@@ -87,6 +89,21 @@ const AGENT_HEADERS = [
   { field: "notificationEnabled", label: "Notification Enabled" },
   { field: "lastSeenAt", label: "Last Seen At" },
   { field: "presenceNotBefore", label: "Presence Not Before" },
+  { field: "eligibleProjectIds", label: "Eligible Projects" },
+];
+
+const PROJECT_FIELD_ALIASES = {
+  id: ["id", "project id", "project_id"],
+  name: ["nama projek", "project", "project name", "project_name", "nama"],
+  active: ["status", "active", "aktif"],
+  createdAt: ["tarikh dibuat", "created at", "created_at"],
+};
+
+const PROJECT_HEADERS = [
+  { field: "id", label: "ID" },
+  { field: "name", label: "Nama Projek" },
+  { field: "active", label: "Status" },
+  { field: "createdAt", label: "Tarikh Dibuat" },
 ];
 
 const REMINDER_FIELD_ALIASES = {
@@ -138,16 +155,20 @@ function doGet() {
     const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
     const sheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
     const agentsSheet = getOrCreateSheet_(spreadsheet, AGENTS_SHEET_NAME);
+    const projectsSheet = getOrCreateSheet_(spreadsheet, PROJECTS_SHEET_NAME);
     const remindersSheet = getOrCreateSheet_(spreadsheet, REMINDERS_SHEET_NAME);
     const pushSheet = getOrCreateSheet_(spreadsheet, PUSH_SUBSCRIPTIONS_SHEET_NAME);
     const headers = ensureRequiredHeaders_(sheet);
     const agentHeaders = ensureRequiredHeadersBySpec_(agentsSheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
+    const projectHeaders = ensureRequiredHeadersBySpec_(projectsSheet, PROJECT_HEADERS, PROJECT_FIELD_ALIASES);
     const reminderHeaders = ensureRequiredHeadersBySpec_(remindersSheet, REMINDER_HEADERS, REMINDER_FIELD_ALIASES);
     ensureRequiredHeadersBySpec_(pushSheet, PUSH_HEADERS, PUSH_FIELD_ALIASES);
     ensureLeadIds_(sheet, headers);
     ensureLeadTimestamps_(sheet, headers);
     ensureLeadSources_(sheet, headers);
     const leads = readLeads_(sheet);
+    const projects = ensureProjectsFromLeads_(projectsSheet, projectHeaders, leads);
+    ensureAgentProjectEligibility_(agentsSheet, agentHeaders, projects);
     const agents = readAgents_(agentsSheet, agentHeaders);
     const followUpReminder = readLatestReminder_(remindersSheet, reminderHeaders);
     return jsonResponse({
@@ -156,6 +177,7 @@ function doGet() {
       sheet: sheet.getName(),
       leads,
       agents,
+      projects,
       follow_up_reminder: followUpReminder,
       push_subscription_count: Math.max(pushSheet.getLastRow() - 1, 0),
     });
@@ -186,6 +208,16 @@ function doPost(event) {
     }
     if (payload.action === "add_agent") {
       const result = upsertAgent_(payload.agent || payload);
+      if (result.ok) rebalanceLeadQueue_();
+      return jsonResponse(result);
+    }
+    if (payload.action === "add_project") {
+      const result = upsertProject_(payload.project || payload);
+      if (result.ok) rebalanceLeadQueue_();
+      return jsonResponse(result);
+    }
+    if (payload.action === "update_project") {
+      const result = upsertProject_(payload.project || payload);
       if (result.ok) rebalanceLeadQueue_();
       return jsonResponse(result);
     }
@@ -640,6 +672,7 @@ function replaceAgents_(agentsInput) {
       createdAt: String(input.created_at || input.createdAt || new Date().toISOString()).trim(),
       password: String(input.password || input.kata_laluan || input.temporary_password || "").trim(),
       cooldownUntil: String(input.cooldown_until || input.cooldownUntil || "").trim(),
+      eligibleProjectIds: normalizeProjectIds_(input.eligible_project_ids || input.eligibleProjectIds),
     }))
     .filter((agent) => agent.id && agent.name && agent.email)
     .map((agent) => buildAgentRow_(headers, agent));
@@ -666,10 +699,14 @@ function upsertAgent_(input) {
     createdAt: String(input.created_at || input.createdAt || new Date().toISOString()).trim(),
     password: String(input.password || input.kata_laluan || input.temporary_password || "").trim(),
     cooldownUntil: String(input.cooldown_until || input.cooldownUntil || "").trim(),
+    eligibleProjectIds: normalizeProjectIds_(input.eligible_project_ids || input.eligibleProjectIds),
   };
 
   if (!agent.name || !agent.email) {
     return { ok: false, error: "Nama dan emel ejen diperlukan." };
+  }
+  if (agent.role !== "admin" && agent.active === "active" && !agent.eligibleProjectIds.length) {
+    return { ok: false, error: "Pilih sekurang-kurangnya satu projek untuk ejen." };
   }
 
   const values = sheet.getDataRange().getDisplayValues();
@@ -738,6 +775,9 @@ function buildAgentRow_(headers, agent, existingRow) {
     setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "password", agent.password);
   }
   setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "cooldownUntil", agent.cooldownUntil || "");
+  if (agent.eligibleProjectIds !== undefined) {
+    setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "eligibleProjectIds", JSON.stringify(agent.eligibleProjectIds));
+  }
   if (agent.notificationEnabled !== undefined) setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "notificationEnabled", agent.notificationEnabled ? "yes" : "no");
   if (agent.lastSeenAt !== undefined) setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "lastSeenAt", agent.lastSeenAt || "");
   if (agent.presenceNotBefore !== undefined) setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "presenceNotBefore", agent.presenceNotBefore || "");
@@ -805,6 +845,7 @@ function readAgents_(sheet, headers) {
       created_at: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "createdAt"),
       password: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "password"),
       cooldown_until: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "cooldownUntil"),
+      eligible_project_ids: normalizeProjectIds_(getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "eligibleProjectIds")),
       notification_enabled: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "notificationEnabled") === "yes",
       last_seen_at: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "lastSeenAt"),
       online: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "notificationEnabled") === "yes" &&
@@ -812,6 +853,97 @@ function readAgents_(sheet, headers) {
         Date.now() - parseLeadTimestamp_(getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "lastSeenAt")).getTime() < AGENT_PRESENCE_TIMEOUT_MINUTES * 60 * 1000,
     }))
     .filter((agent) => agent.name && agent.email);
+}
+
+function normalizeProjectIds_(value) {
+  const raw = Array.isArray(value) ? value : (() => {
+    try { return JSON.parse(String(value || "[]")); } catch (error) { return String(value || "").split(","); }
+  })();
+  return Array.from(new Set((Array.isArray(raw) ? raw : []).map((id) => String(id || "").trim()).filter(Boolean)));
+}
+
+function normalizeProjectName_(value) {
+  return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function readProjects_(sheet, headers) {
+  const values = sheet.getDataRange().getDisplayValues();
+  if (values.length < 2) return [];
+  return values.slice(1).map((row) => ({
+    id: getCellBySpec_(headers, row, PROJECT_FIELD_ALIASES, "id"),
+    name: getCellBySpec_(headers, row, PROJECT_FIELD_ALIASES, "name"),
+    active: normalizeAgentActive_(getCellBySpec_(headers, row, PROJECT_FIELD_ALIASES, "active")) === "active",
+    created_at: getCellBySpec_(headers, row, PROJECT_FIELD_ALIASES, "createdAt"),
+  })).filter((project) => project.id && project.name);
+}
+
+function ensureProjectsFromLeads_(sheet, headers, leads) {
+  const existing = readProjects_(sheet, headers);
+  // Seed only the first time. New project names require an explicit admin action.
+  if (existing.length) return existing;
+  const knownNames = new Set(existing.map((project) => normalizeProjectName_(project.name)));
+  const additions = [];
+  (leads || []).forEach((lead) => {
+    const name = String(lead.project || "").trim().replace(/\s+/g, " ");
+    const key = normalizeProjectName_(name);
+    if (!name || knownNames.has(key)) return;
+    knownNames.add(key);
+    additions.push({ id: `project-${Utilities.getUuid()}`, name, active: true, created_at: canonicalLeadTimestamp_(new Date()) });
+  });
+  if (additions.length) {
+    const rows = additions.map((project) => buildProjectRow_(headers, project));
+    sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, headers.length).setValues(rows);
+  }
+  return existing.concat(additions);
+}
+
+function buildProjectRow_(headers, project, existingRow) {
+  const row = existingRow ? existingRow.slice(0, headers.length) : new Array(headers.length).fill("");
+  setRowValueBySpec_(headers, row, PROJECT_FIELD_ALIASES, "id", project.id);
+  setRowValueBySpec_(headers, row, PROJECT_FIELD_ALIASES, "name", project.name);
+  setRowValueBySpec_(headers, row, PROJECT_FIELD_ALIASES, "active", project.active ? "active" : "inactive");
+  setRowValueBySpec_(headers, row, PROJECT_FIELD_ALIASES, "createdAt", project.created_at || canonicalLeadTimestamp_(new Date()));
+  return row;
+}
+
+function upsertProject_(input) {
+  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = getOrCreateSheet_(spreadsheet, PROJECTS_SHEET_NAME);
+  const headers = ensureRequiredHeadersBySpec_(sheet, PROJECT_HEADERS, PROJECT_FIELD_ALIASES);
+  const name = String(input.name || input.project || input.nama || "").trim().replace(/\s+/g, " ");
+  const id = String(input.id || input.project_id || "").trim() || `project-${Utilities.getUuid()}`;
+  if (!name) return { ok: false, error: "Nama projek diperlukan." };
+  const values = sheet.getDataRange().getDisplayValues();
+  let rowNumber = 0;
+  for (let index = 1; index < values.length; index += 1) {
+    const rowId = getCellBySpec_(headers, values[index], PROJECT_FIELD_ALIASES, "id");
+    const rowName = getCellBySpec_(headers, values[index], PROJECT_FIELD_ALIASES, "name");
+    if (rowId === id || (!input.id && normalizeProjectName_(rowName) === normalizeProjectName_(name))) {
+      rowNumber = index + 1;
+      break;
+    }
+  }
+  const project = { id, name, active: normalizeAgentActive_(input.active ?? input.status ?? "active") === "active", created_at: canonicalLeadTimestamp_(input.created_at || new Date()) };
+  const row = buildProjectRow_(headers, project, rowNumber ? values[rowNumber - 1] : null);
+  if (rowNumber) sheet.getRange(rowNumber, 1, 1, row.length).setValues([row]);
+  else sheet.appendRow(row);
+  return { ok: true, project };
+}
+
+function ensureAgentProjectEligibility_(sheet, headers, projects) {
+  const projectIds = projects.filter((project) => project.active).map((project) => project.id);
+  if (!projectIds.length || sheet.getLastRow() < 2) return;
+  const values = sheet.getDataRange().getDisplayValues();
+  values.slice(1).forEach((value, index) => {
+    const role = getCellBySpec_(headers, value, AGENT_FIELD_ALIASES, "role");
+    const active = normalizeAgentActive_(getCellBySpec_(headers, value, AGENT_FIELD_ALIASES, "active"));
+    if (roleIsAdmin_(role) || active !== "active") return;
+    const eligible = normalizeProjectIds_(getCellBySpec_(headers, value, AGENT_FIELD_ALIASES, "eligibleProjectIds"));
+    if (eligible.length) return;
+    const row = value.slice(0, headers.length);
+    setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "eligibleProjectIds", JSON.stringify(projectIds));
+    sheet.getRange(index + 2, 1, 1, row.length).setValues([row]);
+  });
 }
 
 function readLatestReminder_(sheet, headers) {
@@ -974,6 +1106,20 @@ function getActiveAgentsForPush_(spreadsheet) {
   );
 }
 
+function activeProjectForLead_(projects, lead) {
+  const projectName = normalizeProjectName_(lead.project);
+  return (projects || []).find((project) => project.active && normalizeProjectName_(project.name) === projectName) || null;
+}
+
+function eligibleAgentsForLead_(agents, projects, lead) {
+  const project = activeProjectForLead_(projects, lead);
+  if (!project) return [];
+  return agents.filter((agent) => {
+    if (!Array.isArray(agent.eligible_project_ids)) return true;
+    return agent.eligible_project_ids.includes(project.id);
+  });
+}
+
 function findLeadAgent_(agents, lead) {
   const id = String(lead.assigned_agent_id || "").trim();
   const email = String(lead.assigned_agent_email || "").trim().toLowerCase();
@@ -1121,13 +1267,20 @@ function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
     const values = sheet.getDataRange().getDisplayValues();
     if (values.length < 2) return { ok: true, sent: 0 };
 
+    const projectsSheet = getOrCreateSheet_(spreadsheet, PROJECTS_SHEET_NAME);
+    const projectHeaders = ensureRequiredHeadersBySpec_(projectsSheet, PROJECT_HEADERS, PROJECT_FIELD_ALIASES);
+    const projects = ensureProjectsFromLeads_(projectsSheet, projectHeaders, readLeads_(sheet));
+    const queueAgentsSheet = getOrCreateSheet_(spreadsheet, AGENTS_SHEET_NAME);
+    const queueAgentHeaders = ensureRequiredHeadersBySpec_(queueAgentsSheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
+    ensureAgentProjectEligibility_(queueAgentsSheet, queueAgentHeaders, projects);
     const agents = getActiveAgentsForPush_(spreadsheet);
 
     const subscriptions = readPushSubscriptions_(spreadsheet, { agentOnly: true });
 
     const notifiedKeys = getLeadPushKeys_();
     const properties = PropertiesService.getScriptProperties();
-    let roundRobinIndex = Number(properties.getProperty("leadlaju_push_round_robin_index") || 0);
+    let roundRobinIndexes;
+    try { roundRobinIndexes = JSON.parse(properties.getProperty("leadlaju_project_round_robin_indexes") || "{}"); } catch (error) { roundRobinIndexes = {}; }
     let queueCycle = Number(properties.getProperty("leadlaju_queue_cycle") || 0);
     let sent = 0;
     let changedKeys = false;
@@ -1161,6 +1314,7 @@ function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
       const { rowNumber, row, lead } = candidate;
       if (!lead.name || !lead.phone) continue;
 
+      const eligibleAgents = eligibleAgentsForLead_(agents, projects, lead);
       let agent = lead.queue_state !== "queued" && findLeadAgent_(agents, lead);
       if (agent && occupied.get(agent.id) !== rowNumber - 1) agent = null;
       let runtime = {
@@ -1171,9 +1325,11 @@ function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
         expires_at: lead.expires_at,
       };
       if (!agent) {
-        const next = nextAvailableAgentForLead_(lead, agents, occupied, roundRobinIndex, queueCycle);
+        const project = activeProjectForLead_(projects, lead);
+        const roundRobinIndex = Number(roundRobinIndexes[project?.id] || 0);
+        const next = nextAvailableAgentForLead_(lead, eligibleAgents, occupied, roundRobinIndex, queueCycle);
         agent = next?.agent || null;
-        if (next) roundRobinIndex = (next.index + 1) % agents.length;
+        if (next && project) roundRobinIndexes[project.id] = (next.index + 1) % eligibleAgents.length;
         if (!agent) {
           holdLeadRuntimeRow_(sheet, headers, rowNumber, row);
           continue;
@@ -1204,7 +1360,7 @@ function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
       }
     }
 
-    properties.setProperty("leadlaju_push_round_robin_index", String(roundRobinIndex));
+    properties.setProperty("leadlaju_project_round_robin_indexes", JSON.stringify(roundRobinIndexes));
     properties.setProperty("leadlaju_queue_cycle", String(queueCycle));
     if (changedKeys) saveLeadPushKeys_(notifiedKeys);
     return { ok: true, sent };

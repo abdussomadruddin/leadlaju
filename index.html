@@ -25,8 +25,8 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260626-web-push-v22" />
-    <script src="app.js?v=20260908-force-offline-v38" defer></script>
+    <link rel="stylesheet" href="styles.css?v=20260909-project-routing-v39" />
+    <script src="app.js?v=20260909-project-routing-v39" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -233,6 +233,13 @@
               <path d="M19 8v6M22 11h-6" />
             </svg>
             Pengurusan Ejen
+          </button>
+          <button class="nav-item admin-only" data-view="projects" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 7h16M7 3v4m10-4v4M5 11h14v10H5z" />
+              <path d="M8 15h3m2 0h3" />
+            </svg>
+            Projek
           </button>
           <button class="nav-item admin-only" data-view="integration" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -502,6 +509,21 @@
           <div class="agents-grid" id="agents-grid"></div>
         </section>
 
+        <section class="view admin-only-view" id="projects-view">
+          <div class="content-heading">
+            <div>
+              <span class="section-kicker">Admin sahaja</span>
+              <h2>Projek</h2>
+              <p>Daftar projek yang dibuka untuk agihan lead kepada ejen.</p>
+            </div>
+            <form class="project-create-form" id="project-form">
+              <input id="project-name" type="text" placeholder="Nama projek" required />
+              <button class="primary-button compact" type="submit">+ Tambah projek</button>
+            </form>
+          </div>
+          <div class="projects-list" id="projects-list"></div>
+        </section>
+
         <section class="view admin-only-view" id="integration-view">
           <div class="content-heading">
             <div>
@@ -630,6 +652,11 @@
           <input id="agent-phone" type="tel" placeholder="+60 12-345 6789" required />
           <label for="agent-email">Emel</label>
           <input id="agent-email" type="email" placeholder="amir@agency.com" required />
+          <fieldset class="agent-projects-fieldset">
+            <legend>Projek yang boleh diterima</legend>
+            <p>Pilih sekurang-kurangnya satu projek sebelum ejen diaktifkan.</p>
+            <div class="project-checkbox-list" id="agent-project-checkboxes"></div>
+          </fieldset>
           <label for="agent-password" id="agent-password-label">Kata laluan sementara</label>
           <input
             id="agent-password"
