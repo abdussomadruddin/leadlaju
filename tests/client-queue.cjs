@@ -168,9 +168,18 @@ test('lead and agent deletion require two confirmations', () => {
 test('only admins can see or trigger lead deletion', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const html = fs.readFileSync('index.html', 'utf8');
-  assert.match(html, /class="danger-button full admin-only" id="contact-delete-button"[^>]*hidden disabled/);
+  assert.doesNotMatch(html, /id="contact-delete-button"/);
   assert.match(source, /const deleteButton = isAdmin\(\)/);
-  assert.match(source, /elements\.contactDeleteButton\.disabled = !adminCanDelete/);
   assert.match(source, /if \(remove && isAdmin\(\)\) deleteLeadEverywhere/);
   assert.match(source, /if \(!isAdmin\(\)\) \{\s*showToast\("Admin sahaja"/);
+});
+
+test('edit lead modal updates status and waits for sheet confirmation', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const html = fs.readFileSync('index.html', 'utf8');
+  assert.match(html, /id="contact-status"/);
+  assert.match(source, /elements\.contactStatus\.value = getLeadVisualStatus\(lead\)/);
+  assert.match(source, /await updateLeadStatusFromLog\(lead\.id, nextStatus, elements\.contactStatus\)/);
+  assert.match(source, /return waitForLeadStatusInSheet\(lead, sheetStatus\)/);
+  assert.match(source, /while \(Date\.now\(\) < deadline\)/);
 });

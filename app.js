@@ -201,7 +201,7 @@ const elements = {
   contactProject: document.querySelector("#contact-project"),
   contactNotes: document.querySelector("#contact-notes"),
   contactFormError: document.querySelector("#contact-form-error"),
-  contactDeleteButton: document.querySelector("#contact-delete-button"),
+  contactStatus: document.querySelector("#contact-status"),
   agentsGrid: document.querySelector("#agents-grid"),
   projectsList: document.querySelector("#projects-list"),
   projectForm: document.querySelector("#project-form"),
@@ -2086,7 +2086,7 @@ async function updateLeadStatusInSheet(lead, status) {
   const sheetStatus = formatSheetStatus(normalizeSheetStatus(status));
   const currentUser = getCurrentUser();
   const actingAgent = currentUser?.role === "agent" ? currentUser : null;
-  return postGoogleSheetAction(
+  const sent = await postGoogleSheetAction(
     {
       action: "update_lead_status",
       lead: {
@@ -2104,6 +2104,37 @@ async function updateLeadStatusInSheet(lead, status) {
     "Lead sheet status update failed",
     { waitForSend: true },
   );
+  if (!sent) return false;
+  return waitForLeadStatusInSheet(lead, sheetStatus);
+}
+
+async function waitForLeadStatusInSheet(lead, expectedStatus, timeoutMs = 15000) {
+  const endpoint = getSheetEndpoint();
+  const expected = normalizeSheetStatus(expectedStatus);
+  const targetId = String(lead.dedupeKey || lead.id || "").trim();
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const url = new URL(endpoint);
+      url.searchParams.set("_", Date.now().toString());
+      const response = await fetch(url, { cache: "no-store" });
+      if (response.ok) {
+        const payload = await response.json();
+        const rows = Array.isArray(payload) ? payload : payload.leads || payload.data || [];
+        const sheetLead = rows.find((row) => {
+          const rowId = String(row.id || row.lead_id || "").trim();
+          if (targetId && rowId === targetId) return true;
+          return String(row.phone || row.phone_number || "").trim() === String(lead.phone || "").trim() &&
+            String(row.project || row.projek || "").trim().toLowerCase() === String(lead.project || "").trim().toLowerCase();
+        });
+        if (sheetLead && normalizeSheetStatus(sheetLead.status) === expected) return true;
+      }
+    } catch (error) {
+      console.warn("Lead status confirmation retry", error);
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 600));
+  }
+  return false;
 }
 
 async function updateLeadNotesInSheet(lead, notes) {
@@ -3718,16 +3749,9 @@ function openContactModal(leadId) {
   elements.contactPhone.value = lead.phone;
   elements.contactEmail.value = lead.email || "";
   elements.contactProject.value = lead.project || "";
+  elements.contactStatus.value = getLeadVisualStatus(lead);
   elements.contactNotes.value = lead.notes || "";
   elements.contactFormError.textContent = "";
-  const adminCanDelete = isAdmin();
-  elements.contactDeleteButton.hidden = !adminCanDelete;
-  elements.contactDeleteButton.disabled = !adminCanDelete;
-  if (adminCanDelete) {
-    elements.contactDeleteButton.dataset.contactDelete = lead.id;
-  } else {
-    delete elements.contactDeleteButton.dataset.contactDelete;
-  }
   elements.contactModal.classList.add("open");
   elements.contactModal.setAttribute("aria-hidden", "false");
   window.setTimeout(() => elements.contactName.focus(), 80);
@@ -3740,6 +3764,7 @@ async function updateContact(event) {
     elements.contactFormError.textContent = "Lead ini tidak boleh dikemas kini.";
     return;
   }
+  const nextStatus = normalizeSheetStatus(elements.contactStatus.value);
   lead.name = elements.contactName.value.trim();
   lead.phone = elements.contactPhone.value.trim();
   lead.email = elements.contactEmail.value.trim();
@@ -3754,6 +3779,10 @@ async function updateContact(event) {
     if (!remoteDatabaseMode) {
       const noteSynced = await updateLeadNotesInSheet(lead, lead.notes);
       if (!noteSynced) throw new Error("Nota tidak dapat disimpan ke Google Sheet.");
+    }
+    if (getLeadVisualStatus(lead) !== nextStatus) {
+      const statusSynced = await updateLeadStatusFromLog(lead.id, nextStatus, elements.contactStatus);
+      if (!statusSynced) throw new Error("Status tidak dapat disahkan dalam Google Sheet.");
     }
     saveState();
     closeModal(elements.contactModal);
@@ -3820,14 +3849,14 @@ async function saveLeadNote(leadId, button = null) {
 
 async function updateLeadStatusFromLog(leadId, nextStatus, field = null) {
   const lead = state.leads.find((item) => item.id === leadId);
-  if (!lead) return;
+  if (!lead) return false;
 
   const normalizedStatus = normalizeSheetStatus(nextStatus);
-  if (getLeadVisualStatus(lead) === normalizedStatus) return;
+  if (getLeadVisualStatus(lead) === normalizedStatus) return true;
   if (pendingLeadStatusUpdates.has(leadId)) {
     if (field) field.value = pendingLeadStatusUpdates.get(leadId).status;
     showToast("Status sedang disimpan", "Tunggu kemas kini semasa selesai sebelum memilih status lain.");
-    return;
+    return false;
   }
 
   const previousLead = { ...lead };
@@ -3849,12 +3878,14 @@ async function updateLeadStatusFromLog(leadId, nextStatus, field = null) {
     if (!statusSynced) throw new Error("Status tidak dapat disimpan ke Google Sheet.");
 
     showToast("Status dikemas kini", `${lead.name} kini ${formatSheetStatus(normalizedStatus)}.`);
+    return true;
   } catch (error) {
     Object.assign(lead, previousLead);
     saveState();
     renderAll();
     console.error(error);
     showToast("Status gagal disimpan", error?.message || "Semak sambungan Google Sheet dan cuba lagi.", "error");
+    return false;
   } finally {
     if (pendingLeadStatusUpdates.get(leadId)?.token === updateToken) pendingLeadStatusUpdates.delete(leadId);
     if (field) {
@@ -4178,12 +4209,6 @@ elements.agentsGrid.addEventListener("click", (event) => {
 elements.projectsList?.addEventListener("click", (event) => {
   const toggle = event.target.closest("[data-project-toggle]");
   if (toggle) toggleProject(toggle.dataset.projectToggle);
-});
-
-elements.contactDeleteButton.addEventListener("click", () => {
-  if (!isAdmin()) return;
-  const leadId = elements.contactDeleteButton.dataset.contactDelete || selectedContactId;
-  if (leadId) deleteLeadEverywhere(leadId);
 });
 
 document.addEventListener("keydown", (event) => {
