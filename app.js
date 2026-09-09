@@ -96,6 +96,7 @@ let state = loadState();
 let activeView = "dashboard";
 let tickTimer;
 let syncTimer;
+let signupProjectSyncTimer;
 let followUpReminderTimer;
 let toastTimer;
 let lastRenderedActiveLeadKey = null;
@@ -134,6 +135,7 @@ const elements = {
   signupName: document.querySelector("#signup-name"),
   signupPhone: document.querySelector("#signup-phone"),
   signupEmail: document.querySelector("#signup-email"),
+  signupProjectCheckboxes: document.querySelector("#signup-project-checkboxes"),
   signupPassword: document.querySelector("#signup-password"),
   signupConfirmPassword: document.querySelector("#signup-confirm-password"),
   signupError: document.querySelector("#signup-error"),
@@ -618,7 +620,44 @@ function setSignupError(message) {
   elements.signupError.textContent = message;
 }
 
+function renderSignupProjectOptions() {
+  const selectedIds = new Set(
+    [...elements.signupProjectCheckboxes.querySelectorAll('input[name="signup-project"]:checked')]
+      .map((input) => input.value),
+  );
+  const activeProjects = state.projects.filter((project) => project.active);
+  elements.signupProjectCheckboxes.innerHTML = activeProjects.length
+    ? activeProjects.map((project) => `
+      <label class="project-checkbox">
+        <input type="checkbox" name="signup-project" value="${escapeHtml(project.id)}" ${selectedIds.has(project.id) ? "checked" : ""} />
+        <span>${escapeHtml(project.name)}</span>
+      </label>`).join("")
+    : '<p class="field-error">Tiada projek aktif. Hubungi admin sebelum mendaftar.</p>';
+}
+
+async function syncSignupProjects() {
+  if (elements.signupForm.hidden) return false;
+  try {
+    const url = new URL(getSheetEndpoint());
+    url.searchParams.set("_", Date.now().toString());
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    if (payload?.ok === false || !Array.isArray(payload?.projects)) {
+      throw new Error(payload?.error || "Senarai projek tidak sah");
+    }
+    state.projects = normalizeProjects(payload.projects);
+    saveState();
+    renderSignupProjectOptions();
+    return true;
+  } catch (error) {
+    console.error("Signup project sync failed", error);
+    return false;
+  }
+}
+
 function showSignupForm(show) {
+  window.clearInterval(signupProjectSyncTimer);
   elements.signupForm.hidden = !show;
   elements.loginForm.hidden = show;
   elements.forgotPasswordButton.hidden = show;
@@ -629,6 +668,9 @@ function showSignupForm(show) {
   setSignupError("");
   if (show) {
     elements.signupForm.reset();
+    renderSignupProjectOptions();
+    syncSignupProjects();
+    signupProjectSyncTimer = window.setInterval(syncSignupProjects, DEFAULT_SYNC_INTERVAL_SECONDS * 1000);
     window.setTimeout(() => elements.signupName.focus(), 80);
   } else {
     window.setTimeout(() => elements.loginEmail.focus(), 80);
@@ -698,11 +740,17 @@ async function handleAgentSignup(event) {
   const name = elements.signupName.value.trim();
   const phone = elements.signupPhone.value.trim();
   const email = elements.signupEmail.value.trim().toLowerCase();
+  const eligibleProjectIds = [...elements.signupProjectCheckboxes.querySelectorAll('input[name="signup-project"]:checked')]
+    .map((input) => input.value);
   const password = elements.signupPassword.value;
   const confirmation = elements.signupConfirmPassword.value;
 
   if (!name || !phone || !email || !password) {
     setSignupError("Lengkapkan semua maklumat pendaftaran.");
+    return;
+  }
+  if (!eligibleProjectIds.length) {
+    setSignupError("Pilih sekurang-kurangnya satu projek.");
     return;
   }
   if (password.length < 8) {
@@ -727,6 +775,7 @@ async function handleAgentSignup(event) {
         phone,
         email,
         password,
+        eligible_project_ids: eligibleProjectIds,
       },
     });
     if (error || !data?.ok) {
@@ -742,6 +791,7 @@ async function handleAgentSignup(event) {
       active: false,
       leadsHandled: 0,
       createdAt: Date.now(),
+      eligibleProjectIds,
     };
     state.agents = [
       ...state.agents.filter((agent) => agent.email.toLowerCase() !== email),
@@ -759,12 +809,20 @@ async function handleAgentSignup(event) {
       active: false,
       leadsHandled: 0,
       createdAt: Date.now(),
+      eligibleProjectIds,
     };
     state.agents.push(signupAgent);
     saveState();
   }
 
-  await upsertAgentToSheet(signupAgent);
+  const signupSynced = await upsertAgentToSheet(signupAgent);
+  if (!signupSynced) {
+    state.agents = state.agents.filter((agent) => agent.id !== signupAgent.id);
+    saveState();
+    setSignupError("Permohonan tidak dapat disimpan. Senarai projek mungkin telah berubah; semak pilihan dan cuba lagi.");
+    await syncSignupProjects();
+    return;
+  }
   elements.signupForm.reset();
   showSignupForm(false);
   setLoginError("Permohonan dihantar. Tunggu admin approve, kemudian log masuk guna emel dan kata laluan ini.");

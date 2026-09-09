@@ -25,8 +25,8 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260909-filter-counts-v49" />
-    <script src="app.js?v=20260909-filter-counts-v49" defer></script>
+    <link rel="stylesheet" href="styles.css?v=20260909-signup-projects-v50" />
+    <script src="app.js?v=20260909-signup-projects-v50" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -156,6 +156,12 @@
               </svg>
               <input id="signup-email" type="email" autocomplete="email" placeholder="nama@agency.com" required />
             </div>
+
+            <fieldset class="signup-projects-fieldset">
+              <legend>Projek yang ingin diterima</legend>
+              <p>Pilih sekurang-kurangnya satu projek sebelum menghantar permohonan.</p>
+              <div class="project-checkbox-list" id="signup-project-checkboxes"></div>
+            </fieldset>
 
             <label for="signup-password">Kata laluan</label>
             <div class="login-input">

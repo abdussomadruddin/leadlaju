@@ -285,6 +285,28 @@ svg {
   margin-top: 4px;
 }
 
+.signup-projects-fieldset {
+  margin: 15px 0 3px;
+  padding: 12px;
+  border: 1px solid #dce2eb;
+  border-radius: 11px;
+  background: #fff;
+}
+
+.signup-projects-fieldset legend {
+  padding: 0 5px;
+  color: var(--ink-700);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.signup-projects-fieldset > p {
+  margin: 0 0 9px;
+  color: var(--ink-500);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
 .login-input {
   display: flex;
   min-height: 52px;
@@ -1976,7 +1998,8 @@ td small {
   cursor: pointer;
 }
 
-.modal .project-checkbox input[type="checkbox"] {
+.modal .project-checkbox input[type="checkbox"],
+.signup-projects-fieldset .project-checkbox input[type="checkbox"] {
   appearance: auto;
   width: 18px;
   height: 18px;

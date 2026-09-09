@@ -794,6 +794,8 @@ function upsertAgent_(input) {
   const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheet = getOrCreateSheet_(spreadsheet, AGENTS_SHEET_NAME);
   const headers = ensureRequiredHeadersBySpec_(sheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
+  const projectsSheet = getOrCreateSheet_(spreadsheet, PROJECTS_SHEET_NAME);
+  const projectHeaders = ensureRequiredHeadersBySpec_(projectsSheet, PROJECT_HEADERS, PROJECT_FIELD_ALIASES);
   const agent = {
     id: String(input.id || input.user_id || input.agent_id || "").trim(),
     name: String(input.name || input.nama || input.full_name || "").trim(),
@@ -811,8 +813,16 @@ function upsertAgent_(input) {
   if (!agent.name || !agent.email) {
     return { ok: false, error: "Nama dan emel ejen diperlukan." };
   }
-  if (agent.role !== "admin" && agent.active === "active" && !agent.eligibleProjectIds.length) {
+  if (agent.role !== "admin" && !agent.eligibleProjectIds.length) {
     return { ok: false, error: "Pilih sekurang-kurangnya satu projek untuk ejen." };
+  }
+  if (agent.role !== "admin") {
+    const activeProjectIds = new Set(readProjects_(projectsSheet, projectHeaders)
+      .filter((project) => project.active)
+      .map((project) => project.id));
+    if (agent.eligibleProjectIds.some((projectId) => !activeProjectIds.has(projectId))) {
+      return { ok: false, error: "Pilihan projek tidak sah atau projek sudah dinyahaktifkan." };
+    }
   }
 
   const values = sheet.getDataRange().getDisplayValues();

@@ -1,9 +1,9 @@
-const CACHE_NAME = "leadlaju-pwa-v20260909-filter-counts-v49";
+const CACHE_NAME = "leadlaju-pwa-v20260909-signup-projects-v50";
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20260909-filter-counts-v49",
-  "/app.js?v=20260909-filter-counts-v49",
+  "/styles.css?v=20260909-signup-projects-v50",
+  "/app.js?v=20260909-signup-projects-v50",
   "/manifest.webmanifest?v=20260625-pwa-notifications",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",

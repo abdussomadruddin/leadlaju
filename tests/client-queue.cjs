@@ -139,3 +139,18 @@ test('lead status and agent filter options show live counts', () => {
   assert.match(source, /\$\{escapeHtml\(agent\.name\)\} \(\$\{agentCounts\.get\(agent\.id\) \|\| 0\}\)/);
   assert.match(source, /Belum \/ tiada ejen \(\$\{unassignedCount\}\)/);
 });
+
+test('agent signup requires and syncs active project choices', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const html = fs.readFileSync('index.html', 'utf8');
+  const server = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  assert.match(html, /id="signup-project-checkboxes"/);
+  assert.match(source, /input\[name="signup-project"\]:checked/);
+  assert.match(source, /setSignupError\("Pilih sekurang-kurangnya satu projek\."\)/);
+  assert.match(source, /signupProjectSyncTimer = window\.setInterval\(syncSignupProjects/);
+  assert.match(source, /eligible_project_ids: eligibleProjectIds/);
+  assert.match(source, /const signupSynced = await upsertAgentToSheet\(signupAgent\)/);
+  assert.match(source, /if \(!signupSynced\)/);
+  assert.match(server, /agent\.role !== "admin" && !agent\.eligibleProjectIds\.length/);
+  assert.match(server, /Pilihan projek tidak sah atau projek sudah dinyahaktifkan/);
+});
