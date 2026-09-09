@@ -106,6 +106,7 @@ let selectedContactId = null;
 let remoteDatabaseClient = null;
 let remoteDatabaseMode = false;
 let claimingLeadId = null;
+const pendingLeadStatusUpdates = new Map();
 let serviceWorkerRegistrationPromise = null;
 let notificationAudioContext = null;
 let lastAgentPresenceHeartbeatAt = 0;
@@ -1715,7 +1716,11 @@ async function addLead(input, options = {}) {
       }
     });
 
-    if (applySheetStatusToLead(existingLead, input.status)) changed = true;
+    const pendingStatus = pendingLeadStatusUpdates.get(existingLead.id)?.status;
+    const incomingStatus = normalizeSheetStatus(input.status);
+    if ((!pendingStatus || pendingStatus === incomingStatus) && applySheetStatusToLead(existingLead, input.status)) {
+      changed = true;
+    }
     if (applyLeadRuntimeFromSheet(existingLead, sheetRuntime)) changed = true;
 
     if (!changed) return false;
@@ -3640,8 +3645,15 @@ async function updateLeadStatusFromLog(leadId, nextStatus, field = null) {
 
   const normalizedStatus = normalizeSheetStatus(nextStatus);
   if (getLeadVisualStatus(lead) === normalizedStatus) return;
+  if (pendingLeadStatusUpdates.has(leadId)) {
+    if (field) field.value = pendingLeadStatusUpdates.get(leadId).status;
+    showToast("Status sedang disimpan", "Tunggu kemas kini semasa selesai sebelum memilih status lain.");
+    return;
+  }
 
   const previousLead = { ...lead };
+  const updateToken = Symbol("lead-status-update");
+  pendingLeadStatusUpdates.set(leadId, { status: normalizedStatus, token: updateToken });
   if (field) {
     field.disabled = true;
     field.classList.add("is-saving");
@@ -3665,6 +3677,7 @@ async function updateLeadStatusFromLog(leadId, nextStatus, field = null) {
     console.error(error);
     showToast("Status gagal disimpan", error?.message || "Semak sambungan Google Sheet dan cuba lagi.", "error");
   } finally {
+    if (pendingLeadStatusUpdates.get(leadId)?.token === updateToken) pendingLeadStatusUpdates.delete(leadId);
     if (field) {
       field.disabled = false;
       field.classList.remove("is-saving");

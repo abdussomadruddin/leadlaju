@@ -481,7 +481,6 @@ function updateLeadStatusLocked_(input) {
         }
         setRowValue_(headers, nextRow, "expiresAt", "");
         setRowValue_(headers, nextRow, "queueState", normalizeLeadStage_(status));
-        setRowValue_(headers, nextRow, "assignmentRevision", String(currentRevision + 1));
       }
       sheet.getRange(rowNumber, 1, 1, nextRow.length).setValues([nextRow]);
       updated += 1;

@@ -158,3 +158,10 @@ test('a stale phone cannot overwrite a newer assignment revision', () => {
   assert.equal(f.rows()[0].queue_state, 'active');
   assert.equal(f.rows()[0].assignment_revision, '4');
 });
+
+test('ordinary status changes do not advance the assignment revision', () => {
+  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const start = source.indexOf('function updateLeadStatusLocked_(');
+  const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
+  assert.doesNotMatch(body, /assignmentRevision[^\n]*currentRevision \+ 1/);
+});

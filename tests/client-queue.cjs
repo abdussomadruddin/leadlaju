@@ -89,3 +89,9 @@ test('client queue activation is read-only', () => {
   assert.match(body, /return \[\];/);
   assert.doesNotMatch(body, /syncLeadRuntimeInSheet|assignedAgentId\s*=/);
 });
+
+test('pending status update is protected from stale sheet sync', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  assert.match(source, /pendingLeadStatusUpdates\.get\(existingLead\.id\)\?\.status/);
+  assert.match(source, /pendingLeadStatusUpdates\.set\(leadId, \{ status: normalizedStatus, token: updateToken \}\)/);
+});
