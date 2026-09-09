@@ -188,4 +188,5 @@ test('server reconciles obsolete lead agent IDs by email or name', () => {
   assert.match(source, /function reconcileLeadAgentReferences_\(sheet, headers, agents\)/);
   assert.match(source, /agentsByEmail\.get\(assignedEmail\) \|\| agentsByName\.get\(assignedName\)/);
   assert.match(source, /setRowValue_\(headers, nextRow, "assignedAgentId", matchedAgent\.id\)/);
+  assert.match(source, /entry\.agentId = matchedAgent\.id/);
 });

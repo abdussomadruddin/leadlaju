@@ -207,16 +207,30 @@ function reconcileLeadAgentReferences_(sheet, headers, agents) {
   for (let rowNumber = 2; rowNumber <= values.length; rowNumber += 1) {
     const row = values[rowNumber - 1];
     const assignedId = getCell_(headers, row, "assignedAgentId");
-    if (!assignedId || agentsById.has(assignedId)) continue;
-    const assignedEmail = getCell_(headers, row, "assignedAgentEmail").toLowerCase();
-    const assignedName = normalizeProjectName_(getCell_(headers, row, "assignedAgentName"));
-    const matchedAgent = agentsByEmail.get(assignedEmail) || agentsByName.get(assignedName);
-    if (!matchedAgent) continue;
-
     const nextRow = row.slice(0, headers.length);
-    setRowValue_(headers, nextRow, "assignedAgentId", matchedAgent.id);
-    setRowValue_(headers, nextRow, "assignedAgentName", matchedAgent.name);
-    setRowValue_(headers, nextRow, "assignedAgentEmail", matchedAgent.email);
+    let changed = false;
+    if (assignedId && !agentsById.has(assignedId)) {
+      const assignedEmail = getCell_(headers, row, "assignedAgentEmail").toLowerCase();
+      const assignedName = normalizeProjectName_(getCell_(headers, row, "assignedAgentName"));
+      const matchedAgent = agentsByEmail.get(assignedEmail) || agentsByName.get(assignedName);
+      if (matchedAgent) {
+        setRowValue_(headers, nextRow, "assignedAgentId", matchedAgent.id);
+        setRowValue_(headers, nextRow, "assignedAgentName", matchedAgent.name);
+        setRowValue_(headers, nextRow, "assignedAgentEmail", matchedAgent.email);
+        changed = true;
+      }
+    }
+    const history = parseAssignmentHistory_(headers, nextRow);
+    history.forEach((entry) => {
+      if (!entry.agentId || agentsById.has(String(entry.agentId))) return;
+      const matchedAgent = agentsByName.get(normalizeProjectName_(entry.agentName));
+      if (!matchedAgent) return;
+      entry.agentId = matchedAgent.id;
+      entry.agentName = matchedAgent.name;
+      changed = true;
+    });
+    if (!changed) continue;
+    setRowValue_(headers, nextRow, "assignmentHistory", JSON.stringify(history));
     sheet.getRange(rowNumber, 1, 1, nextRow.length).setValues([nextRow]);
     updated += 1;
   }
