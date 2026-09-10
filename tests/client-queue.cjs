@@ -22,6 +22,10 @@ test('delayed sync cannot overwrite a completed or pending status edit', async (
   pending.set('local', { status: 'potential' });
   assert.equal(await context.addLead(row, { updateExisting: true, syncStartedAt: 300 }), false);
   assert.equal(lead.status, 'potential');
+  pending.clear();
+  lead.statusRevision = 5;
+  assert.equal(await context.addLead({ ...row, status_revision: 4 }, { updateExisting: true, syncStartedAt: 400 }), false);
+  assert.equal(lead.status, 'potential');
 });
 
 function setup(leads) {
