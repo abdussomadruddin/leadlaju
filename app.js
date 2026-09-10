@@ -244,6 +244,7 @@ const elements = {
   statContacted: document.querySelector("#stat-contacted"),
   statResponse: document.querySelector("#stat-response"),
   statConversion: document.querySelector("#stat-conversion"),
+  pickupDetails: document.querySelector("#pickup-details"),
   contactRate: document.querySelector("#contact-rate"),
 };
 
@@ -3017,9 +3018,10 @@ function renderStats() {
   const user = getCurrentUser();
   const assignments = state.leads.flatMap((lead) => {
     const history = Array.isArray(lead.assignmentHistory) ? lead.assignmentHistory : [];
-    if (history.length) return history;
+    if (history.length) return history.map((assignment) => ({ ...assignment, leadId: lead.id }));
     if (!lead.assignedAgentId) return [];
     return [{
+      leadId: lead.id,
       agentId: lead.assignedAgentId,
       assignedAt: new Date(lead.receivedAt || lead.createdAt).toISOString(),
       outcome: lead.status === "contacted" ? "contacted" : lead.status === "passed" ? "missed" : "pending",
@@ -3030,6 +3032,9 @@ function renderStats() {
   );
   const contacted = assignments.filter((assignment) => assignment.outcome === "contacted");
   const missed = assignments.filter((assignment) => assignment.outcome === "missed");
+  const resolvedAssignments = assignments.filter((assignment) =>
+    assignment.outcome === "contacted" || assignment.outcome === "missed",
+  );
   const responseValues = contacted.map((assignment) =>
     new Date(assignment.resolvedAt).getTime() - new Date(assignment.assignedAt).getTime(),
   ).filter((value) => Number.isFinite(value) && value >= 0);
@@ -3037,17 +3042,18 @@ function renderStats() {
     ? responseValues.reduce((total, value) => total + value, 0) / responseValues.length
     : null;
 
-  elements.statToday.textContent = assignments.length;
+  elements.statToday.textContent = resolvedAssignments.length;
   elements.statContacted.textContent = missed.length;
-  elements.contactRate.textContent = assignments.length
-    ? `${Math.round((contacted.length / assignments.length) * 100)}%`
+  elements.contactRate.textContent = resolvedAssignments.length
+    ? `${Math.round((contacted.length / resolvedAssignments.length) * 100)}%`
     : "0%";
   elements.statResponse.textContent = averageResponse !== null
     ? `${Math.floor(averageResponse / 60000)}m ${Math.floor((averageResponse % 60000) / 1000)}s`
     : "--";
-  elements.statConversion.textContent = assignments.length
-    ? `${Math.round((contacted.length / assignments.length) * 100)}% (${contacted.length} call / ${missed.length} missed)`
+  elements.statConversion.textContent = resolvedAssignments.length
+    ? `${Math.round((contacted.length / resolvedAssignments.length) * 100)}%`
     : "0%";
+  elements.pickupDetails.textContent = `${contacted.length} call / ${missed.length} missed`;
 }
 
 function renderActivities() {

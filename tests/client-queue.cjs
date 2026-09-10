@@ -275,3 +275,16 @@ test('dashboard and Google Sheet use one official lead status list', () => {
   assert.match(script, /function normalizeLegacyLeadStatuses_\(sheet, headers\)/);
   assert.match(script, /if \(\["potential", "potensi", "prospect", "prospek", "hot lead"\]/);
 });
+
+test('daily pickup stats exclude pending assignments from the completed lead total', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const html = fs.readFileSync('index.html', 'utf8');
+  const start = source.indexOf('function renderStats(');
+  const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
+  assert.match(body, /const resolvedAssignments = assignments\.filter/);
+  assert.match(body, /elements\.statToday\.textContent = resolvedAssignments\.length/);
+  assert.match(body, /contacted\.length \/ resolvedAssignments\.length/);
+  assert.match(body, /elements\.pickupDetails\.textContent/);
+  assert.match(html, /Pickup rate hari ini/);
+  assert.match(html, /id="pickup-details"/);
+});
