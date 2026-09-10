@@ -4640,15 +4640,10 @@ elements.agentPasswordForm.addEventListener("submit", updateAgentPassword);
 elements.contactForm.addEventListener("submit", updateContact);
 elements.integrationForm.addEventListener("submit", saveIntegration);
 elements.syncNowButton.addEventListener("click", () => syncGoogleSheet());
-elements.refreshButton?.addEventListener("click", async () => {
+elements.refreshButton?.addEventListener("click", () => {
   elements.refreshButton.disabled = true;
   elements.refreshButton.classList.add("is-syncing");
-  try {
-    await syncGoogleSheet();
-  } finally {
-    elements.refreshButton.disabled = false;
-    elements.refreshButton.classList.remove("is-syncing");
-  }
+  window.location.reload();
 });
 
 if ("serviceWorker" in navigator) {
