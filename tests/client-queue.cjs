@@ -217,7 +217,8 @@ test('edit lead modal receives the server-confirmed status revision', () => {
 
 test('lead status updates use the same-origin confirmation proxy', () => {
   const proxy = fs.readFileSync('api/lead-status.js', 'utf8');
-  assert.match(proxy, /payload\.action !== "update_lead_status"/);
+  assert.match(proxy, /payload\.action === "update_lead_status"/);
+  assert.match(proxy, /payload\.action === "set_agent_lead_availability"/);
   assert.match(proxy, /await fetch\(GOOGLE_SHEET_ENDPOINT/);
   assert.match(proxy, /response\.status\(result\?\.ok \? 200 : 409\)/);
 });
@@ -304,11 +305,15 @@ test('agents explicitly start and stop lead availability from the dashboard', ()
   const html = fs.readFileSync('index.html', 'utf8');
   assert.match(html, /id="get-lead-button"/);
   assert.match(html, /id="stop-lead-button"/);
+  assert.match(html, /id="agent-lead-status"/);
   assert.match(source, /async function setAgentLeadAvailability\(ready\)/);
   assert.match(source, /action: "set_agent_lead_availability"/);
+  assert.match(source, /postGoogleSheetActionWithResponse\(\{/);
   assert.match(source, /syncPushSubscription\(true\)/);
   assert.match(source, /elements\.getLeadButton\?\.addEventListener/);
   assert.match(source, /elements\.stopLeadButton\?\.addEventListener/);
+  assert.match(source, /elements\.getLeadButton\.disabled = ready/);
+  assert.match(source, /elements\.stopLeadButton\.disabled = !ready/);
 });
 
 test('login UI is not blocked by the initial Google Sheet agent sync', () => {

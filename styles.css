@@ -1181,18 +1181,71 @@ svg {
   margin-top: 32px;
 }
 
-.new-lead-heading-actions,
-.agent-lead-controls {
+.new-lead-heading-actions {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
-.agent-lead-controls .primary-button,
-.agent-lead-controls .secondary-button {
-  min-height: 36px;
-  padding: 0 13px;
-  font-size: 10px;
+.agent-lead-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.9fr);
+  gap: 18px;
+  align-items: center;
+  margin: 18px 0;
+  padding: 16px;
+  border: 1px solid #dce4f2;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.agent-lead-controls.is-ready {
+  border-color: #b6ead1;
+  background: #f5fcf8;
+}
+
+.agent-lead-controls.is-stopped {
+  border-color: #f0d5d5;
+  background: #fffafa;
+}
+
+.agent-lead-control-status {
+  display: grid;
+  gap: 4px;
+}
+
+.agent-lead-control-status strong {
+  color: var(--ink-900);
+  font-family: "Manrope", sans-serif;
+  font-size: 17px;
+}
+
+.agent-lead-controls.is-ready .agent-lead-control-status strong {
+  color: var(--green);
+}
+
+.agent-lead-control-status small {
+  color: var(--ink-500);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.agent-lead-control-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.agent-lead-control-buttons .primary-button,
+.agent-lead-control-buttons .secondary-button {
+  min-height: 54px;
+  padding: 0 14px;
+  font-size: 12px;
+}
+
+.agent-lead-control-buttons button:disabled {
+  cursor: default;
+  opacity: 0.48;
 }
 
 .stop-lead-button {
@@ -1204,6 +1257,11 @@ svg {
 .stop-lead-button:hover {
   border-color: #f1a9a9;
   background: #fff0f0;
+}
+
+.stop-lead-button:disabled:hover {
+  border-color: #ffd0d0;
+  background: #fff7f7;
 }
 
 .section-heading h2 {
@@ -3079,6 +3137,19 @@ td small {
   .new-lead-heading-actions {
     align-items: flex-end;
     flex-direction: column;
+  }
+
+  .agent-lead-controls {
+    grid-template-columns: 1fr;
+    gap: 14px;
+    padding: 14px;
+  }
+
+  .agent-lead-control-buttons .primary-button,
+  .agent-lead-control-buttons .secondary-button {
+    min-height: 52px;
+    padding: 0 8px;
+    font-size: 11px;
   }
 
   .view {

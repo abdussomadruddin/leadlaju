@@ -20,8 +20,16 @@ module.exports = async function handler(request, response) {
       return response.status(400).json({ ok: false, error: "Invalid request body" });
     }
   }
-  if (payload.action !== "update_lead_status" || !payload.lead?.id || !payload.lead?.status) {
+  const updatingLeadStatus = payload.action === "update_lead_status";
+  const updatingAvailability = payload.action === "set_agent_lead_availability";
+  if (updatingLeadStatus && (!payload.lead?.id || !payload.lead?.status)) {
     return response.status(400).json({ ok: false, error: "Invalid lead status update" });
+  }
+  if (updatingAvailability && (!payload.agent?.id || typeof payload.agent.ready !== "boolean")) {
+    return response.status(400).json({ ok: false, error: "Invalid agent lead availability update" });
+  }
+  if (!updatingLeadStatus && !updatingAvailability) {
+    return response.status(400).json({ ok: false, error: "Unsupported update action" });
   }
 
   try {

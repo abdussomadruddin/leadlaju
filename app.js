@@ -195,6 +195,8 @@ const elements = {
   teamList: document.querySelector("#team-list"),
   onlineCount: document.querySelector("#online-count"),
   agentLeadControls: document.querySelector("#agent-lead-controls"),
+  agentLeadStatus: document.querySelector("#agent-lead-status"),
+  agentLeadStatusMessage: document.querySelector("#agent-lead-status-message"),
   getLeadButton: document.querySelector("#get-lead-button"),
   stopLeadButton: document.querySelector("#stop-lead-button"),
   leadsTableBody: document.querySelector("#leads-table-body"),
@@ -2294,25 +2296,28 @@ async function setAgentLeadAvailability(ready) {
 
   const button = ready ? elements.getLeadButton : elements.stopLeadButton;
   button.disabled = true;
-  const updated = await postGoogleSheetAction({
-    action: "set_agent_lead_availability",
-    agent: { id: user.id, ready },
-  }, "Lead availability update failed", { waitForSend: true });
-  button.disabled = false;
-  if (!updated) {
-    showToast("Status tidak dikemas kini", "Semak sambungan dan cuba lagi.", "error");
+  let result;
+  try {
+    result = await postGoogleSheetActionWithResponse({
+      action: "set_agent_lead_availability",
+      agent: { id: user.id, ready },
+    }, "Lead availability update failed");
+  } catch (error) {
+    showToast("Status tidak dikemas kini", error.message || "Semak sambungan dan cuba lagi.", "error");
     return false;
+  } finally {
+    button.disabled = false;
   }
 
-  user.leadReady = ready;
-  user.online = ready && Notification.permission === "granted";
+  user.leadReady = Boolean(result?.lead_ready ?? ready);
+  user.online = user.leadReady && Notification.permission === "granted";
   saveState();
   renderAll();
   await syncGoogleSheet({ silent: true, notifyNewLeads: true });
   showToast(
-    ready ? "Sedia menerima lead" : "Agihan lead dihentikan",
-    ready ? "Anda kini dimasukkan ke giliran agihan lead baharu." : "Lead baharu tidak akan dihantar kepada anda.",
-    ready ? "success" : "default",
+    user.leadReady ? "Sedia menerima lead" : "Agihan lead dihentikan",
+    user.leadReady ? "Anda kini dimasukkan ke giliran agihan lead baharu." : "Lead baharu tidak akan dihantar kepada anda.",
+    user.leadReady ? "success" : "default",
   );
   return true;
 }
@@ -3069,8 +3074,16 @@ function renderAgentLeadControls() {
   elements.agentLeadControls.hidden = !isAgent;
   if (!isAgent) return;
   const ready = Boolean(user.leadReady);
-  elements.getLeadButton.hidden = ready;
-  elements.stopLeadButton.hidden = !ready;
+  elements.agentLeadControls.classList.toggle("is-ready", ready);
+  elements.agentLeadControls.classList.toggle("is-stopped", !ready);
+  elements.getLeadButton.disabled = ready;
+  elements.stopLeadButton.disabled = !ready;
+  elements.getLeadButton.setAttribute("aria-pressed", String(ready));
+  elements.stopLeadButton.setAttribute("aria-pressed", String(!ready));
+  elements.agentLeadStatus.textContent = ready ? "Sedang menerima lead" : "Agihan lead dihentikan";
+  elements.agentLeadStatusMessage.textContent = ready
+    ? "Anda berada dalam giliran agihan. STOP LEAD hanya menghentikan lead baharu."
+    : "Tekan GET LEAD untuk masuk giliran agihan lead baharu.";
 }
 
 function updateCountdown() {
