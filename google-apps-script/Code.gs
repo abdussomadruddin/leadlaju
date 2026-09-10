@@ -22,6 +22,18 @@ const LEAD_STATUS_VALUES = [
   "Cancelled",
   "Client",
 ];
+const LEAD_QUEUE_STATE_VALUES = [
+  "active",
+  "queued",
+  "contacted",
+  "passed",
+  "all_offer_presented",
+  "need_follow_up",
+  "potential",
+  "rejected",
+  "cancelled",
+  "client",
+];
 // Used only when a legacy sheet has no lead rows to seed the first project list.
 const INITIAL_PROJECT_NAMES = ["Armani Putrajaya", "BBSAP Sitiawan"];
 
@@ -187,6 +199,7 @@ function doGet() {
     ensureLeadSources_(sheet, headers);
     normalizeLegacyLeadStatuses_(sheet, headers);
     syncLeadStatusValidation_(sheet, headers);
+    syncLeadQueueStateValidation_(sheet, headers);
     let leads = readLeads_(sheet);
     const projects = ensureProjectsFromLeads_(projectsSheet, projectHeaders, leads);
     ensureAgentProjectEligibility_(agentsSheet, agentHeaders, projects);
@@ -1634,6 +1647,18 @@ function syncLeadStatusValidation_(sheet, headers) {
   return true;
 }
 
+function syncLeadQueueStateValidation_(sheet, headers) {
+  const queueStateIndex = headers.findIndex((header) => FIELD_ALIASES.queueState.includes(header));
+  if (queueStateIndex < 0) return false;
+  const rowCount = Math.max(sheet.getMaxRows() - 1, 1);
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(LEAD_QUEUE_STATE_VALUES, true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(2, queueStateIndex + 1, rowCount, 1).setDataValidation(rule);
+  return true;
+}
+
 function canonicalLeadSource_(value) {
   const source = String(value || DEFAULT_SOURCE).trim();
   const lower = source.toLowerCase();
@@ -1719,6 +1744,7 @@ function refreshSheetTemplate_() {
   ensureLeadSources_(sheet, headers);
   normalizeLegacyLeadStatuses_(sheet, headers);
   syncLeadStatusValidation_(sheet, headers);
+  syncLeadQueueStateValidation_(sheet, headers);
   const pushResult = notifyUnsentLeadPushes_(spreadsheet, sheet, headers);
   return { ok: true, refreshed_at: new Date().toISOString(), push: pushResult };
 }

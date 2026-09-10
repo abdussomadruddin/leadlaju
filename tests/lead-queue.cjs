@@ -174,6 +174,17 @@ test('new status updates return the new status revision before queue handling', 
   assert.match(body, /status_revision: latestStatusRevision/);
 });
 
+test('sheet queue-state validation accepts every final lead status', () => {
+  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const states = [
+    'active', 'queued', 'contacted', 'passed', 'all_offer_presented',
+    'need_follow_up', 'potential', 'rejected', 'cancelled', 'client',
+  ];
+  states.forEach((state) => assert.match(source, new RegExp(`"${state}"`)));
+  assert.match(source, /function syncLeadQueueStateValidation_\(sheet, headers\)/);
+  assert.match(source, /requireValueInList\(LEAD_QUEUE_STATE_VALUES, true\)/);
+});
+
 test('server persists and returns lead notes through the sheet', () => {
   const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
   assert.match(source, /notes: \["nota", "notes", "catatan"\]/);
