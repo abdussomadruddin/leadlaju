@@ -31,7 +31,7 @@ module.exports = async function handler(request, response) {
       body: JSON.stringify(payload),
     });
     const result = await upstream.json();
-    return response.status(upstream.ok && result?.ok ? 200 : 409).json(result);
+    return response.status(result?.ok ? 200 : 409).json(result);
   } catch (error) {
     console.error("Google Sheet status proxy failed", error);
     return response.status(502).json({ ok: false, error: "Google Sheet tidak dapat dihubungi." });

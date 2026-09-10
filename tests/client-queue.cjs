@@ -219,7 +219,7 @@ test('lead status updates use the same-origin confirmation proxy', () => {
   const proxy = fs.readFileSync('api/lead-status.js', 'utf8');
   assert.match(proxy, /payload\.action !== "update_lead_status"/);
   assert.match(proxy, /await fetch\(GOOGLE_SHEET_ENDPOINT/);
-  assert.match(proxy, /result\?\.ok/);
+  assert.match(proxy, /response\.status\(result\?\.ok \? 200 : 409\)/);
 });
 
 test('dashboard and Google Sheet use one official lead status list', () => {
