@@ -2016,17 +2016,22 @@ td small {
 }
 
 .project-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  display: grid;
+  gap: 13px;
   padding: 17px 18px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
 }
 
-.project-row > span {
+.project-row-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.project-row-heading > span {
   display: grid;
   gap: 4px;
 }
@@ -2038,6 +2043,84 @@ td small {
 .project-row small {
   color: var(--ink-500);
   font-size: 11px;
+}
+
+.project-status-dropdown {
+  border-top: 1px solid var(--line);
+}
+
+.project-status-dropdown summary {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 11px;
+  color: var(--ink-700);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+  list-style: none;
+}
+
+.project-status-dropdown summary::-webkit-details-marker {
+  display: none;
+}
+
+.project-status-dropdown summary::after {
+  width: 7px;
+  height: 7px;
+  margin-left: 2px;
+  border-right: 2px solid var(--ink-500);
+  border-bottom: 2px solid var(--ink-500);
+  content: "";
+  transform: rotate(45deg) translateY(-2px);
+}
+
+.project-status-dropdown[open] summary::after {
+  transform: rotate(225deg) translate(-1px, -2px);
+}
+
+.project-status-dropdown summary b {
+  margin-left: auto;
+  color: var(--blue-dark);
+}
+
+.project-status-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 1px solid var(--line);
+}
+
+.project-status-item {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-700);
+}
+
+.project-status-item:nth-child(3n) {
+  border-right: 0;
+}
+
+.project-status-item:nth-last-child(-n + 3) {
+  border-bottom: 0;
+}
+
+.project-status-item small {
+  color: var(--ink-500);
+  font-size: 10px;
+}
+
+.project-status-item b {
+  color: var(--ink-900);
+  font-family: "Manrope", sans-serif;
+  font-size: 14px;
 }
 
 .agent-projects-fieldset {
@@ -2805,6 +2888,27 @@ td small {
   .project-create-form input {
     min-width: 0;
     flex: 1;
+  }
+
+  .project-status-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .project-status-item:nth-child(3n) {
+    border-right: 1px solid var(--line);
+  }
+
+  .project-status-item:nth-last-child(-n + 3) {
+    border-bottom: 1px solid var(--line);
+  }
+
+  .project-status-item:nth-child(2n),
+  .project-status-item:last-child {
+    border-right: 0;
+  }
+
+  .project-status-item:last-child {
+    border-bottom: 0;
   }
 
   .topbar {

@@ -354,6 +354,19 @@ test('agent sidebar hides the Google Sheet connection card', () => {
   assert.match(source, /item\.hidden = !isAdmin\(\)/);
 });
 
+test('project dropdown shows live lead totals for every official status', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const css = fs.readFileSync('styles.css', 'utf8');
+  const start = source.indexOf('function renderProjects()');
+  const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
+  assert.match(body, /project-status-dropdown/);
+  assert.match(body, /projectLeads\.length/);
+  assert.match(body, /LEAD_STATUS_OPTIONS\.map/);
+  assert.match(body, /getLeadVisualStatus\(lead\)/);
+  assert.match(source, /expandedProjectStatusIds/);
+  assert.match(css, /\.project-status-list/);
+});
+
 test('an older server response cannot reset an agent GET LEAD choice', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const start = source.indexOf('function normalizeSheetAgent(input)');

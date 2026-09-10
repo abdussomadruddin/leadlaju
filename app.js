@@ -120,6 +120,7 @@ let notificationAudioContext = null;
 let lastAgentPresenceHeartbeatAt = 0;
 let deferredInstallPrompt = null;
 let notificationReminderDismissedForSession = false;
+const expandedProjectStatusIds = new Set();
 let agentPresenceSessionStartedAt = 0;
 let notifiedLeadKeys = loadNotifiedLeadKeys();
 let sentFollowUpReminderKeys = loadFollowUpReminderKeys();
@@ -3482,15 +3483,40 @@ function renderProjects() {
   if (!elements.projectsList) return;
   const projects = state.projects || [];
   elements.projectsList.innerHTML = projects.length
-    ? projects.map((project) => `
+    ? projects.map((project) => {
+      const projectKey = String(project.name || "").trim().replace(/\s+/g, " ").toLowerCase();
+      const projectLeads = state.leads.filter((lead) =>
+        String(lead.project || "").trim().replace(/\s+/g, " ").toLowerCase() === projectKey,
+      );
+      const statusCounts = Object.fromEntries(LEAD_STATUS_OPTIONS.map((status) => [status.value, 0]));
+      projectLeads.forEach((lead) => {
+        statusCounts[getLeadVisualStatus(lead)] = (statusCounts[getLeadVisualStatus(lead)] || 0) + 1;
+      });
+      return `
       <article class="project-row">
-        <span>
-          <strong>${escapeHtml(project.name)}</strong>
-          <small>${project.active ? "Aktif untuk agihan" : "Tidak menerima lead baharu"}</small>
-        </span>
-        <button class="switch ${project.active ? "active" : ""}" type="button"
-          data-project-toggle="${project.id}" aria-label="${project.active ? "Nyahaktifkan" : "Aktifkan"} ${escapeHtml(project.name)}"></button>
-      </article>`).join("")
+        <div class="project-row-heading">
+          <span>
+            <strong>${escapeHtml(project.name)}</strong>
+            <small>${project.active ? "Aktif untuk agihan" : "Tidak menerima lead baharu"}</small>
+          </span>
+          <button class="switch ${project.active ? "active" : ""}" type="button"
+            data-project-toggle="${project.id}" aria-label="${project.active ? "Nyahaktifkan" : "Aktifkan"} ${escapeHtml(project.name)}"></button>
+        </div>
+        <details class="project-status-dropdown" data-project-status="${project.id}" ${expandedProjectStatusIds.has(project.id) ? "open" : ""}>
+          <summary>
+            <span>Status lead mengikut projek</span>
+            <b>${projectLeads.length} lead</b>
+          </summary>
+          <div class="project-status-list">
+            ${LEAD_STATUS_OPTIONS.map((status) => `
+              <span class="project-status-item status-${status.value}">
+                <small>${status.label}</small>
+                <b>${statusCounts[status.value] || 0}</b>
+              </span>`).join("")}
+          </div>
+        </details>
+      </article>`;
+    }).join("")
     : '<p class="empty-state">Belum ada projek. Tambah projek sebelum meluluskan ejen.</p>';
 }
 
@@ -4436,6 +4462,13 @@ elements.projectsList?.addEventListener("click", (event) => {
   const toggle = event.target.closest("[data-project-toggle]");
   if (toggle) toggleProject(toggle.dataset.projectToggle);
 });
+
+elements.projectsList?.addEventListener("toggle", (event) => {
+  const dropdown = event.target.closest("[data-project-status]");
+  if (!dropdown) return;
+  if (dropdown.open) expandedProjectStatusIds.add(dropdown.dataset.projectStatus);
+  else expandedProjectStatusIds.delete(dropdown.dataset.projectStatus);
+}, true);
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
