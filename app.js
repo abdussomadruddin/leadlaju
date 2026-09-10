@@ -184,6 +184,7 @@ const elements = {
   navLeadCount: document.querySelector("#nav-lead-count"),
   notificationCount: document.querySelector("#notification-count"),
   notificationButton: document.querySelector("#notification-button"),
+  refreshButton: document.querySelector("#refresh-button"),
   notificationRequiredModal: document.querySelector("#notification-required-modal"),
   enableRequiredNotifications: document.querySelector("#enable-required-notifications"),
   addToHomeScreen: document.querySelector("#add-to-home-screen"),
@@ -4639,6 +4640,16 @@ elements.agentPasswordForm.addEventListener("submit", updateAgentPassword);
 elements.contactForm.addEventListener("submit", updateContact);
 elements.integrationForm.addEventListener("submit", saveIntegration);
 elements.syncNowButton.addEventListener("click", () => syncGoogleSheet());
+elements.refreshButton?.addEventListener("click", async () => {
+  elements.refreshButton.disabled = true;
+  elements.refreshButton.classList.add("is-syncing");
+  try {
+    await syncGoogleSheet();
+  } finally {
+    elements.refreshButton.disabled = false;
+    elements.refreshButton.classList.remove("is-syncing");
+  }
+});
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.addEventListener("message", (event) => {
