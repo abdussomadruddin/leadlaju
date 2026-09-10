@@ -501,7 +501,11 @@ function deleteLead_(input) {
 
 function updateLeadStatus_(input) {
   const lock = LockService.getScriptLock();
-  if (!lock.tryLock(8000)) return { ok: false, error: "Agihan lead sedang berjalan." };
+  try {
+    lock.waitLock(30000);
+  } catch (error) {
+    return { ok: false, error: "Agihan lead masih sibuk. Sila cuba semula." };
+  }
   let result;
   try {
     result = updateLeadStatusLocked_(input);
