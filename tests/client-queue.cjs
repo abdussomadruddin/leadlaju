@@ -346,6 +346,14 @@ test('logout reaches the login screen before network cleanup completes', () => {
   assert.match(body, /localStorage\.removeItem\(AUTH_KEY\)/);
 });
 
+test('agent sidebar hides the Google Sheet connection card', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const html = fs.readFileSync('index.html', 'utf8');
+  assert.match(html, /class="sync-card admin-only-sync-card" hidden/);
+  assert.match(source, /document\.querySelectorAll\("\.admin-only-sync-card"\)/);
+  assert.match(source, /item\.hidden = !isAdmin\(\)/);
+});
+
 test('an older server response cannot reset an agent GET LEAD choice', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const start = source.indexOf('function normalizeSheetAgent(input)');

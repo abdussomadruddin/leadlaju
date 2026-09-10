@@ -3518,6 +3518,9 @@ function renderUser() {
   document.querySelectorAll(".admin-only").forEach((item) => {
     item.style.display = isAdmin() ? "flex" : "none";
   });
+  document.querySelectorAll(".admin-only-sync-card").forEach((item) => {
+    item.hidden = !isAdmin();
+  });
   if (!isAdmin() && (activeView === "agents" || activeView === "projects" || activeView === "integration")) {
     switchView("dashboard");
   }
