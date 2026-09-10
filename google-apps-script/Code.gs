@@ -554,6 +554,8 @@ function updateLeadStatusLocked_(input) {
   if (statusIndex < 0) return { ok: false, error: "Kolum Status tidak dijumpai." };
 
   let updated = 0;
+  let latestStatusRevision = 0;
+  let latestStatusUpdatedAt = "";
   for (let rowNumber = 2; rowNumber <= values.length; rowNumber += 1) {
     const row = values[rowNumber - 1];
     const rowId = idIndex >= 0 ? String(row[idIndex] || "").trim() : "";
@@ -563,16 +565,15 @@ function updateLeadStatusLocked_(input) {
     const fallbackMatches = !id && phone && project && rowPhone === phone && rowProject === project;
 
     if (idMatches || fallbackMatches) {
-      const currentRevision = Number(getCell_(headers, row, "assignmentRevision")) || 0;
-      const requestedRevision = Number(input.assignment_revision ?? input.assignmentRevision);
-      if (Number.isFinite(requestedRevision) && requestedRevision !== currentRevision) {
-        return { ok: false, stale: true, error: "Assignment lead telah berubah." };
-      }
+      // Status has its own revision. Assignment revisions only protect runtime actions
+      // such as expiring or reassigning a lead, so a valid status edit from another
+      // signed-in device cannot be discarded after the lead's assignment changes.
       const nextRow = row.slice(0, headers.length);
       nextRow[statusIndex] = status;
       const statusRevision = (Number(getCell_(headers, row, "statusRevision")) || 0) + 1;
+      const statusUpdatedAt = new Date().toISOString();
       setRowValue_(headers, nextRow, "statusRevision", String(statusRevision));
-      setRowValue_(headers, nextRow, "statusUpdatedAt", new Date().toISOString());
+      setRowValue_(headers, nextRow, "statusUpdatedAt", statusUpdatedAt);
       if (normalizeLeadStage_(status) === "new") {
         holdLeadRuntimeRow_(sheet, headers, rowNumber, nextRow);
         updated += 1;
@@ -595,10 +596,20 @@ function updateLeadStatusLocked_(input) {
       }
       sheet.getRange(rowNumber, 1, 1, nextRow.length).setValues([nextRow]);
       updated += 1;
+      latestStatusRevision = statusRevision;
+      latestStatusUpdatedAt = statusUpdatedAt;
+      if (idMatches) break;
     }
   }
 
-  return { ok: true, updated, status };
+  if (!updated) return { ok: false, error: "Lead tidak dijumpai." };
+  return {
+    ok: true,
+    updated,
+    status,
+    status_revision: latestStatusRevision,
+    status_updated_at: latestStatusUpdatedAt,
+  };
 }
 
 function expireLead_(input) {

@@ -199,12 +199,17 @@ test('only admins can see or trigger lead deletion', () => {
   assert.match(source, /if \(!isAdmin\(\)\) \{\s*showToast\("Admin sahaja"/);
 });
 
-test('edit lead modal updates status and waits for sheet confirmation', () => {
+test('edit lead modal receives the server-confirmed status revision', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const html = fs.readFileSync('index.html', 'utf8');
   assert.match(html, /id="contact-status"/);
   assert.match(source, /elements\.contactStatus\.value = getLeadVisualStatus\(lead\)/);
   assert.match(source, /await updateLeadStatusFromLog\(lead\.id, nextStatus, elements\.contactStatus\)/);
-  assert.match(source, /return waitForLeadStatusInSheet\(lead, sheetStatus\)/);
-  assert.match(source, /while \(Date\.now\(\) < deadline\)/);
+  const statusWriter = source.slice(
+    source.indexOf("async function updateLeadStatusInSheet"),
+    source.indexOf("\nasync function ", source.indexOf("async function updateLeadStatusInSheet") + 1),
+  );
+  assert.match(statusWriter, /postGoogleSheetActionWithResponse/);
+  assert.match(statusWriter, /lead\.statusRevision = Number\(result\.status_revision\)/);
+  assert.doesNotMatch(statusWriter, /assignment_revision/);
 });

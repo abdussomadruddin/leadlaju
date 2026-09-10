@@ -2089,12 +2089,38 @@ async function postGoogleSheetAction(payload, errorLabel, options = {}) {
   }
 }
 
+async function postGoogleSheetActionWithResponse(payload, errorLabel) {
+  const endpoint = getSheetEndpoint();
+  if (!endpoint) throw new Error("Web App URL Google Sheet belum ditetapkan.");
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=UTF-8" },
+      body: JSON.stringify(payload),
+      keepalive: true,
+    });
+    if (!response.ok) throw new Error(`Server membalas ralat ${response.status}.`);
+
+    const result = await response.json();
+    if (!result?.ok) throw new Error(result?.error || "Server tidak menyimpan perubahan status.");
+
+    state.integration.connected = true;
+    state.integration.lastSyncAt = Date.now();
+    saveState();
+    return result;
+  } catch (error) {
+    console.error(errorLabel, error);
+    throw error;
+  }
+}
+
 async function updateLeadStatusInSheet(lead, status) {
   if (!lead) return false;
   const sheetStatus = formatSheetStatus(normalizeSheetStatus(status));
   const currentUser = getCurrentUser();
   const actingAgent = currentUser?.role === "agent" ? currentUser : null;
-  const sent = await postGoogleSheetAction(
+  const result = await postGoogleSheetActionWithResponse(
     {
       action: "update_lead_status",
       lead: {
@@ -2103,50 +2129,16 @@ async function updateLeadStatusInSheet(lead, status) {
         project: lead.project,
         name: lead.name,
         status: sheetStatus,
-        assignment_revision: Number(lead.assignmentRevision) || 0,
         acting_agent_id: actingAgent?.id || "",
         acting_agent_name: actingAgent?.name || "",
         acting_agent_email: actingAgent?.email || "",
       },
     },
     "Lead sheet status update failed",
-    { waitForSend: true },
   );
-  if (!sent) return false;
-  return waitForLeadStatusInSheet(lead, sheetStatus);
-}
-
-async function waitForLeadStatusInSheet(lead, expectedStatus, timeoutMs = 15000) {
-  const endpoint = getSheetEndpoint();
-  const expected = normalizeSheetStatus(expectedStatus);
-  const targetId = String(lead.dedupeKey || lead.id || "").trim();
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const url = new URL(endpoint);
-      url.searchParams.set("_", Date.now().toString());
-      const response = await fetch(url, { cache: "no-store" });
-      if (response.ok) {
-        const payload = await response.json();
-        const rows = Array.isArray(payload) ? payload : payload.leads || payload.data || [];
-        const sheetLead = rows.find((row) => {
-          const rowId = String(row.id || row.lead_id || "").trim();
-          if (targetId) return rowId === targetId;
-          return String(row.phone || row.phone_number || "").trim() === String(lead.phone || "").trim() &&
-            String(row.project || row.projek || "").trim().toLowerCase() === String(lead.project || "").trim().toLowerCase();
-        });
-        if (sheetLead && normalizeSheetStatus(sheetLead.status) === expected) {
-          lead.statusRevision = Number(sheetLead.status_revision) || 0;
-          lead.statusUpdatedAt = sheetLead.status_updated_at || null;
-          return true;
-        }
-      }
-    } catch (error) {
-      console.warn("Lead status confirmation retry", error);
-    }
-    await new Promise((resolve) => window.setTimeout(resolve, 600));
-  }
-  return false;
+  lead.statusRevision = Number(result.status_revision) || lead.statusRevision || 0;
+  lead.statusUpdatedAt = result.status_updated_at || lead.statusUpdatedAt || null;
+  return true;
 }
 
 async function updateLeadNotesInSheet(lead, notes) {
