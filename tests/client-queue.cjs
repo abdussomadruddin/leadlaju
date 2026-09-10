@@ -222,6 +222,23 @@ test('lead status updates use the same-origin confirmation proxy', () => {
   assert.match(proxy, /response\.status\(result\?\.ok \? 200 : 409\)/);
 });
 
+test('agents must save a note before selecting passed, rejected, or cancelled', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  assert.match(source, /AGENT_NOTE_REQUIRED_STATUSES = new Set\(\["passed", "rejected", "cancelled"\]\)/);
+  assert.match(source, /getCurrentUser\(\)\?\.role === "agent"/);
+  assert.match(source, /!String\(lead\.notes \|\| ""\)\.trim\(\)/);
+  assert.match(source, /"Simpan nota dahulu"/);
+  assert.match(source, /acting_role: currentUser\?\.role \|\| ""/);
+});
+
+test('notes are confirmed in Google Sheet before a modal status update', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const start = source.indexOf('async function updateContact(');
+  const body = source.slice(start, source.indexOf('\nasync function ', start + 1));
+  assert.ok(body.indexOf('await updateLeadNotesInSheet') < body.indexOf('await updateLeadStatusFromLog'));
+  assert.doesNotMatch(body, /if \(!remoteDatabaseMode\)/);
+});
+
 test('scheduled sheet sync does not write derived agent totals', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const start = source.indexOf('async function syncGoogleSheet(');

@@ -570,6 +570,7 @@ function updateLeadStatusLocked_(input) {
   const actingAgentId = String(input.acting_agent_id || input.actingAgentId || "").trim();
   const actingAgentName = String(input.acting_agent_name || input.actingAgentName || "").trim();
   const actingAgentEmail = String(input.acting_agent_email || input.actingAgentEmail || "").trim().toLowerCase();
+  const actingRole = String(input.acting_role || input.actingRole || "").trim().toLowerCase();
   if (statusIndex < 0) return { ok: false, error: "Kolum Status tidak dijumpai." };
 
   let updated = 0;
@@ -584,6 +585,16 @@ function updateLeadStatusLocked_(input) {
     const fallbackMatches = !id && phone && project && rowPhone === phone && rowProject === project;
 
     if (idMatches || fallbackMatches) {
+      const stage = normalizeLeadStage_(status);
+      const requiresAgentNote = ["passed", "rejected", "cancelled"].includes(stage);
+      const isAgentAction = actingRole === "agent" || Boolean(actingAgentId);
+      if (isAgentAction && requiresAgentNote && !getCell_(headers, row, "notes").trim()) {
+        return {
+          ok: false,
+          note_required: true,
+          error: `Simpan nota dahulu sebelum status ditukar kepada ${status}.`,
+        };
+      }
       // Status has its own revision. Assignment revisions only protect runtime actions
       // such as expiring or reassigning a lead, so a valid status edit from another
       // signed-in device cannot be discarded after the lead's assignment changes.

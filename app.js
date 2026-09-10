@@ -34,6 +34,7 @@ const LEAD_STATUS_OPTIONS = [
   { value: "client", label: "Client" },
 ];
 const LEAD_STATUS_LABELS = Object.fromEntries(LEAD_STATUS_OPTIONS.map((status) => [status.value, status.label]));
+const AGENT_NOTE_REQUIRED_STATUSES = new Set(["passed", "rejected", "cancelled"]);
 
 const defaultState = {
   currentUserId: "agent-aina",
@@ -2134,6 +2135,7 @@ async function updateLeadStatusInSheet(lead, status) {
         project: lead.project,
         name: lead.name,
         status: sheetStatus,
+        acting_role: currentUser?.role || "",
         acting_agent_id: actingAgent?.id || "",
         acting_agent_name: actingAgent?.name || "",
         acting_agent_email: actingAgent?.email || "",
@@ -3785,10 +3787,8 @@ async function updateContact(event) {
   }
   try {
     await persistLead(lead);
-    if (!remoteDatabaseMode) {
-      const noteSynced = await updateLeadNotesInSheet(lead, lead.notes);
-      if (!noteSynced) throw new Error("Nota tidak dapat disimpan ke Google Sheet.");
-    }
+    const noteSynced = await updateLeadNotesInSheet(lead, lead.notes);
+    if (!noteSynced) throw new Error("Nota tidak dapat disimpan ke Google Sheet.");
     if (getLeadVisualStatus(lead) !== nextStatus) {
       const statusSynced = await updateLeadStatusFromLog(lead.id, nextStatus, elements.contactStatus);
       if (!statusSynced) throw new Error("Status tidak dapat disahkan dalam Google Sheet.");
@@ -3836,10 +3836,9 @@ async function saveLeadNote(leadId, button = null) {
       });
       if (error) throw error;
       if (data === false) throw new Error("Anda hanya boleh edit nota lead yang boleh dilihat oleh akaun ini.");
-    } else {
-      const noteSynced = await updateLeadNotesInSheet(lead, nextNotes);
-      if (!noteSynced) throw new Error("Nota tidak dapat disimpan ke Google Sheet.");
     }
+    const noteSynced = await updateLeadNotesInSheet(lead, nextNotes);
+    if (!noteSynced) throw new Error("Nota tidak dapat disimpan ke Google Sheet.");
     saveState();
     if (leadNoteDrafts.get(draftKey) === submittedDraft) leadNoteDrafts.delete(draftKey);
     showToast("Nota disimpan", `Nota untuk ${lead.name} telah dikemas kini.`);
@@ -3862,6 +3861,19 @@ async function updateLeadStatusFromLog(leadId, nextStatus, field = null) {
 
   const normalizedStatus = normalizeSheetStatus(nextStatus);
   if (getLeadVisualStatus(lead) === normalizedStatus) return true;
+  if (
+    getCurrentUser()?.role === "agent" &&
+    AGENT_NOTE_REQUIRED_STATUSES.has(normalizedStatus) &&
+    !String(lead.notes || "").trim()
+  ) {
+    if (field) field.value = getLeadVisualStatus(lead);
+    showToast(
+      "Simpan nota dahulu",
+      `Nota diperlukan sebelum status ditukar kepada ${formatSheetStatus(normalizedStatus)}.`,
+      "error",
+    );
+    return false;
+  }
   if (pendingLeadStatusUpdates.has(leadId)) {
     if (field) field.value = pendingLeadStatusUpdates.get(leadId).status;
     showToast("Status sedang disimpan", "Tunggu kemas kini semasa selesai sebelum memilih status lain.");

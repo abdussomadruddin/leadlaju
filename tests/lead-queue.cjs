@@ -204,6 +204,16 @@ test('server persists and returns lead notes through the sheet', () => {
   assert.match(source, /notes: getCell_\(headers, row, "notes"\)/);
 });
 
+test('server rejects protected agent statuses when the shared note is empty', () => {
+  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const start = source.indexOf('function updateLeadStatusLocked_(');
+  const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
+  assert.match(body, /\["passed", "rejected", "cancelled"\]\.includes\(stage\)/);
+  assert.match(body, /actingRole === "agent" \|\| Boolean\(actingAgentId\)/);
+  assert.match(body, /!getCell_\(headers, row, "notes"\)\.trim\(\)/);
+  assert.match(body, /note_required: true/);
+});
+
 test('contacted status records an acting agent when assignment fields are empty', () => {
   const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
   const start = source.indexOf('function updateLeadStatusLocked_(');
