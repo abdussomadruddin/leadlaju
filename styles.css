@@ -1778,6 +1778,11 @@ svg {
   display: grid;
 }
 
+.appointment-list > .empty-state {
+  margin: 0;
+  padding: 28px 24px;
+}
+
 .appointment-item {
   display: grid;
   gap: 13px;
@@ -2449,6 +2454,12 @@ td small {
 .modal select {
   width: 100%;
   min-height: 45px;
+}
+
+.modal input[type="datetime-local"] {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .modal select {
