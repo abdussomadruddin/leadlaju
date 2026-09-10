@@ -1181,6 +1181,31 @@ svg {
   margin-top: 32px;
 }
 
+.new-lead-heading-actions,
+.agent-lead-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.agent-lead-controls .primary-button,
+.agent-lead-controls .secondary-button {
+  min-height: 36px;
+  padding: 0 13px;
+  font-size: 10px;
+}
+
+.stop-lead-button {
+  border-color: #ffd0d0;
+  color: #d93b3b;
+  background: #fff7f7;
+}
+
+.stop-lead-button:hover {
+  border-color: #f1a9a9;
+  background: #fff0f0;
+}
+
 .section-heading h2 {
   margin: 0;
   font-family: "Manrope", sans-serif;
@@ -3046,6 +3071,16 @@ td small {
 }
 
 @media (max-width: 420px) {
+  .section-heading {
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .new-lead-heading-actions {
+    align-items: flex-end;
+    flex-direction: column;
+  }
+
   .view {
     padding-top: 27px;
   }

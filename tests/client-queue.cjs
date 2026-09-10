@@ -246,6 +246,16 @@ test('scheduled sheet sync does not write derived agent totals', () => {
   assert.doesNotMatch(body, /await syncLeadHandledCountsToSheet\(\)/);
 });
 
+test('dashboard sync skips overlapping requests while a prior sync is running', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const start = source.indexOf('async function syncGoogleSheet(');
+  const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
+  assert.match(source, /let syncInProgress = false/);
+  assert.match(body, /if \(syncInProgress\) return false/);
+  assert.match(body, /syncInProgress = true/);
+  assert.match(body, /finally \{\s*syncInProgress = false/);
+});
+
 test('every device blocks agent access until its own notification permission is granted', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const html = fs.readFileSync('index.html', 'utf8');
@@ -287,4 +297,16 @@ test('daily pickup stats exclude pending assignments from the completed lead tot
   assert.match(body, /elements\.pickupDetails\.textContent/);
   assert.match(html, /Pickup rate hari ini/);
   assert.match(html, /id="pickup-details"/);
+});
+
+test('agents explicitly start and stop lead availability from the dashboard', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const html = fs.readFileSync('index.html', 'utf8');
+  assert.match(html, /id="get-lead-button"/);
+  assert.match(html, /id="stop-lead-button"/);
+  assert.match(source, /async function setAgentLeadAvailability\(ready\)/);
+  assert.match(source, /action: "set_agent_lead_availability"/);
+  assert.match(source, /syncPushSubscription\(true\)/);
+  assert.match(source, /elements\.getLeadButton\?\.addEventListener/);
+  assert.match(source, /elements\.stopLeadButton\?\.addEventListener/);
 });

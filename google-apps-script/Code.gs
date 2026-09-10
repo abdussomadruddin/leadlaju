@@ -102,6 +102,7 @@ const AGENT_FIELD_ALIASES = {
   password: ["password", "kata laluan", "kata_laluan", "temporary password", "temporary_password"],
   cooldownUntil: ["cooldown until", "cooldown_until", "rehat sehingga"],
   notificationEnabled: ["notification enabled", "notification_enabled", "loceng aktif"],
+  leadReady: ["lead ready", "lead_ready", "ready for leads", "sedia terima lead"],
   lastSeenAt: ["last seen at", "last_seen_at", "terakhir online"],
   presenceNotBefore: ["presence not before", "presence_not_before", "sesi online selepas"],
   eligibleProjectIds: ["eligible projects", "eligible_project_ids", "projek layak", "project ids"],
@@ -119,6 +120,7 @@ const AGENT_HEADERS = [
   { field: "password", label: "Password" },
   { field: "cooldownUntil", label: "Cooldown Until" },
   { field: "notificationEnabled", label: "Notification Enabled" },
+  { field: "leadReady", label: "Lead Ready" },
   { field: "lastSeenAt", label: "Last Seen At" },
   { field: "presenceNotBefore", label: "Presence Not Before" },
   { field: "eligibleProjectIds", label: "Eligible Projects" },
@@ -190,25 +192,15 @@ function doGet() {
     const projectsSheet = getOrCreateSheet_(spreadsheet, PROJECTS_SHEET_NAME);
     const remindersSheet = getOrCreateSheet_(spreadsheet, REMINDERS_SHEET_NAME);
     const pushSheet = getOrCreateSheet_(spreadsheet, PUSH_SUBSCRIPTIONS_SHEET_NAME);
-    const headers = ensureRequiredHeaders_(sheet);
-    const agentHeaders = ensureRequiredHeadersBySpec_(agentsSheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
-    const projectHeaders = ensureRequiredHeadersBySpec_(projectsSheet, PROJECT_HEADERS, PROJECT_FIELD_ALIASES);
-    const reminderHeaders = ensureRequiredHeadersBySpec_(remindersSheet, REMINDER_HEADERS, REMINDER_FIELD_ALIASES);
-    ensureRequiredHeadersBySpec_(pushSheet, PUSH_HEADERS, PUSH_FIELD_ALIASES);
-    ensureLeadIds_(sheet, headers);
-    ensureLeadTimestamps_(sheet, headers);
-    ensureLeadSources_(sheet, headers);
-    normalizeLegacyLeadStatuses_(sheet, headers);
-    ensureLeadValidations_(sheet, headers);
-    let leads = readLeads_(sheet);
-    const projects = ensureProjectsFromLeads_(projectsSheet, projectHeaders, leads);
-    ensureAgentProjectEligibility_(agentsSheet, agentHeaders, projects);
-    clearExpiredAgentCooldowns_(agentsSheet, agentHeaders);
-    let agents = readAgents_(agentsSheet, agentHeaders);
-    if (reconcileLeadAgentReferences_(sheet, headers, agents)) leads = readLeads_(sheet);
-    if (syncAgentHandledCounts_(leads, agentsSheet, agentHeaders)) {
-      agents = readAgents_(agentsSheet, agentHeaders);
-    }
+    // Dashboard reads must stay read-only. Repairing data, queue maintenance, and
+    // derived agent counts run in refreshSheetTemplate_ via the installed trigger.
+    const headers = readExistingHeaders_(sheet);
+    const agentHeaders = readExistingHeaders_(agentsSheet);
+    const projectHeaders = readExistingHeaders_(projectsSheet);
+    const reminderHeaders = readExistingHeaders_(remindersSheet);
+    const leads = readLeads_(sheet);
+    const projects = readProjects_(projectsSheet, projectHeaders);
+    const agents = readAgents_(agentsSheet, agentHeaders);
     const followUpReminder = readLatestReminder_(remindersSheet, reminderHeaders);
     return jsonResponse({
       ok: true,
@@ -223,6 +215,11 @@ function doGet() {
   } catch (error) {
     return jsonResponse({ ok: false, error: String(error), leads: [] });
   }
+}
+
+function readExistingHeaders_(sheet) {
+  if (!sheet || sheet.getLastColumn() < 1) return [];
+  return sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0].map(normalizeHeader_);
 }
 
 function reconcileLeadAgentReferences_(sheet, headers, agents) {
@@ -320,6 +317,11 @@ function doPost(event) {
     }
     if (payload.action === "update_agent_presence") {
       return jsonResponse(updateAgentPresence_(payload.agent || payload));
+    }
+    if (payload.action === "set_agent_lead_availability") {
+      const result = setAgentLeadAvailability_(payload.agent || payload);
+      if (result.ok && result.ready) rebalanceLeadQueue_();
+      return jsonResponse(result);
     }
     if (payload.action === "force_agent_offline") {
       const result = forceAgentOffline_(payload.agent || payload);
@@ -860,6 +862,7 @@ function upsertAgent_(input) {
     password: String(input.password || input.kata_laluan || input.temporary_password || "").trim(),
     cooldownUntil: String(input.cooldown_until || input.cooldownUntil || "").trim(),
     eligibleProjectIds: normalizeProjectIds_(input.eligible_project_ids || input.eligibleProjectIds),
+    leadReady: input.lead_ready ?? input.leadReady,
   };
 
   if (!agent.name || !agent.email) {
@@ -946,6 +949,7 @@ function buildAgentRow_(headers, agent, existingRow) {
   if (agent.eligibleProjectIds !== undefined) {
     setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "eligibleProjectIds", JSON.stringify(agent.eligibleProjectIds));
   }
+  if (agent.leadReady !== undefined) setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "leadReady", agent.leadReady ? "yes" : "no");
   if (agent.notificationEnabled !== undefined) setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "notificationEnabled", agent.notificationEnabled ? "yes" : "no");
   if (agent.lastSeenAt !== undefined) setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "lastSeenAt", agent.lastSeenAt || "");
   if (agent.presenceNotBefore !== undefined) setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "presenceNotBefore", agent.presenceNotBefore || "");
@@ -976,6 +980,28 @@ function updateAgentPresence_(input) {
   return { ok: false, error: "Ejen tidak dijumpai." };
 }
 
+function setAgentLeadAvailability_(input) {
+  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = getOrCreateSheet_(spreadsheet, AGENTS_SHEET_NAME);
+  const headers = ensureRequiredHeadersBySpec_(sheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
+  const values = sheet.getDataRange().getDisplayValues();
+  const id = String(input.id || "").trim();
+  const ready = Boolean(input.ready);
+
+  for (let index = 1; index < values.length; index += 1) {
+    if (getCellBySpec_(headers, values[index], AGENT_FIELD_ALIASES, "id") !== id) continue;
+    const row = values[index].slice(0, headers.length);
+    const active = normalizeAgentActive_(getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "active"));
+    const notificationsEnabled = getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "notificationEnabled") === "yes";
+    if (ready && active !== "active") return { ok: false, error: "Akaun ejen belum aktif." };
+    if (ready && !notificationsEnabled) return { ok: false, error: "Aktifkan notifikasi sebelum menerima lead." };
+    setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "leadReady", ready ? "yes" : "no");
+    sheet.getRange(index + 1, 1, 1, row.length).setValues([row]);
+    return { ok: true, ready };
+  }
+  return { ok: false, error: "Ejen tidak dijumpai." };
+}
+
 function forceAgentOffline_(input) {
   const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheet = getOrCreateSheet_(spreadsheet, AGENTS_SHEET_NAME);
@@ -987,6 +1013,7 @@ function forceAgentOffline_(input) {
     const row = values[index].slice(0, headers.length);
     const now = canonicalLeadTimestamp_(new Date());
     setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "notificationEnabled", "no");
+    setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "leadReady", "no");
     setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "lastSeenAt", "");
     setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "presenceNotBefore", now);
     sheet.getRange(index + 1, 1, 1, row.length).setValues([row]);
@@ -1015,10 +1042,10 @@ function readAgents_(sheet, headers) {
       cooldown_until: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "cooldownUntil"),
       eligible_project_ids: normalizeProjectIds_(getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "eligibleProjectIds")),
       notification_enabled: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "notificationEnabled") === "yes",
+      lead_ready: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "leadReady") === "yes",
       last_seen_at: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "lastSeenAt"),
-      online: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "notificationEnabled") === "yes" &&
-        Boolean(getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "lastSeenAt")) &&
-        Date.now() - parseLeadTimestamp_(getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "lastSeenAt")).getTime() < AGENT_PRESENCE_TIMEOUT_MINUTES * 60 * 1000,
+      online: getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "leadReady") === "yes" &&
+        getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "notificationEnabled") === "yes",
     }))
     .filter((agent) => agent.name && agent.email);
 }
@@ -1779,10 +1806,12 @@ function refreshSheetTemplate_() {
   const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
   const agentsSheet = getOrCreateSheet_(spreadsheet, AGENTS_SHEET_NAME);
+  const projectsSheet = getOrCreateSheet_(spreadsheet, PROJECTS_SHEET_NAME);
   const remindersSheet = getOrCreateSheet_(spreadsheet, REMINDERS_SHEET_NAME);
   const pushSheet = getOrCreateSheet_(spreadsheet, PUSH_SUBSCRIPTIONS_SHEET_NAME);
   const headers = ensureRequiredHeaders_(sheet);
   const agentHeaders = ensureRequiredHeadersBySpec_(agentsSheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
+  const projectHeaders = ensureRequiredHeadersBySpec_(projectsSheet, PROJECT_HEADERS, PROJECT_FIELD_ALIASES);
   ensureRequiredHeadersBySpec_(remindersSheet, REMINDER_HEADERS, REMINDER_FIELD_ALIASES);
   ensureRequiredHeadersBySpec_(pushSheet, PUSH_HEADERS, PUSH_FIELD_ALIASES);
   ensureLeadIds_(sheet, headers);
@@ -1790,7 +1819,13 @@ function refreshSheetTemplate_() {
   ensureLeadSources_(sheet, headers);
   normalizeLegacyLeadStatuses_(sheet, headers);
   ensureLeadValidations_(sheet, headers);
-  syncAgentHandledCounts_(readLeads_(sheet), agentsSheet, agentHeaders);
+  let leads = readLeads_(sheet);
+  const projects = ensureProjectsFromLeads_(projectsSheet, projectHeaders, leads);
+  ensureAgentProjectEligibility_(agentsSheet, agentHeaders, projects);
+  clearExpiredAgentCooldowns_(agentsSheet, agentHeaders);
+  const agents = readAgents_(agentsSheet, agentHeaders);
+  if (reconcileLeadAgentReferences_(sheet, headers, agents)) leads = readLeads_(sheet);
+  syncAgentHandledCounts_(leads, agentsSheet, agentHeaders);
   const pushResult = notifyUnsentLeadPushes_(spreadsheet, sheet, headers);
   return { ok: true, refreshed_at: new Date().toISOString(), push: pushResult };
 }

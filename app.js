@@ -99,6 +99,7 @@ let state = loadState();
 let activeView = "dashboard";
 let tickTimer;
 let syncTimer;
+let syncInProgress = false;
 let signupProjectSyncTimer;
 let followUpReminderTimer;
 let toastTimer;
@@ -192,6 +193,9 @@ const elements = {
   activityList: document.querySelector("#activity-list"),
   teamList: document.querySelector("#team-list"),
   onlineCount: document.querySelector("#online-count"),
+  agentLeadControls: document.querySelector("#agent-lead-controls"),
+  getLeadButton: document.querySelector("#get-lead-button"),
+  stopLeadButton: document.querySelector("#stop-lead-button"),
   leadsTableBody: document.querySelector("#leads-table-body"),
   leadSearch: document.querySelector("#lead-search"),
   leadFilter: document.querySelector("#lead-filter"),
@@ -835,7 +839,10 @@ async function handleAgentSignup(event) {
 
 async function logout() {
   const user = getCurrentUser();
-  if (user?.role === "agent") await updateAgentPresence(false);
+  if (user?.role === "agent") {
+    await setAgentLeadAvailability(false);
+    await updateAgentPresence(false);
+  }
   try {
     const registration = await registerServiceWorker();
     const subscription = await registration?.pushManager?.getSubscription();
@@ -1754,6 +1761,7 @@ function normalizeSheetAgent(input) {
     cooldownUntil: normalizeCooldownUntil(input.cooldown_until || input.cooldownUntil),
     online: Boolean(input.online),
     notificationEnabled: Boolean(input.notification_enabled),
+    leadReady: Boolean(input.lead_ready),
     eligibleProjectIds: normalizeProjectIds(input.eligible_project_ids || input.eligibleProjectIds),
   };
 }
@@ -2230,6 +2238,7 @@ function agentSheetPayload(agent) {
     cooldown_until: normalizeCooldownUntil(agent.cooldownUntil)
       ? new Date(normalizeCooldownUntil(agent.cooldownUntil)).toISOString()
       : "",
+    lead_ready: Boolean(agent.leadReady),
     eligible_project_ids: normalizeProjectIds(agent.eligibleProjectIds),
   };
 }
@@ -2252,6 +2261,49 @@ async function updateAgentPresence(online, force = false) {
   }, "Agent presence update failed", { waitForSend: true });
   if (updated) lastAgentPresenceHeartbeatAt = online ? now : 0;
   return updated;
+}
+
+async function setAgentLeadAvailability(ready) {
+  const user = getCurrentUser();
+  if (!user?.id || user.role !== "agent") return false;
+  if (ready && (!("Notification" in window) || Notification.permission !== "granted")) {
+    enforceAgentNotificationAccess();
+    showToast("Aktifkan loceng dahulu", "Benarkan notifikasi sebelum menekan GET LEAD.", "error");
+    return false;
+  }
+
+  if (ready) {
+    const subscribed = await syncPushSubscription(true).catch(() => false);
+    if (!subscribed) {
+      showToast("Notifikasi belum sedia", "Pastikan loceng dan notifikasi pelayar telah diaktifkan sebelum GET LEAD.", "error");
+      return false;
+    }
+    await updateAgentPresence(true, true);
+  }
+
+  const button = ready ? elements.getLeadButton : elements.stopLeadButton;
+  button.disabled = true;
+  const updated = await postGoogleSheetAction({
+    action: "set_agent_lead_availability",
+    agent: { id: user.id, ready },
+  }, "Lead availability update failed", { waitForSend: true });
+  button.disabled = false;
+  if (!updated) {
+    showToast("Status tidak dikemas kini", "Semak sambungan dan cuba lagi.", "error");
+    return false;
+  }
+
+  user.leadReady = ready;
+  user.online = ready && Notification.permission === "granted";
+  saveState();
+  renderAll();
+  await syncGoogleSheet({ silent: true, notifyNewLeads: true });
+  showToast(
+    ready ? "Sedia menerima lead" : "Agihan lead dihentikan",
+    ready ? "Anda kini dimasukkan ke giliran agihan lead baharu." : "Lead baharu tidak akan dihantar kepada anda.",
+    ready ? "success" : "default",
+  );
+  return true;
 }
 
 function enforceAgentNotificationAccess() {
@@ -2358,6 +2410,7 @@ async function syncAgentsFromSheet(sheetAgentRows) {
         cooldownUntil: sheetAgent.cooldownUntil,
         online: sheetAgent.online,
         notificationEnabled: sheetAgent.notificationEnabled,
+        leadReady: sheetAgent.leadReady,
         eligibleProjectIds: sheetAgent.eligibleProjectIds,
       };
       if (sheetAgent.password.length >= 8) {
@@ -2393,6 +2446,7 @@ async function syncAgentsFromSheet(sheetAgentRows) {
       cooldownUntil: sheetAgent.cooldownUntil,
       online: sheetAgent.online,
       notificationEnabled: sheetAgent.notificationEnabled,
+      leadReady: sheetAgent.leadReady,
       eligibleProjectIds: sheetAgent.eligibleProjectIds,
     });
     result.added += 1;
@@ -2952,6 +3006,7 @@ function renderActiveLead() {
   elements.navLeadCount.textContent = visibleLeads.length;
   elements.notificationCount.textContent = newLeadCount;
   elements.notificationCount.style.display = newLeadCount ? "grid" : "none";
+  renderAgentLeadControls();
 
   if (!lead) {
     lastRenderedActiveLeadKey = null;
@@ -2995,6 +3050,16 @@ function renderActiveLead() {
   }
 
   updateCountdown();
+}
+
+function renderAgentLeadControls() {
+  const user = getCurrentUser();
+  const isAgent = user?.role === "agent";
+  elements.agentLeadControls.hidden = !isAgent;
+  if (!isAgent) return;
+  const ready = Boolean(user.leadReady);
+  elements.getLeadButton.hidden = ready;
+  elements.stopLeadButton.hidden = !ready;
 }
 
 function updateCountdown() {
@@ -3086,20 +3151,21 @@ function renderActivities() {
 function renderTeam() {
   const activeAgents = state.agents.filter((agent) => agent.role === "agent" && agent.online);
   elements.onlineCount.textContent = `${activeAgents.length} online`;
-  elements.teamList.innerHTML = state.agents
-    .filter((agent) => agent.role === "agent")
+  elements.teamList.innerHTML = activeAgents.length
+    ? activeAgents
     .map(
       (agent, index) => `
         <div class="team-member">
           <span class="member-avatar">${initials(agent.name)}</span>
           <span>
             <strong>${escapeHtml(agent.name)}</strong>
-            <small>${agent.online ? `Online · Giliran #${activeAgents.findIndex((item) => item.id === agent.id) + 1}` : "Offline"}</small>
+            <small>GET LEAD aktif · Giliran #${index + 1}</small>
           </span>
-          <span class="member-state ${agent.online ? "" : "offline"}" title="${agent.online ? "Online" : "Offline"}"></span>
+          <span class="member-state" title="Online dan sedia menerima lead"></span>
         </div>`,
     )
-    .join("");
+    .join("")
+    : '<div class="table-empty">Tiada ejen sedang sedia menerima lead.</div>';
 }
 
 const leadNoteDrafts = new Map();
@@ -3961,6 +4027,8 @@ async function syncGoogleSheet(options = {}) {
     showToast("URL diperlukan", "Masukkan Google Apps Script Web App URL.", "error");
     return false;
   }
+  if (syncInProgress) return false;
+  syncInProgress = true;
 
   elements.connectionResult.classList.remove("error");
   elements.connectionResult.innerHTML = '<span class="status-dot"></span><span>Sedang menyemak Google Sheet...</span>';
@@ -4093,6 +4161,8 @@ async function syncGoogleSheet(options = {}) {
     }
     console.error("Google Sheet sync failed", error);
     return false;
+  } finally {
+    syncInProgress = false;
   }
 }
 
@@ -4124,6 +4194,8 @@ document.querySelectorAll("[data-view-link]").forEach((button) => {
 
 elements.manualLeadButtons.forEach((button) => button.addEventListener("click", openManualLeadModal));
 elements.notificationButton.addEventListener("click", requestNotifications);
+elements.getLeadButton?.addEventListener("click", () => setAgentLeadAvailability(true));
+elements.stopLeadButton?.addEventListener("click", () => setAgentLeadAvailability(false));
 elements.enableRequiredNotifications.addEventListener("click", requestNotifications);
 elements.remindAgentsButton?.addEventListener("click", remindAllAgentsForFollowUp);
 elements.dismissAdminReminderButton?.addEventListener("click", dismissAdminReminder);

@@ -423,7 +423,13 @@
                 <span class="section-kicker red-dot">Perlu tindakan segera</span>
                 <h2>New Leads</h2>
               </div>
-              <span class="queue-label" id="queue-label">0 lead menunggu</span>
+              <div class="new-lead-heading-actions">
+                <div class="agent-lead-controls" id="agent-lead-controls" hidden>
+                  <button class="primary-button get-lead-button" id="get-lead-button" type="button">GET LEAD</button>
+                  <button class="secondary-button stop-lead-button" id="stop-lead-button" type="button" hidden>STOP LEAD</button>
+                </div>
+                <span class="queue-label" id="queue-label">0 lead menunggu</span>
+              </div>
             </div>
 
             <div id="active-lead-container"></div>

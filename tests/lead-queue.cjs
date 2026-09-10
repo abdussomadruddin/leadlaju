@@ -212,7 +212,6 @@ test('server counts every assigned non-new lead for each agent', () => {
   assert.match(body, /normalizeLeadStage_\(lead\.status\) === "new"/);
   assert.match(body, /counts\.set\(agentId, \(counts\.get\(agentId\) \|\| 0\) \+ 1\)/);
   assert.match(source, /syncAgentHandledCounts_\(leads, agentsSheet, agentHeaders\)/);
-  assert.match(source, /syncAgentHandledCounts_\(readLeads_\(sheet\), agentsSheet, agentHeaders\)/);
 
   const context = vm.createContext({});
   vm.runInContext(source, context);
@@ -226,6 +225,16 @@ test('server counts every assigned non-new lead for each agent', () => {
   assert.equal(counts.get('a'), 2);
   assert.equal(counts.get('b'), 1);
   assert.equal(counts.has(''), false);
+});
+
+test('dashboard GET is read-only while maintenance runs through the trigger refresh', () => {
+  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const start = source.indexOf('function doGet()');
+  const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
+  assert.match(body, /readExistingHeaders_\(sheet\)/);
+  assert.doesNotMatch(body, /ensureLeadIds_|ensureLeadTimestamps_|notifyUnsentLeadPushes_|syncAgentHandledCounts_/);
+  assert.match(source, /function refreshSheetTemplate_\(\)/);
+  assert.match(source, /syncAgentHandledCounts_\(leads, agentsSheet, agentHeaders\)/);
 });
 
 test('server rejects protected agent statuses when the shared note is empty', () => {
@@ -253,4 +262,14 @@ test('server reconciles obsolete lead agent IDs by email or name', () => {
   assert.match(source, /agentsByEmail\.get\(assignedEmail\) \|\| agentsByName\.get\(assignedName\)/);
   assert.match(source, /setRowValue_\(headers, nextRow, "assignedAgentId", matchedAgent\.id\)/);
   assert.match(source, /entry\.agentId = matchedAgent\.id/);
+});
+
+test('server only treats agents who selected GET LEAD as online for distribution', () => {
+  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  assert.match(source, /leadReady: \["lead ready", "lead_ready"/);
+  assert.match(source, /\{ field: "leadReady", label: "Lead Ready" \}/);
+  assert.match(source, /payload\.action === "set_agent_lead_availability"/);
+  assert.match(source, /function setAgentLeadAvailability_\(input\)/);
+  assert.match(source, /setRowValueBySpec_\(headers, row, AGENT_FIELD_ALIASES, "leadReady", ready \? "yes" : "no"\)/);
+  assert.match(source, /"leadReady"\) === "yes" &&\s*\n?\s*getCellBySpec_\(headers, row, AGENT_FIELD_ALIASES, "notificationEnabled"\) === "yes"/);
 });
