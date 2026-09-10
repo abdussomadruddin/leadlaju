@@ -174,10 +174,13 @@ test('agent signup requires and syncs active project choices', () => {
   assert.match(source, /setSignupError\("Pilih sekurang-kurangnya satu projek\."\)/);
   assert.match(source, /signupProjectSyncTimer = window\.setInterval\(syncSignupProjects/);
   assert.match(source, /eligible_project_ids: eligibleProjectIds/);
-  assert.match(source, /const signupSynced = await upsertAgentToSheet\(signupAgent\)/);
-  assert.match(source, /if \(!signupSynced\)/);
+  assert.match(source, /await submitAgentSignupToSheet\(signupAgent\)/);
+  assert.match(source, /fetch\("\/api\/agent-signup"/);
+  assert.match(fs.readFileSync('api/agent-signup.js', 'utf8'), /payload\.action !== "add_agent"/);
   assert.match(server, /agent\.role !== "admin" && !agent\.eligibleProjectIds\.length/);
   assert.match(server, /Pilihan projek tidak sah atau projek sudah dinyahaktifkan/);
+  assert.match(server, /function sendNewAgentSignupPush_\(spreadsheet, agent\)/);
+  assert.match(server, /adminOnly: true/);
 });
 
 test('lead and agent deletion require two confirmations', () => {

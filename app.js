@@ -838,11 +838,12 @@ async function handleAgentSignup(event) {
     saveState();
   }
 
-  const signupSynced = await upsertAgentToSheet(signupAgent);
-  if (!signupSynced) {
+  try {
+    await submitAgentSignupToSheet(signupAgent);
+  } catch (error) {
     state.agents = state.agents.filter((agent) => agent.id !== signupAgent.id);
     saveState();
-    setSignupError("Permohonan tidak dapat disimpan. Senarai projek mungkin telah berubah; semak pilihan dan cuba lagi.");
+    setSignupError(error.message || "Permohonan tidak dapat disimpan. Semak pilihan projek dan cuba lagi.");
     await syncSignupProjects();
     return;
   }
@@ -2382,6 +2383,22 @@ async function upsertAgentToSheet(agent) {
     },
     "Agent sheet upsert failed",
   );
+}
+
+async function submitAgentSignupToSheet(agent) {
+  const response = await fetch("/api/agent-signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "add_agent",
+      agent: agentSheetPayload(agent),
+    }),
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok || !result?.ok) {
+    throw new Error(result?.error || "Permohonan tidak dapat disimpan di Google Sheet.");
+  }
+  return result;
 }
 
 async function deleteAgentFromSheet(agent) {

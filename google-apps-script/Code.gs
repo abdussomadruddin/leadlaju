@@ -902,6 +902,9 @@ function upsertAgent_(input) {
   }
 
   sheet.appendRow(row);
+  if (agent.role !== "admin" && agent.active === "inactive") {
+    sendNewAgentSignupPush_(spreadsheet, agent);
+  }
   return { ok: true, agent };
 }
 
@@ -1254,6 +1257,7 @@ function readPushSubscriptions_(spreadsheet, options) {
     .filter((item) => {
       if (!item.endpoint || !item.p256dh || !item.auth) return false;
       if (item.active !== "active") return false;
+      if (options && options.adminOnly && !roleIsAdmin_(item.role)) return false;
       if (options && options.agentOnly && roleIsAdmin_(item.role)) return false;
       if (item.agentId && activeAgentIds.has(item.agentId)) return true;
       if (item.agentEmail && activeAgentEmails.has(item.agentEmail)) return true;
@@ -1330,6 +1334,25 @@ function sendFollowUpReminderPush_(spreadsheet, reminder) {
     requireInteraction: true,
   };
   return sendPushViaApi_(spreadsheet, subscriptions, notification);
+}
+
+function sendNewAgentSignupPush_(spreadsheet, agent) {
+  const subscriptions = readPushSubscriptions_(spreadsheet, { adminOnly: true });
+  const projectsSheet = getOrCreateSheet_(spreadsheet, PROJECTS_SHEET_NAME);
+  const projectHeaders = ensureRequiredHeadersBySpec_(projectsSheet, PROJECT_HEADERS, PROJECT_FIELD_ALIASES);
+  const projectNamesById = new Map(readProjects_(projectsSheet, projectHeaders)
+    .map((project) => [project.id, project.name]));
+  const projectNames = agent.eligibleProjectIds
+    .map((projectId) => projectNamesById.get(projectId) || projectId)
+    .join(", ");
+  return sendPushViaApi_(spreadsheet, subscriptions, {
+    title: "Permohonan ejen baharu",
+    body: `${agent.name} menunggu approval${projectNames ? ` untuk ${projectNames}` : ""}.`,
+    tag: `leadlaju-agent-signup-${agent.id}`,
+    view: "agents",
+    url: "/?view=agents",
+    requireInteraction: true,
+  });
 }
 
 function getLeadPushKeys_() {
