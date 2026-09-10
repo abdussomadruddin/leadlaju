@@ -2421,12 +2421,51 @@ td small {
   line-height: 1.6;
 }
 
+.home-screen-help {
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px solid #d8e5fb;
+  border-radius: 8px;
+  color: var(--ink-700);
+  background: #f6f9ff;
+  text-align: left;
+}
+
+.home-screen-help strong {
+  display: block;
+  color: var(--ink-900);
+  font-size: 12px;
+}
+
+.home-screen-help p {
+  margin: 5px 0 0;
+  color: var(--ink-500);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
 .notification-enable-button {
   display: flex;
   width: 100%;
   align-items: center;
   justify-content: center;
   gap: 10px;
+}
+
+.notification-home-screen-button,
+.notification-close-button {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.notification-home-screen-button {
+  min-height: 44px;
+}
+
+.notification-close-button {
+  min-height: 36px;
+  color: var(--ink-500);
+  font-size: 11px;
 }
 
 .notification-enable-button svg {

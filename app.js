@@ -118,6 +118,8 @@ const pendingLeadNoteUpdates = new Map();
 let serviceWorkerRegistrationPromise = null;
 let notificationAudioContext = null;
 let lastAgentPresenceHeartbeatAt = 0;
+let deferredInstallPrompt = null;
+let notificationReminderDismissedForSession = false;
 let agentPresenceSessionStartedAt = 0;
 let notifiedLeadKeys = loadNotifiedLeadKeys();
 let sentFollowUpReminderKeys = loadFollowUpReminderKeys();
@@ -174,6 +176,11 @@ const elements = {
   notificationButton: document.querySelector("#notification-button"),
   notificationRequiredModal: document.querySelector("#notification-required-modal"),
   enableRequiredNotifications: document.querySelector("#enable-required-notifications"),
+  addToHomeScreen: document.querySelector("#add-to-home-screen"),
+  closeNotificationReminder: document.querySelector("#close-notification-reminder"),
+  homeScreenHelp: document.querySelector("#home-screen-help"),
+  homeScreenHelpTitle: document.querySelector("#home-screen-help-title"),
+  homeScreenHelpMessage: document.querySelector("#home-screen-help-message"),
   remindAgentsButton: document.querySelector("#remind-agents-button"),
   adminReminderAlert: document.querySelector("#admin-reminder-alert"),
   adminReminderTitle: document.querySelector("#admin-reminder-title"),
@@ -2326,9 +2333,44 @@ function enforceAgentNotificationAccess() {
   const user = getCurrentUser();
   if (user?.role !== "agent") return;
   const granted = "Notification" in window && Notification.permission === "granted";
-  elements.notificationRequiredModal.classList.toggle("open", !granted);
-  elements.notificationRequiredModal.setAttribute("aria-hidden", String(granted));
+  const showReminder = !granted && !notificationReminderDismissedForSession;
+  elements.notificationRequiredModal.classList.toggle("open", showReminder);
+  elements.notificationRequiredModal.setAttribute("aria-hidden", String(!showReminder));
+  if (granted) notificationReminderDismissedForSession = false;
   if (granted) updateAgentPresence(true);
+}
+
+function isInstalledApp() {
+  return window.matchMedia?.("(display-mode: standalone)").matches || window.navigator.standalone === true;
+}
+
+function showHomeScreenHelp() {
+  const isIos = /iPad|iPhone|iPod/.test(window.navigator.userAgent);
+  elements.homeScreenHelp.hidden = false;
+  elements.homeScreenHelpTitle.textContent = isInstalledApp()
+    ? "Aplikasi sudah dipasang"
+    : "Tambah LeadLaju ke skrin utama";
+  elements.homeScreenHelpMessage.textContent = isInstalledApp()
+    ? "Buka aplikasi LeadLaju dari skrin utama, kemudian tekan loceng untuk benarkan notifikasi lead baharu."
+    : isIos
+      ? "Tekan ikon Share dalam pelayar, pilih Add to Home Screen, kemudian buka LeadLaju melalui ikon aplikasi dan aktifkan loceng."
+      : "Pilih Install atau Add to Home Screen dalam menu pelayar, kemudian buka LeadLaju sebagai aplikasi dan aktifkan loceng.";
+}
+
+async function addToHomeScreen() {
+  if (deferredInstallPrompt) {
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice.catch(() => null);
+    deferredInstallPrompt = null;
+    return;
+  }
+  showHomeScreenHelp();
+}
+
+function closeNotificationReminder() {
+  notificationReminderDismissedForSession = true;
+  elements.notificationRequiredModal.classList.remove("open");
+  elements.notificationRequiredModal.setAttribute("aria-hidden", "true");
 }
 
 async function upsertAgentToSheet(agent) {
@@ -2863,6 +2905,7 @@ async function requestNotifications() {
     await syncPushSubscription(true).catch((error) => console.warn("Push subscription sync failed", error));
     elements.notificationRequiredModal.classList.remove("open");
     elements.notificationRequiredModal.setAttribute("aria-hidden", "true");
+    notificationReminderDismissedForSession = false;
     await updateAgentPresence(true, true);
   }
   showToast(
@@ -4221,6 +4264,8 @@ elements.notificationButton.addEventListener("click", requestNotifications);
 elements.getLeadButton?.addEventListener("click", () => setAgentLeadAvailability(true));
 elements.stopLeadButton?.addEventListener("click", () => setAgentLeadAvailability(false));
 elements.enableRequiredNotifications.addEventListener("click", requestNotifications);
+elements.addToHomeScreen?.addEventListener("click", addToHomeScreen);
+elements.closeNotificationReminder?.addEventListener("click", closeNotificationReminder);
 elements.remindAgentsButton?.addEventListener("click", remindAllAgentsForFollowUp);
 elements.dismissAdminReminderButton?.addEventListener("click", dismissAdminReminder);
 elements.mobileMenu.addEventListener("click", () => elements.sidebar.classList.toggle("open"));
@@ -4276,6 +4321,16 @@ if ("serviceWorker" in navigator) {
     if (event.data?.type === "OPEN_VIEW") switchView(event.data.view || "dashboard");
   });
 }
+
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  deferredInstallPrompt = event;
+});
+
+window.addEventListener("appinstalled", () => {
+  deferredInstallPrompt = null;
+  showToast("LeadLaju dipasang", "Buka aplikasi dari skrin utama dan aktifkan loceng untuk notifikasi lead baharu.", "success");
+});
 
 window.addEventListener("focus", () => {
   checkFollowUpReminder();

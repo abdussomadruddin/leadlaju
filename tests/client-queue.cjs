@@ -265,11 +265,17 @@ test('every device blocks agent access until its own notification permission is 
   const syncStart = source.indexOf('async function syncGoogleSheet(');
   const syncBody = source.slice(syncStart, source.indexOf('\nfunction ', syncStart + 1));
   assert.match(accessBody, /Notification\.permission === "granted"/);
-  assert.match(accessBody, /notificationRequiredModal\.classList\.toggle\("open", !granted\)/);
+  assert.match(accessBody, /const showReminder = !granted && !notificationReminderDismissedForSession/);
+  assert.match(accessBody, /notificationRequiredModal\.classList\.toggle\("open", showReminder\)/);
   assert.match(syncBody, /enforceAgentNotificationAccess\(\)/);
-  assert.match(html, /Peranti ini belum mengaktifkan notifikasi/);
+  assert.match(html, /Tambah LeadLaju ke skrin utama/);
   assert.match(html, /id="enable-required-notifications"/);
+  assert.match(html, /id="add-to-home-screen"/);
+  assert.match(html, /id="close-notification-reminder"/);
   assert.match(source, /enableRequiredNotifications\.addEventListener\("click", requestNotifications\)/);
+  assert.match(source, /function addToHomeScreen\(\)/);
+  assert.match(source, /beforeinstallprompt/);
+  assert.match(source, /function closeNotificationReminder\(\)/);
 });
 
 test('dashboard and Google Sheet use one official lead status list', () => {
