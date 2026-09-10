@@ -622,12 +622,22 @@ function showLogin() {
   window.clearInterval(tickTimer);
   window.clearInterval(syncTimer);
   window.clearInterval(followUpReminderTimer);
-  elements.sidebar.classList.remove("open");
+  setMobileSidebarOpen(false);
   elements.appShell.setAttribute("aria-hidden", "true");
   document.body.classList.remove("auth-pending", "authenticated");
   document.body.classList.add("logged-out");
   showSignupForm(false);
   window.setTimeout(() => elements.loginEmail.focus(), 80);
+}
+
+function isMobileSidebarViewport() {
+  return window.matchMedia("(max-width: 900px)").matches;
+}
+
+function setMobileSidebarOpen(open) {
+  elements.sidebar.classList.toggle("open", open);
+  elements.mobileMenu.setAttribute("aria-expanded", String(open));
+  elements.mobileMenu.setAttribute("aria-label", open ? "Tutup menu" : "Buka menu");
 }
 
 function setLoginError(message) {
@@ -3626,7 +3636,7 @@ function switchView(viewName) {
         }).format(new Date())
       : "LeadLaju";
   renderUser();
-  elements.sidebar.classList.remove("open");
+  setMobileSidebarOpen(false);
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -4336,7 +4346,42 @@ elements.addToHomeScreen?.addEventListener("click", addToHomeScreen);
 elements.closeNotificationReminder?.addEventListener("click", closeNotificationReminder);
 elements.remindAgentsButton?.addEventListener("click", remindAllAgentsForFollowUp);
 elements.dismissAdminReminderButton?.addEventListener("click", dismissAdminReminder);
-elements.mobileMenu.addEventListener("click", () => elements.sidebar.classList.toggle("open"));
+elements.mobileMenu.addEventListener("click", () => {
+  setMobileSidebarOpen(!elements.sidebar.classList.contains("open"));
+});
+document.addEventListener("click", (event) => {
+  if (!isMobileSidebarViewport() || !elements.sidebar.classList.contains("open")) return;
+  if (Date.now() - mobileSidebarLastGestureAt < 500) return;
+  if (elements.sidebar.contains(event.target) || elements.mobileMenu.contains(event.target)) return;
+  setMobileSidebarOpen(false);
+});
+
+let mobileSidebarTouchStart = null;
+let mobileSidebarLastGestureAt = 0;
+document.addEventListener("touchstart", (event) => {
+  if (!isMobileSidebarViewport() || event.touches.length !== 1) return;
+  const touch = event.touches[0];
+  mobileSidebarTouchStart = { x: touch.clientX, y: touch.clientY };
+}, { passive: true });
+document.addEventListener("touchend", (event) => {
+  if (!mobileSidebarTouchStart || !isMobileSidebarViewport() || event.changedTouches.length !== 1) {
+    mobileSidebarTouchStart = null;
+    return;
+  }
+  const touch = event.changedTouches[0];
+  const deltaX = touch.clientX - mobileSidebarTouchStart.x;
+  const deltaY = touch.clientY - mobileSidebarTouchStart.y;
+  mobileSidebarTouchStart = null;
+  if (Math.abs(deltaX) < 64 || Math.abs(deltaX) <= Math.abs(deltaY) * 1.4) return;
+  if (deltaX < 0 && elements.sidebar.classList.contains("open")) {
+    mobileSidebarLastGestureAt = Date.now();
+    setMobileSidebarOpen(false);
+  }
+  if (deltaX > 0 && !elements.sidebar.classList.contains("open")) {
+    mobileSidebarLastGestureAt = Date.now();
+    setMobileSidebarOpen(true);
+  }
+}, { passive: true });
 elements.loginForm.addEventListener("submit", handleLogin);
 elements.loginEmail.addEventListener("input", () => setLoginError(""));
 elements.loginPassword.addEventListener("input", () => setLoginError(""));
@@ -4478,7 +4523,7 @@ document.addEventListener("keydown", (event) => {
     closeModal(elements.resetPasswordModal);
     closeModal(elements.agentPasswordModal);
     closeModal(elements.contactModal);
-    elements.sidebar.classList.remove("open");
+    setMobileSidebarOpen(false);
   }
 });
 

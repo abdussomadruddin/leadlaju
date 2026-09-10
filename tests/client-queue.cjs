@@ -354,6 +354,17 @@ test('agent sidebar hides the Google Sheet connection card', () => {
   assert.match(source, /item\.hidden = !isAdmin\(\)/);
 });
 
+test('mobile sidebar closes on content tap or left swipe and opens on right swipe', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const html = fs.readFileSync('index.html', 'utf8');
+  assert.match(source, /function setMobileSidebarOpen\(open\)/);
+  assert.match(source, /elements\.sidebar\.contains\(event\.target\)/);
+  assert.match(source, /deltaX < 0 && elements\.sidebar\.classList\.contains\("open"\)/);
+  assert.match(source, /deltaX > 0 && !elements\.sidebar\.classList\.contains\("open"\)/);
+  assert.match(source, /Math\.abs\(deltaX\) < 64/);
+  assert.match(html, /aria-controls="sidebar"/);
+});
+
 test('project dropdown shows live lead totals for every official status', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const css = fs.readFileSync('styles.css', 'utf8');
