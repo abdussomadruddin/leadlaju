@@ -2457,11 +2457,16 @@ td small {
 }
 
 .modal input[type="datetime-local"] {
+  -webkit-appearance: none;
+  appearance: none;
   display: block;
   inline-size: 100%;
+  width: -webkit-fill-available;
   min-width: 0;
   min-inline-size: 0;
   max-width: 100%;
+  max-inline-size: 100%;
+  overflow: hidden;
 }
 
 .modal select {
