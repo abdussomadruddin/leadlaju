@@ -183,6 +183,8 @@ test('sheet queue-state validation accepts every final lead status', () => {
   states.forEach((state) => assert.match(source, new RegExp(`"${state}"`)));
   assert.match(source, /function syncLeadQueueStateValidation_\(sheet, headers\)/);
   assert.match(source, /requireValueInList\(LEAD_QUEUE_STATE_VALUES, true\)/);
+  assert.match(source, /LEAD_VALIDATION_VERSION = "lead-status-queue-v2"/);
+  assert.match(source, /function ensureLeadValidations_\(sheet, headers\)/);
 });
 
 test('server persists and returns lead notes through the sheet', () => {

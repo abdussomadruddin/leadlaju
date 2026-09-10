@@ -34,6 +34,7 @@ const LEAD_QUEUE_STATE_VALUES = [
   "cancelled",
   "client",
 ];
+const LEAD_VALIDATION_VERSION = "lead-status-queue-v2";
 // Used only when a legacy sheet has no lead rows to seed the first project list.
 const INITIAL_PROJECT_NAMES = ["Armani Putrajaya", "BBSAP Sitiawan"];
 
@@ -198,8 +199,7 @@ function doGet() {
     ensureLeadTimestamps_(sheet, headers);
     ensureLeadSources_(sheet, headers);
     normalizeLegacyLeadStatuses_(sheet, headers);
-    syncLeadStatusValidation_(sheet, headers);
-    syncLeadQueueStateValidation_(sheet, headers);
+    ensureLeadValidations_(sheet, headers);
     let leads = readLeads_(sheet);
     const projects = ensureProjectsFromLeads_(projectsSheet, projectHeaders, leads);
     ensureAgentProjectEligibility_(agentsSheet, agentHeaders, projects);
@@ -1659,6 +1659,15 @@ function syncLeadQueueStateValidation_(sheet, headers) {
   return true;
 }
 
+function ensureLeadValidations_(sheet, headers) {
+  const properties = PropertiesService.getScriptProperties();
+  if (properties.getProperty("leadlaju_validation_version") === LEAD_VALIDATION_VERSION) return false;
+  syncLeadStatusValidation_(sheet, headers);
+  syncLeadQueueStateValidation_(sheet, headers);
+  properties.setProperty("leadlaju_validation_version", LEAD_VALIDATION_VERSION);
+  return true;
+}
+
 function canonicalLeadSource_(value) {
   const source = String(value || DEFAULT_SOURCE).trim();
   const lower = source.toLowerCase();
@@ -1743,8 +1752,7 @@ function refreshSheetTemplate_() {
   ensureLeadTimestamps_(sheet, headers);
   ensureLeadSources_(sheet, headers);
   normalizeLegacyLeadStatuses_(sheet, headers);
-  syncLeadStatusValidation_(sheet, headers);
-  syncLeadQueueStateValidation_(sheet, headers);
+  ensureLeadValidations_(sheet, headers);
   const pushResult = notifyUnsentLeadPushes_(spreadsheet, sheet, headers);
   return { ok: true, refreshed_at: new Date().toISOString(), push: pushResult };
 }
