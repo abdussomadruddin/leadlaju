@@ -319,3 +319,12 @@ test('login UI is not blocked by the initial Google Sheet agent sync', () => {
   assert.doesNotMatch(body, /await syncGoogleSheet\(\{ silent: true, agentsOnly: true \}\)/);
   assert.match(source, /if \(!user && initialAgentSyncPromise\)/);
 });
+
+test('an older server response cannot reset an agent GET LEAD choice', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const start = source.indexOf('function normalizeSheetAgent(input)');
+  const body = source.slice(start, source.indexOf('\nfunction sheetDedupeKey', start));
+  assert.match(body, /const hasLeadReady = Object\.prototype\.hasOwnProperty\.call\(input, "lead_ready"\)/);
+  assert.match(body, /const leadReady = hasLeadReady \? Boolean\(input\.lead_ready \?\? input\.leadReady\) : undefined/);
+  assert.match(source, /if \(sheetAgent\.leadReady !== undefined\) updates\.leadReady = sheetAgent\.leadReady/);
+});

@@ -1753,6 +1753,10 @@ function normalizeSheetAgent(input) {
   const name = String(input.name || input.nama || input.full_name || "").trim();
   if (!name || !email) return null;
 
+  const hasLeadReady = Object.prototype.hasOwnProperty.call(input, "lead_ready") ||
+    Object.prototype.hasOwnProperty.call(input, "leadReady");
+  const leadReady = hasLeadReady ? Boolean(input.lead_ready ?? input.leadReady) : undefined;
+
   return {
     id: String(input.id || input.user_id || input.agent_id || "").trim(),
     name,
@@ -1764,9 +1768,11 @@ function normalizeSheetAgent(input) {
     password: String(input.password || input.kata_laluan || input.temporary_password || "").trim(),
     createdAt: input.created_at || input.createdAt ? new Date(input.created_at || input.createdAt).getTime() : null,
     cooldownUntil: normalizeCooldownUntil(input.cooldown_until || input.cooldownUntil),
-    online: Boolean(input.online),
+    online: hasLeadReady
+      ? leadReady && Boolean(input.notification_enabled)
+      : Boolean(input.online),
     notificationEnabled: Boolean(input.notification_enabled),
-    leadReady: Boolean(input.lead_ready),
+    leadReady,
     eligibleProjectIds: normalizeProjectIds(input.eligible_project_ids || input.eligibleProjectIds),
   };
 }
@@ -2415,9 +2421,9 @@ async function syncAgentsFromSheet(sheetAgentRows) {
         cooldownUntil: sheetAgent.cooldownUntil,
         online: sheetAgent.online,
         notificationEnabled: sheetAgent.notificationEnabled,
-        leadReady: sheetAgent.leadReady,
         eligibleProjectIds: sheetAgent.eligibleProjectIds,
       };
+      if (sheetAgent.leadReady !== undefined) updates.leadReady = sheetAgent.leadReady;
       if (sheetAgent.password.length >= 8) {
         updates.password = sheetAgent.password;
       }
@@ -2451,7 +2457,7 @@ async function syncAgentsFromSheet(sheetAgentRows) {
       cooldownUntil: sheetAgent.cooldownUntil,
       online: sheetAgent.online,
       notificationEnabled: sheetAgent.notificationEnabled,
-      leadReady: sheetAgent.leadReady,
+      leadReady: sheetAgent.leadReady ?? false,
       eligibleProjectIds: sheetAgent.eligibleProjectIds,
     });
     result.added += 1;
