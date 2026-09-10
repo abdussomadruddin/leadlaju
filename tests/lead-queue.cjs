@@ -204,6 +204,30 @@ test('server persists and returns lead notes through the sheet', () => {
   assert.match(source, /notes: getCell_\(headers, row, "notes"\)/);
 });
 
+test('server counts every assigned non-new lead for each agent', () => {
+  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const start = source.indexOf('function countHandledLeadsByAgent_(');
+  const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
+  assert.match(body, /lead\.assigned_agent_id/);
+  assert.match(body, /normalizeLeadStage_\(lead\.status\) === "new"/);
+  assert.match(body, /counts\.set\(agentId, \(counts\.get\(agentId\) \|\| 0\) \+ 1\)/);
+  assert.match(source, /syncAgentHandledCounts_\(leads, agentsSheet, agentHeaders\)/);
+  assert.match(source, /syncAgentHandledCounts_\(readLeads_\(sheet\), agentsSheet, agentHeaders\)/);
+
+  const context = vm.createContext({});
+  vm.runInContext(source, context);
+  const counts = context.countHandledLeadsByAgent_([
+    { assigned_agent_id: 'a', status: 'New' },
+    { assigned_agent_id: 'a', status: 'Contacted' },
+    { assigned_agent_id: 'a', status: 'Rejected' },
+    { assigned_agent_id: 'b', status: 'Client' },
+    { assigned_agent_id: '', status: 'Passed' },
+  ]);
+  assert.equal(counts.get('a'), 2);
+  assert.equal(counts.get('b'), 1);
+  assert.equal(counts.has(''), false);
+});
+
 test('server rejects protected agent statuses when the shared note is empty', () => {
   const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
   const start = source.indexOf('function updateLeadStatusLocked_(');

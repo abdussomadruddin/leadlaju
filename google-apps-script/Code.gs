@@ -204,8 +204,11 @@ function doGet() {
     const projects = ensureProjectsFromLeads_(projectsSheet, projectHeaders, leads);
     ensureAgentProjectEligibility_(agentsSheet, agentHeaders, projects);
     clearExpiredAgentCooldowns_(agentsSheet, agentHeaders);
-    const agents = readAgents_(agentsSheet, agentHeaders);
+    let agents = readAgents_(agentsSheet, agentHeaders);
     if (reconcileLeadAgentReferences_(sheet, headers, agents)) leads = readLeads_(sheet);
+    if (syncAgentHandledCounts_(leads, agentsSheet, agentHeaders)) {
+      agents = readAgents_(agentsSheet, agentHeaders);
+    }
     const followUpReminder = readLatestReminder_(remindersSheet, reminderHeaders);
     return jsonResponse({
       ok: true,
@@ -1020,6 +1023,36 @@ function readAgents_(sheet, headers) {
     .filter((agent) => agent.name && agent.email);
 }
 
+function countHandledLeadsByAgent_(leads) {
+  const counts = new Map();
+  (Array.isArray(leads) ? leads : []).forEach((lead) => {
+    const agentId = String(lead.assigned_agent_id || "").trim();
+    if (!agentId || normalizeLeadStage_(lead.status) === "new") return;
+    counts.set(agentId, (counts.get(agentId) || 0) + 1);
+  });
+  return counts;
+}
+
+function syncAgentHandledCounts_(leads, sheet, headers) {
+  if (!sheet || sheet.getLastRow() < 2) return 0;
+  const handledIndex = headers.findIndex((header) => AGENT_FIELD_ALIASES.leadsHandled.includes(header));
+  if (handledIndex < 0) return 0;
+
+  const values = sheet.getDataRange().getDisplayValues();
+  const counts = countHandledLeadsByAgent_(leads);
+  let changed = 0;
+  const nextValues = values.slice(1).map((row) => {
+    const role = getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "role") || "agent";
+    const agentId = getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "id");
+    const current = Number(row[handledIndex]) || 0;
+    const next = role === "agent" ? counts.get(agentId) || 0 : current;
+    if (next !== current) changed += 1;
+    return [next];
+  });
+  if (changed) sheet.getRange(2, handledIndex + 1, nextValues.length, 1).setValues(nextValues);
+  return changed;
+}
+
 function clearExpiredAgentCooldowns_(sheet, headers, now) {
   if (!sheet || sheet.getLastRow() < 2) return 0;
   const values = sheet.getDataRange().getDisplayValues();
@@ -1749,7 +1782,7 @@ function refreshSheetTemplate_() {
   const remindersSheet = getOrCreateSheet_(spreadsheet, REMINDERS_SHEET_NAME);
   const pushSheet = getOrCreateSheet_(spreadsheet, PUSH_SUBSCRIPTIONS_SHEET_NAME);
   const headers = ensureRequiredHeaders_(sheet);
-  ensureRequiredHeadersBySpec_(agentsSheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
+  const agentHeaders = ensureRequiredHeadersBySpec_(agentsSheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
   ensureRequiredHeadersBySpec_(remindersSheet, REMINDER_HEADERS, REMINDER_FIELD_ALIASES);
   ensureRequiredHeadersBySpec_(pushSheet, PUSH_HEADERS, PUSH_FIELD_ALIASES);
   ensureLeadIds_(sheet, headers);
@@ -1757,6 +1790,7 @@ function refreshSheetTemplate_() {
   ensureLeadSources_(sheet, headers);
   normalizeLegacyLeadStatuses_(sheet, headers);
   ensureLeadValidations_(sheet, headers);
+  syncAgentHandledCounts_(readLeads_(sheet), agentsSheet, agentHeaders);
   const pushResult = notifyUnsentLeadPushes_(spreadsheet, sheet, headers);
   return { ok: true, refreshed_at: new Date().toISOString(), push: pushResult };
 }
