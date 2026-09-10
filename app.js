@@ -28,6 +28,7 @@ const LEAD_STATUS_OPTIONS = [
   { value: "passed", label: "Passed" },
   { value: "all_offer_presented", label: "All Offer Presented" },
   { value: "need_follow_up", label: "Need Follow Up" },
+  { value: "potential", label: "Potential" },
   { value: "rejected", label: "Rejected" },
   { value: "cancelled", label: "Cancelled" },
   { value: "client", label: "Client" },
@@ -1551,7 +1552,7 @@ function normalizeSheetStatus(value) {
     return "cancelled";
   }
   if (["potential", "potensi", "prospect", "prospek", "hot lead"].includes(compactStatus)) {
-    return "new";
+    return "potential";
   }
   if (["client", "customer", "pelanggan", "buyer", "pembeli"].includes(compactStatus)) {
     return "client";
@@ -2097,19 +2098,16 @@ async function postGoogleSheetAction(payload, errorLabel, options = {}) {
 }
 
 async function postGoogleSheetActionWithResponse(payload, errorLabel) {
-  const endpoint = getSheetEndpoint();
-  if (!endpoint) throw new Error("Web App URL Google Sheet belum ditetapkan.");
+  if (!getSheetEndpoint()) throw new Error("Web App URL Google Sheet belum ditetapkan.");
 
   try {
-    const response = await fetch(endpoint, {
+    const response = await fetch("/api/lead-status", {
       method: "POST",
-      headers: { "Content-Type": "text/plain;charset=UTF-8" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
-      keepalive: true,
     });
-    if (!response.ok) throw new Error(`Server membalas ralat ${response.status}.`);
-
-    const result = await response.json();
+    const result = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(result?.error || `Server membalas ralat ${response.status}.`);
     if (!result?.ok) throw new Error(result?.error || "Server tidak menyimpan perubahan status.");
 
     state.integration.connected = true;

@@ -210,8 +210,16 @@ test('edit lead modal receives the server-confirmed status revision', () => {
     source.indexOf("\nasync function ", source.indexOf("async function updateLeadStatusInSheet") + 1),
   );
   assert.match(statusWriter, /postGoogleSheetActionWithResponse/);
+  assert.match(source, /fetch\("\/api\/lead-status"/);
   assert.match(statusWriter, /lead\.statusRevision = Number\(result\.status_revision\)/);
   assert.doesNotMatch(statusWriter, /assignment_revision/);
+});
+
+test('lead status updates use the same-origin confirmation proxy', () => {
+  const proxy = fs.readFileSync('api/lead-status.js', 'utf8');
+  assert.match(proxy, /payload\.action !== "update_lead_status"/);
+  assert.match(proxy, /await fetch\(GOOGLE_SHEET_ENDPOINT/);
+  assert.match(proxy, /result\?\.ok/);
 });
 
 test('dashboard and Google Sheet use one official lead status list', () => {
@@ -219,13 +227,12 @@ test('dashboard and Google Sheet use one official lead status list', () => {
   const script = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
   const expected = [
     'New', 'Contacted', 'Passed', 'All Offer Presented',
-    'Need Follow Up', 'Rejected', 'Cancelled', 'Client',
+    'Need Follow Up', 'Potential', 'Rejected', 'Cancelled', 'Client',
   ];
   expected.forEach((status) => {
     assert.match(source, new RegExp(`label: "${status}"`));
     assert.match(script, new RegExp(`"${status}"`));
   });
-  assert.doesNotMatch(source, /label: "Potential"/);
   assert.match(script, /function normalizeLegacyLeadStatuses_\(sheet, headers\)/);
   assert.match(script, /if \(\["potential", "potensi", "prospect", "prospek", "hot lead"\]/);
 });

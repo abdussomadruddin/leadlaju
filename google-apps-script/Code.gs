@@ -17,6 +17,7 @@ const LEAD_STATUS_VALUES = [
   "Passed",
   "All Offer Presented",
   "Need Follow Up",
+  "Potential",
   "Rejected",
   "Cancelled",
   "Client",
@@ -1582,7 +1583,7 @@ function normalizeLeadStage_(value) {
     return "cancelled";
   }
   if (["potential", "potensi", "prospect", "prospek", "hot lead"].includes(compactStatus)) {
-    return "new";
+    return "potential";
   }
   if (["client", "customer", "pelanggan", "buyer", "pembeli"].includes(compactStatus)) {
     return "client";
@@ -1597,6 +1598,7 @@ function canonicalSheetStatus_(value) {
   if (stage === "all_offer_presented") return "All Offer Presented";
   if (stage === "rejected") return "Rejected";
   if (stage === "need_follow_up") return "Need Follow Up";
+  if (stage === "potential") return "Potential";
   if (stage === "cancelled") return "Cancelled";
   if (stage === "client") return "Client";
   return "New";
