@@ -4038,6 +4038,7 @@ async function syncGoogleSheet(options = {}) {
     }
     scheduleSync();
     renderAll();
+    enforceAgentNotificationAccess();
     const agentChanges =
       (agentSync.added || 0) +
       (agentSync.updated || 0) +

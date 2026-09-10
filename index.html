@@ -793,12 +793,22 @@
     </div>
 
     <div class="modal-backdrop" id="notification-required-modal" aria-hidden="true">
-      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="notification-required-title">
+      <div class="modal notification-required-card" role="dialog" aria-modal="true" aria-labelledby="notification-required-title" aria-describedby="notification-required-description">
         <div class="modal-heading">
           <div><span class="section-kicker">Tindakan diperlukan</span><h2 id="notification-required-title">Aktifkan notifikasi</h2></div>
         </div>
-        <p>Ejen mesti mengaktifkan loceng supaya lead baharu tidak terlepas.</p>
-        <button class="primary-button" id="enable-required-notifications" type="button">Aktifkan loceng</button>
+        <div class="notification-required-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24">
+            <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" />
+          </svg>
+        </div>
+        <p id="notification-required-description">Peranti ini belum mengaktifkan notifikasi. Tekan ikon loceng di bahagian kanan atas, atau aktifkan terus melalui butang di bawah untuk menerima lead.</p>
+        <button class="primary-button notification-enable-button" id="enable-required-notifications" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" />
+          </svg>
+          <span>Aktifkan loceng sekarang</span>
+        </button>
       </div>
     </div>
 

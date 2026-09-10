@@ -2301,6 +2301,54 @@ td small {
   animation: modal-in 180ms ease-out;
 }
 
+.notification-required-card {
+  text-align: center;
+}
+
+.notification-required-card .modal-heading {
+  justify-content: center;
+}
+
+.notification-required-icon {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  margin: 22px auto 16px;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--blue);
+  background: #eef4ff;
+}
+
+.notification-required-icon svg,
+.notification-enable-button svg {
+  width: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.notification-required-card > p {
+  margin: 0 auto 20px;
+  max-width: 340px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.notification-enable-button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.notification-enable-button svg {
+  width: 19px;
+}
+
 @keyframes modal-in {
   from {
     opacity: 0;

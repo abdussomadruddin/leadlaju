@@ -246,6 +246,21 @@ test('scheduled sheet sync does not write derived agent totals', () => {
   assert.doesNotMatch(body, /await syncLeadHandledCountsToSheet\(\)/);
 });
 
+test('every device blocks agent access until its own notification permission is granted', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const html = fs.readFileSync('index.html', 'utf8');
+  const accessStart = source.indexOf('function enforceAgentNotificationAccess(');
+  const accessBody = source.slice(accessStart, source.indexOf('\nasync function ', accessStart + 1));
+  const syncStart = source.indexOf('async function syncGoogleSheet(');
+  const syncBody = source.slice(syncStart, source.indexOf('\nfunction ', syncStart + 1));
+  assert.match(accessBody, /Notification\.permission === "granted"/);
+  assert.match(accessBody, /notificationRequiredModal\.classList\.toggle\("open", !granted\)/);
+  assert.match(syncBody, /enforceAgentNotificationAccess\(\)/);
+  assert.match(html, /Peranti ini belum mengaktifkan notifikasi/);
+  assert.match(html, /id="enable-required-notifications"/);
+  assert.match(source, /enableRequiredNotifications\.addEventListener\("click", requestNotifications\)/);
+});
+
 test('dashboard and Google Sheet use one official lead status list', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const script = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
