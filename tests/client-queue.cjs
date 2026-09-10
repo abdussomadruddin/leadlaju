@@ -222,6 +222,13 @@ test('lead status updates use the same-origin confirmation proxy', () => {
   assert.match(proxy, /response\.status\(result\?\.ok \? 200 : 409\)/);
 });
 
+test('scheduled sheet sync does not write derived agent totals', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const start = source.indexOf('async function syncGoogleSheet(');
+  const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
+  assert.doesNotMatch(body, /await syncLeadHandledCountsToSheet\(\)/);
+});
+
 test('dashboard and Google Sheet use one official lead status list', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const script = fs.readFileSync('google-apps-script/Code.gs', 'utf8');

@@ -500,20 +500,9 @@ function deleteLead_(input) {
 }
 
 function updateLeadStatus_(input) {
-  const lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(30000);
-  } catch (error) {
-    return { ok: false, error: "Agihan lead masih sibuk. Sila cuba semula." };
-  }
-  let result;
-  try {
-    result = updateLeadStatusLocked_(input);
-  } finally {
-    lock.releaseLock();
-  }
-  if (result.ok) rebalanceLeadQueue_();
-  return result;
+  // Status edits are independent from assignment revisions and must not wait for
+  // push delivery. The minute queue trigger will release or assign the next lead.
+  return updateLeadStatusLocked_(input);
 }
 
 function updateLeadNotes_(input) {

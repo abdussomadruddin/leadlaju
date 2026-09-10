@@ -3884,7 +3884,6 @@ async function updateLeadStatusFromLog(leadId, nextStatus, field = null) {
     renderAll();
 
     const statusSynced = await updateLeadStatusInSheet(lead, normalizedStatus);
-    await syncLeadHandledCountsToSheet();
     if (!statusSynced) throw new Error("Status tidak dapat disimpan ke Google Sheet.");
 
     showToast("Status dikemas kini", `${lead.name} kini ${formatSheetStatus(normalizedStatus)}.`);
@@ -4007,7 +4006,9 @@ async function syncGoogleSheet(options = {}) {
       await deleteLeads(removedLeads.map((lead) => lead.id));
     }
     const activatedQueuedLeads = [];
-    const handledSync = await syncLeadHandledCountsToSheet();
+    // A scheduled read must never write agent totals back to the server. Runtime
+    // counts and queue ownership are authoritative in Google Apps Script.
+    const handledSync = { updated: 0, pushed: 0 };
 
     state.integration.endpoint = endpoint;
     state.integration.interval = DEFAULT_SYNC_INTERVAL_SECONDS;

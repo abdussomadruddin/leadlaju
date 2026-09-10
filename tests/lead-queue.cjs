@@ -166,12 +166,13 @@ test('ordinary status changes do not advance the assignment revision', () => {
   assert.doesNotMatch(body, /assignmentRevision[^\n]*currentRevision \+ 1/);
 });
 
-test('status updates wait for the assignment lock instead of failing immediately', () => {
+test('status updates are not blocked by queue push delivery', () => {
   const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
   const start = source.indexOf('function updateLeadStatus_(');
   const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
-  assert.match(body, /lock\.waitLock\(30000\)/);
-  assert.doesNotMatch(body, /tryLock\(8000\)/);
+  assert.match(body, /return updateLeadStatusLocked_\(input\)/);
+  assert.doesNotMatch(body, /LockService/);
+  assert.doesNotMatch(body, /rebalanceLeadQueue_/);
 });
 
 test('new status updates return the new status revision before queue handling', () => {
