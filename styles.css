@@ -868,8 +868,10 @@ svg {
 }
 
 .refresh-button svg {
-  width: 17px;
+  width: 18px;
+  height: 18px;
   fill: none;
+  overflow: visible;
   stroke: currentColor;
   stroke-linecap: round;
   stroke-linejoin: round;
