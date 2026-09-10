@@ -334,6 +334,18 @@ test('login UI is not blocked by the initial Google Sheet agent sync', () => {
   assert.match(source, /if \(!user && initialAgentSyncPromise\)/);
 });
 
+test('logout reaches the login screen before network cleanup completes', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const start = source.indexOf('function logout()');
+  const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
+  assert.match(source, /function sendAgentLogoutState\(user\)/);
+  assert.match(source, /function cleanUpPushAfterLogout\(\)/);
+  assert.doesNotMatch(body, /await setAgentLeadAvailability/);
+  assert.doesNotMatch(body, /await updateAgentPresence/);
+  assert.ok(body.indexOf('showLogin()') < body.indexOf('cleanUpPushAfterLogout()'));
+  assert.match(body, /localStorage\.removeItem\(AUTH_KEY\)/);
+});
+
 test('an older server response cannot reset an agent GET LEAD choice', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const start = source.indexOf('function normalizeSheetAgent(input)');

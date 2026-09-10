@@ -852,12 +852,24 @@ async function handleAgentSignup(event) {
   setLoginError("Permohonan dihantar. Tunggu admin approve, kemudian log masuk guna emel dan kata laluan ini.");
 }
 
-async function logout() {
-  const user = getCurrentUser();
-  if (user?.role === "agent") {
-    await setAgentLeadAvailability(false);
-    await updateAgentPresence(false);
-  }
+function sendAgentLogoutState(user) {
+  if (!user?.id || user.role !== "agent") return;
+  postGoogleSheetAction({
+    action: "set_agent_lead_availability",
+    agent: { id: user.id, ready: false },
+  }, "Agent logout availability update failed").catch(() => {});
+  postGoogleSheetAction({
+    action: "update_agent_presence",
+    agent: {
+      id: user.id,
+      online: false,
+      notification_enabled: false,
+      session_started_at: agentPresenceSessionStartedAt,
+    },
+  }, "Agent logout presence update failed").catch(() => {});
+}
+
+async function cleanUpPushAfterLogout() {
   try {
     const registration = await registerServiceWorker();
     const subscription = await registration?.pushManager?.getSubscription();
@@ -867,13 +879,23 @@ async function logout() {
   } catch (error) {
     console.error("Push logout cleanup failed", error);
   }
-  localStorage.removeItem("leadlaju-push-subscription-owner");
-  if (remoteDatabaseClient) {
-    await remoteDatabaseClient.auth.signOut();
+}
+
+function logout() {
+  const user = getCurrentUser();
+  if (user?.role === "agent") {
+    user.leadReady = false;
+    user.online = false;
+    user.notificationEnabled = false;
+    saveState();
+    sendAgentLogoutState(user);
   }
+  localStorage.removeItem("leadlaju-push-subscription-owner");
   localStorage.removeItem(AUTH_KEY);
   remoteDatabaseMode = false;
   showLogin();
+  if (remoteDatabaseClient) remoteDatabaseClient.auth.signOut().catch(() => {});
+  cleanUpPushAfterLogout();
 }
 
 function togglePasswordVisibility() {
