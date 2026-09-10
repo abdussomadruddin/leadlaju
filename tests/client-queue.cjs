@@ -7,7 +7,7 @@ test('delayed sync cannot overwrite a completed or pending status edit', async (
   const source = fs.readFileSync('app.js', 'utf8');
   const start = source.indexOf('async function addLead(');
   const end = source.indexOf('\nfunction ', start + 1);
-  const lead = { id: 'local', dedupeKey: 'sheet-id', status: 'potential' };
+  const lead = { id: 'local', dedupeKey: 'sheet-id', status: 'need_follow_up' };
   const pending = new Map();
   const context = vm.createContext({
     state: { leads: [lead] }, pendingLeadStatusUpdates: pending,
@@ -18,14 +18,14 @@ test('delayed sync cannot overwrite a completed or pending status edit', async (
   vm.runInContext(source.slice(start, end), context);
   const row = { name: 'Test', phone: '601234', status: 'Contacted' };
   assert.equal(await context.addLead(row, { updateExisting: true, syncStartedAt: 100 }), false);
-  assert.equal(lead.status, 'potential');
-  pending.set('local', { status: 'potential' });
+  assert.equal(lead.status, 'need_follow_up');
+  pending.set('local', { status: 'need_follow_up' });
   assert.equal(await context.addLead(row, { updateExisting: true, syncStartedAt: 300 }), false);
-  assert.equal(lead.status, 'potential');
+  assert.equal(lead.status, 'need_follow_up');
   pending.clear();
   lead.statusRevision = 5;
   assert.equal(await context.addLead({ ...row, status_revision: 4 }, { updateExisting: true, syncStartedAt: 400 }), false);
-  assert.equal(lead.status, 'potential');
+  assert.equal(lead.status, 'need_follow_up');
 });
 
 function setup(leads) {
@@ -212,4 +212,20 @@ test('edit lead modal receives the server-confirmed status revision', () => {
   assert.match(statusWriter, /postGoogleSheetActionWithResponse/);
   assert.match(statusWriter, /lead\.statusRevision = Number\(result\.status_revision\)/);
   assert.doesNotMatch(statusWriter, /assignment_revision/);
+});
+
+test('dashboard and Google Sheet use one official lead status list', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const script = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const expected = [
+    'New', 'Contacted', 'Passed', 'All Offer Presented',
+    'Need Follow Up', 'Rejected', 'Cancelled', 'Client',
+  ];
+  expected.forEach((status) => {
+    assert.match(source, new RegExp(`label: "${status}"`));
+    assert.match(script, new RegExp(`"${status}"`));
+  });
+  assert.doesNotMatch(source, /label: "Potential"/);
+  assert.match(script, /function normalizeLegacyLeadStatuses_\(sheet, headers\)/);
+  assert.match(script, /if \(\["potential", "potensi", "prospect", "prospek", "hot lead"\]/);
 });

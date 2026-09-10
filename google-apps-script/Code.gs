@@ -11,6 +11,16 @@ const PUSH_API_URL = "https://leadlaju.vercel.app/api/push";
 const PUSH_NOTIFY_SECRET = "leadlaju-push-notify-v1";
 const RESPONSE_WINDOW_MINUTES = 5;
 const AGENT_PRESENCE_TIMEOUT_MINUTES = 60;
+const LEAD_STATUS_VALUES = [
+  "New",
+  "Contacted",
+  "Passed",
+  "All Offer Presented",
+  "Need Follow Up",
+  "Rejected",
+  "Cancelled",
+  "Client",
+];
 // Used only when a legacy sheet has no lead rows to seed the first project list.
 const INITIAL_PROJECT_NAMES = ["Armani Putrajaya", "BBSAP Sitiawan"];
 
@@ -174,6 +184,8 @@ function doGet() {
     ensureLeadIds_(sheet, headers);
     ensureLeadTimestamps_(sheet, headers);
     ensureLeadSources_(sheet, headers);
+    normalizeLegacyLeadStatuses_(sheet, headers);
+    syncLeadStatusValidation_(sheet, headers);
     let leads = readLeads_(sheet);
     const projects = ensureProjectsFromLeads_(projectsSheet, projectHeaders, leads);
     ensureAgentProjectEligibility_(agentsSheet, agentHeaders, projects);
@@ -1547,6 +1559,9 @@ function normalizeLeadStage_(value) {
   if (["passed", "pass", "expired", "missed", "tamat", "terlepas", "dipindahkan"].includes(compactStatus)) {
     return "passed";
   }
+  if (["all offer presented", "offer presented", "all offers presented", "semua tawaran dibentang"].includes(compactStatus)) {
+    return "all_offer_presented";
+  }
   if (["rejected", "reject", "tolak", "ditolak", "tak berminat", "tidak berminat"].includes(compactStatus)) {
     return "rejected";
   }
@@ -1563,8 +1578,11 @@ function normalizeLeadStage_(value) {
   ) {
     return "need_follow_up";
   }
+  if (["cancelled", "canceled", "cancel", "batal", "dibatalkan"].includes(compactStatus)) {
+    return "cancelled";
+  }
   if (["potential", "potensi", "prospect", "prospek", "hot lead"].includes(compactStatus)) {
-    return "potential";
+    return "new";
   }
   if (["client", "customer", "pelanggan", "buyer", "pembeli"].includes(compactStatus)) {
     return "client";
@@ -1576,11 +1594,41 @@ function canonicalSheetStatus_(value) {
   const stage = normalizeLeadStage_(value);
   if (stage === "contacted") return "Contacted";
   if (stage === "passed") return "Passed";
+  if (stage === "all_offer_presented") return "All Offer Presented";
   if (stage === "rejected") return "Rejected";
   if (stage === "need_follow_up") return "Need Follow Up";
-  if (stage === "potential") return "Potential";
+  if (stage === "cancelled") return "Cancelled";
   if (stage === "client") return "Client";
   return "New";
+}
+
+function normalizeLegacyLeadStatuses_(sheet, headers) {
+  const statusIndex = headers.findIndex((header) => FIELD_ALIASES.status.includes(header));
+  if (statusIndex < 0 || sheet.getLastRow() < 2) return 0;
+
+  const rowCount = sheet.getLastRow() - 1;
+  const statusRange = sheet.getRange(2, statusIndex + 1, rowCount, 1);
+  const values = statusRange.getDisplayValues();
+  let changed = false;
+  const normalized = values.map(([value]) => {
+    const nextStatus = canonicalSheetStatus_(value);
+    if (nextStatus !== String(value || "").trim()) changed = true;
+    return [nextStatus];
+  });
+  if (changed) statusRange.setValues(normalized);
+  return changed ? rowCount : 0;
+}
+
+function syncLeadStatusValidation_(sheet, headers) {
+  const statusIndex = headers.findIndex((header) => FIELD_ALIASES.status.includes(header));
+  if (statusIndex < 0) return false;
+  const rowCount = Math.max(sheet.getMaxRows() - 1, 1);
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(LEAD_STATUS_VALUES, true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(2, statusIndex + 1, rowCount, 1).setDataValidation(rule);
+  return true;
 }
 
 function canonicalLeadSource_(value) {
@@ -1666,6 +1714,8 @@ function refreshSheetTemplate_() {
   ensureLeadIds_(sheet, headers);
   ensureLeadTimestamps_(sheet, headers);
   ensureLeadSources_(sheet, headers);
+  normalizeLegacyLeadStatuses_(sheet, headers);
+  syncLeadStatusValidation_(sheet, headers);
   const pushResult = notifyUnsentLeadPushes_(spreadsheet, sheet, headers);
   return { ok: true, refreshed_at: new Date().toISOString(), push: pushResult };
 }

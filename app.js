@@ -26,9 +26,10 @@ const LEAD_STATUS_OPTIONS = [
   { value: "new", label: "New" },
   { value: "contacted", label: "Contacted" },
   { value: "passed", label: "Passed" },
-  { value: "rejected", label: "Rejected" },
+  { value: "all_offer_presented", label: "All Offer Presented" },
   { value: "need_follow_up", label: "Need Follow Up" },
-  { value: "potential", label: "Potential" },
+  { value: "rejected", label: "Rejected" },
+  { value: "cancelled", label: "Cancelled" },
   { value: "client", label: "Client" },
 ];
 const LEAD_STATUS_LABELS = Object.fromEntries(LEAD_STATUS_OPTIONS.map((status) => [status.value, status.label]));
@@ -1527,6 +1528,9 @@ function normalizeSheetStatus(value) {
   if (["passed", "pass", "expired", "missed", "tamat", "terlepas", "dipindahkan"].includes(compactStatus)) {
     return "passed";
   }
+  if (["all offer presented", "offer presented", "all offers presented", "semua tawaran dibentang"].includes(compactStatus)) {
+    return "all_offer_presented";
+  }
   if (["rejected", "reject", "tolak", "ditolak", "tak berminat", "tidak berminat"].includes(compactStatus)) {
     return "rejected";
   }
@@ -1543,8 +1547,11 @@ function normalizeSheetStatus(value) {
   ) {
     return "need_follow_up";
   }
+  if (["cancelled", "canceled", "cancel", "batal", "dibatalkan"].includes(compactStatus)) {
+    return "cancelled";
+  }
   if (["potential", "potensi", "prospect", "prospek", "hot lead"].includes(compactStatus)) {
-    return "potential";
+    return "new";
   }
   if (["client", "customer", "pelanggan", "buyer", "pembeli"].includes(compactStatus)) {
     return "client";
