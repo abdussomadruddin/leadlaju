@@ -35,6 +35,12 @@ const LEAD_STATUS_OPTIONS = [
 ];
 const LEAD_STATUS_LABELS = Object.fromEntries(LEAD_STATUS_OPTIONS.map((status) => [status.value, status.label]));
 const AGENT_NOTE_REQUIRED_STATUSES = new Set(["passed", "rejected", "cancelled"]);
+const APPOINTMENT_STATUS_OPTIONS = [
+  { value: "scheduled", label: "Scheduled" },
+  { value: "show_up", label: "Show Up" },
+  { value: "no_show", label: "No Show" },
+  { value: "reschedule", label: "Reschedule" },
+];
 
 const defaultState = {
   currentUserId: "agent-aina",
@@ -81,6 +87,7 @@ const defaultState = {
     },
   ],
   leads: [],
+  appointments: [],
   projects: [
     { id: "project-armani", name: "Armani Putrajaya", active: true },
     { id: "project-bbsap", name: "BBSAP Sitiawan", active: true },
@@ -109,6 +116,8 @@ let passwordResetRequest = null;
 let selectedAgentId = null;
 let editingAgentId = null;
 let selectedContactId = null;
+let selectedAppointmentLeadId = null;
+let reschedulingAppointmentId = null;
 let remoteDatabaseClient = null;
 let remoteDatabaseMode = false;
 let claimingLeadId = null;
@@ -212,6 +221,21 @@ const elements = {
   leadFilter: document.querySelector("#lead-filter"),
   leadAgentFilter: document.querySelector("#lead-agent-filter"),
   leadLogCount: document.querySelector("#lead-log-count"),
+  appointmentList: document.querySelector("#appointment-list"),
+  appointmentCount: document.querySelector("#appointment-count"),
+  appointmentStatusFilter: document.querySelector("#appointment-status-filter"),
+  appointmentProjectFilter: document.querySelector("#appointment-project-filter"),
+  appointmentModal: document.querySelector("#appointment-modal"),
+  appointmentForm: document.querySelector("#appointment-form"),
+  appointmentModalKicker: document.querySelector("#appointment-modal-kicker"),
+  appointmentModalTitle: document.querySelector("#appointment-modal-title"),
+  appointmentLeadSummary: document.querySelector("#appointment-lead-summary"),
+  appointmentType: document.querySelector("#appointment-type"),
+  appointmentScheduledAt: document.querySelector("#appointment-scheduled-at"),
+  appointmentLocation: document.querySelector("#appointment-location"),
+  appointmentNotes: document.querySelector("#appointment-notes"),
+  appointmentFormError: document.querySelector("#appointment-form-error"),
+  appointmentSubmitButton: document.querySelector("#appointment-submit-button"),
   contactModal: document.querySelector("#contact-modal"),
   contactForm: document.querySelector("#contact-form"),
   contactName: document.querySelector("#contact-name"),
@@ -296,6 +320,32 @@ function normalizeProjects(rows) {
   })).filter((project) => project.id && project.name);
 }
 
+function normalizeAppointmentStatus(value) {
+  const status = String(value || "scheduled").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return APPOINTMENT_STATUS_OPTIONS.some((option) => option.value === status) ? status : "scheduled";
+}
+
+function formatAppointmentStatus(value) {
+  return APPOINTMENT_STATUS_OPTIONS.find((option) => option.value === normalizeAppointmentStatus(value))?.label || "Scheduled";
+}
+
+function normalizeAppointments(rows) {
+  return (Array.isArray(rows) ? rows : []).map((appointment) => ({
+    id: String(appointment.id || appointment.appointment_id || "").trim(),
+    leadId: String(appointment.lead_id || appointment.leadId || "").trim(),
+    leadName: String(appointment.lead_name || appointment.leadName || "").trim(),
+    project: String(appointment.project || "").trim(),
+    type: String(appointment.type || "Site Visit").trim(),
+    scheduledAt: parseLeadTimestamp(appointment.scheduled_at || appointment.scheduledAt, Date.now()),
+    location: String(appointment.location || "").trim(),
+    notes: String(appointment.notes || "").trim(),
+    status: normalizeAppointmentStatus(appointment.status),
+    parentAppointmentId: String(appointment.parent_appointment_id || appointment.parentAppointmentId || "").trim(),
+    assignedAgentId: String(appointment.assigned_agent_id || appointment.assignedAgentId || "").trim(),
+    assignedAgentName: String(appointment.assigned_agent_name || appointment.assignedAgentName || "").trim(),
+  })).filter((appointment) => appointment.id && appointment.leadId);
+}
+
 function getSheetEndpoint() {
   return (
     elements.sheetEndpoint?.value?.trim() ||
@@ -323,6 +373,7 @@ function loadState() {
       eligibleProjectIds: normalizeProjectIds(agent.eligibleProjectIds || agent.eligible_project_ids),
     }));
     merged.projects = normalizeProjects(saved.projects).length ? normalizeProjects(saved.projects) : structuredClone(defaultState.projects);
+    merged.appointments = normalizeAppointments(saved.appointments);
     merged.leads = merged.leads.map((lead) => ({
       ...lead,
       email: lead.email || "",
@@ -1323,7 +1374,7 @@ function getNotificationStartUrl(viewName = "") {
 function getRequestedStartView() {
   const params = new URLSearchParams(window.location.search);
   const requestedView = params.get("view") || window.location.hash.replace(/^#/, "");
-  return ["dashboard", "leads", "agents", "integration"].includes(requestedView) ? requestedView : "dashboard";
+  return ["dashboard", "leads", "appointments", "agents", "projects", "integration"].includes(requestedView) ? requestedView : "dashboard";
 }
 
 async function registerServiceWorker() {
@@ -3382,7 +3433,10 @@ function renderLeadsTable() {
           const deleteButton = isAdmin()
             ? `<button class="contact-edit-button danger" type="button" data-lead-delete="${lead.id}">Padam</button>`
             : "";
-          const actionButtons = [editButton, deleteButton].filter(Boolean).join("");
+          const appointmentButton = canAccessLead(lead) && lead.assignedAgentId
+            ? `<button class="contact-edit-button appointment" type="button" data-lead-appointment="${lead.id}">Appointment</button>`
+            : "";
+          const actionButtons = [editButton, appointmentButton, deleteButton].filter(Boolean).join("");
           const assignedAgentLabel = lead.assignedAgentId
             ? getAgent(lead.assignedAgentId)?.name || lead.assignedAgentName || "Tiada ejen"
             : "Belum diagih";
@@ -3428,6 +3482,147 @@ function renderLeadsTable() {
         })
         .join("")
     : `<tr><td class="table-empty" colspan="7">Tiada lead ditemui.</td></tr>`;
+}
+
+function appointmentDateTimeLocalValue(value) {
+  const parts = malaysiaDateParts(value);
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
+
+function renderAppointments() {
+  if (!elements.appointmentList) return;
+  const selectedStatus = elements.appointmentStatusFilter.value || "all";
+  const selectedProject = elements.appointmentProjectFilter.value || "all";
+  const visible = state.appointments
+    .filter((appointment) => {
+      const lead = state.leads.find((item) => item.id === appointment.leadId);
+      return isAdmin() || (lead && lead.assignedAgentId === state.currentUserId);
+    })
+    .sort((left, right) => left.scheduledAt - right.scheduledAt);
+  const projects = [...new Set(visible.map((appointment) => appointment.project).filter(Boolean))].sort();
+  elements.appointmentProjectFilter.innerHTML = [
+    '<option value="all">Semua projek</option>',
+    ...projects.map((project) => `<option value="${escapeHtml(project)}">${escapeHtml(project)}</option>`),
+  ].join("");
+  elements.appointmentProjectFilter.value = projects.includes(selectedProject) ? selectedProject : "all";
+  const filtered = visible.filter((appointment) =>
+    (selectedStatus === "all" || appointment.status === selectedStatus) &&
+    (elements.appointmentProjectFilter.value === "all" || appointment.project === elements.appointmentProjectFilter.value),
+  );
+  elements.appointmentCount.textContent = `${filtered.length} appointment`;
+  elements.appointmentList.innerHTML = filtered.length
+    ? filtered.map((appointment) => {
+      const lead = state.leads.find((item) => item.id === appointment.leadId);
+      const owner = lead?.assignedAgentId ? getAgent(lead.assignedAgentId)?.name || appointment.assignedAgentName : "Tiada ejen";
+      const actionButtons = appointment.status === "scheduled"
+        ? `<div class="appointment-actions">
+            <button class="contact-edit-button success" type="button" data-appointment-status="show_up" data-appointment-id="${appointment.id}">Show Up</button>
+            <button class="contact-edit-button danger" type="button" data-appointment-status="no_show" data-appointment-id="${appointment.id}">No Show</button>
+            <button class="contact-edit-button" type="button" data-appointment-reschedule="${appointment.id}">Reschedule</button>
+          </div>`
+        : "";
+      return `<article class="appointment-item">
+        <div class="appointment-item-heading">
+          <span class="status-badge appointment-${appointment.status}">${formatAppointmentStatus(appointment.status)}</span>
+          <small>${escapeHtml(appointment.type)}</small>
+        </div>
+        <div class="appointment-item-main">
+          <div>
+            <strong>${escapeHtml(appointment.leadName || lead?.name || "Lead")}</strong>
+            <small>${escapeHtml(appointment.project || lead?.project || "Tidak dinyatakan")}</small>
+          </div>
+          <div>
+            <strong>${formatDateTime(appointment.scheduledAt)}</strong>
+            <small>${escapeHtml(appointment.location || "Lokasi belum ditetapkan")}</small>
+          </div>
+          <div>
+            <strong>${escapeHtml(owner)}</strong>
+            <small>Ejen bertanggungjawab</small>
+          </div>
+        </div>
+        ${appointment.notes ? `<p class="appointment-notes">${escapeHtml(appointment.notes)}</p>` : ""}
+        ${actionButtons}
+      </article>`;
+    }).join("")
+    : '<p class="empty-state">Tiada appointment untuk dipaparkan.</p>';
+}
+
+function openAppointmentModal(leadId, appointmentId = null) {
+  const lead = state.leads.find((item) => item.id === leadId);
+  if (!lead?.assignedAgentId || !canAccessLead(lead)) {
+    showToast("Lead belum layak", "Appointment hanya boleh dibuat untuk lead yang telah diagihkan kepada anda.", "error");
+    return;
+  }
+  const appointment = appointmentId ? state.appointments.find((item) => item.id === appointmentId) : null;
+  selectedAppointmentLeadId = leadId;
+  reschedulingAppointmentId = appointment?.id || null;
+  elements.appointmentForm.reset();
+  elements.appointmentModalKicker.textContent = appointment ? "Jadual baharu" : "Susulan lead";
+  elements.appointmentModalTitle.textContent = appointment ? "Reschedule Appointment" : "Tambah Appointment";
+  elements.appointmentLeadSummary.textContent = `${lead.name} · ${lead.project}`;
+  elements.appointmentType.value = appointment?.type || "Site Visit";
+  elements.appointmentScheduledAt.value = appointmentDateTimeLocalValue(appointment?.scheduledAt || Date.now() + 24 * 60 * 60 * 1000);
+  elements.appointmentScheduledAt.min = appointmentDateTimeLocalValue(Date.now() + 60 * 1000);
+  elements.appointmentLocation.value = appointment?.location || "";
+  elements.appointmentNotes.value = appointment?.notes || "";
+  elements.appointmentFormError.textContent = "";
+  elements.appointmentSubmitButton.textContent = appointment ? "Simpan jadual baharu" : "Simpan appointment";
+  elements.appointmentModal.classList.add("open");
+  elements.appointmentModal.setAttribute("aria-hidden", "false");
+}
+
+function appointmentActionPayload(appointment = {}) {
+  const user = getCurrentUser();
+  return {
+    ...appointment,
+    acting_role: user?.role || "",
+    acting_agent_id: user?.role === "agent" ? user.id : "",
+  };
+}
+
+async function saveAppointment(event) {
+  event.preventDefault();
+  const lead = state.leads.find((item) => item.id === selectedAppointmentLeadId);
+  if (!lead?.assignedAgentId || !canAccessLead(lead)) {
+    elements.appointmentFormError.textContent = "Lead ini sudah tidak ditugaskan kepada anda.";
+    return;
+  }
+  const appointment = appointmentActionPayload({
+    id: reschedulingAppointmentId || "",
+    lead_id: lead.id,
+    type: elements.appointmentType.value,
+    scheduled_at: elements.appointmentScheduledAt.value,
+    location: elements.appointmentLocation.value.trim(),
+    notes: elements.appointmentNotes.value.trim(),
+  });
+  const action = reschedulingAppointmentId ? "reschedule_appointment" : "create_appointment";
+  elements.appointmentSubmitButton.disabled = true;
+  try {
+    await postGoogleSheetActionWithResponse({ action, appointment }, "Appointment update failed");
+    closeModal(elements.appointmentModal);
+    await syncGoogleSheet({ silent: true });
+    showToast(reschedulingAppointmentId ? "Appointment dijadual semula" : "Appointment disimpan", `${lead.name} telah dikemas kini.`);
+  } catch (error) {
+    elements.appointmentFormError.textContent = error?.message || "Appointment tidak dapat disimpan.";
+  } finally {
+    elements.appointmentSubmitButton.disabled = false;
+  }
+}
+
+async function updateAppointmentStatus(appointmentId, status) {
+  const appointment = state.appointments.find((item) => item.id === appointmentId);
+  const lead = appointment && state.leads.find((item) => item.id === appointment.leadId);
+  if (!appointment || !lead || !canAccessLead(lead)) return;
+  try {
+    await postGoogleSheetActionWithResponse({
+      action: "update_appointment_status",
+      appointment: appointmentActionPayload({ id: appointmentId, status }),
+    }, "Appointment status update failed");
+    await syncGoogleSheet({ silent: true });
+    showToast("Appointment dikemas kini", `${lead.name}: ${formatAppointmentStatus(status)}.`);
+  } catch (error) {
+    showToast("Status gagal disimpan", error?.message || "Cuba lagi.", "error");
+  }
 }
 
 function renderAgents() {
@@ -3607,6 +3802,7 @@ function renderAll() {
   renderActivities();
   renderTeam();
   renderLeadsTable();
+  renderAppointments();
   renderAgents();
   renderProjects();
   renderIntegration();
@@ -3614,6 +3810,7 @@ function renderAll() {
 
 const viewTitles = {
   leads: "Log Lead",
+  appointments: "Appointment Tracker",
   agents: "Pengurusan Ejen",
   projects: "Projek",
   integration: "Google Sheets Sync",
@@ -4194,6 +4391,7 @@ async function syncGoogleSheet(options = {}) {
     if (!Array.isArray(payload)) {
       const projects = normalizeProjects(payload.projects);
       if (projects.length) state.projects = projects;
+      state.appointments = normalizeAppointments(payload.appointments);
     }
     if (options.agentsOnly) {
       state.integration.endpoint = endpoint;
@@ -4404,13 +4602,27 @@ elements.logoutButton.addEventListener("click", logout);
 elements.leadSearch.addEventListener("input", renderLeadsTable);
 elements.leadFilter.addEventListener("change", renderLeadsTable);
 elements.leadAgentFilter?.addEventListener("change", renderLeadsTable);
+elements.appointmentStatusFilter?.addEventListener("change", renderAppointments);
+elements.appointmentProjectFilter?.addEventListener("change", renderAppointments);
 elements.leadsTableBody.addEventListener("click", (event) => {
   const edit = event.target.closest("[data-lead-edit]");
   const remove = event.target.closest("[data-lead-delete]");
   const saveNote = event.target.closest("[data-lead-note-save]");
+  const appointment = event.target.closest("[data-lead-appointment]");
   if (edit) openContactModal(edit.dataset.leadEdit);
   if (remove && isAdmin()) deleteLeadEverywhere(remove.dataset.leadDelete);
   if (saveNote) saveLeadNote(saveNote.dataset.leadNoteSave, saveNote);
+  if (appointment) openAppointmentModal(appointment.dataset.leadAppointment);
+});
+elements.appointmentForm?.addEventListener("submit", saveAppointment);
+elements.appointmentList?.addEventListener("click", (event) => {
+  const status = event.target.closest("[data-appointment-status]");
+  const reschedule = event.target.closest("[data-appointment-reschedule]");
+  if (status) updateAppointmentStatus(status.dataset.appointmentId, status.dataset.appointmentStatus);
+  if (reschedule) {
+    const appointment = state.appointments.find((item) => item.id === reschedule.dataset.appointmentReschedule);
+    if (appointment) openAppointmentModal(appointment.leadId, appointment.id);
+  }
 });
 elements.leadsTableBody.addEventListener("change", (event) => {
   const statusField = event.target.closest("[data-lead-status]");
@@ -4480,7 +4692,7 @@ elements.resetPasswordModal.addEventListener("click", (event) => {
   if (event.target === elements.resetPasswordModal) closeModal(elements.resetPasswordModal);
 });
 
-[elements.agentPasswordModal, elements.contactModal].forEach((modal) => {
+[elements.agentPasswordModal, elements.contactModal, elements.appointmentModal].forEach((modal) => {
   modal.addEventListener("click", (event) => {
     if (event.target === modal) closeModal(modal);
   });
@@ -4523,6 +4735,7 @@ document.addEventListener("keydown", (event) => {
     closeModal(elements.resetPasswordModal);
     closeModal(elements.agentPasswordModal);
     closeModal(elements.contactModal);
+    closeModal(elements.appointmentModal);
     setMobileSidebarOpen(false);
   }
 });

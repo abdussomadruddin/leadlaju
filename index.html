@@ -232,6 +232,13 @@
             Log Lead
             <span class="nav-count" id="nav-lead-count">0</span>
           </button>
+          <button class="nav-item" data-view="appointments" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="3" y="5" width="18" height="16" rx="2" />
+              <path d="M7 3v4m10-4v4M3 10h18M8 14h3m2 0h3m-8 3h3" />
+            </svg>
+            Appointment
+          </button>
           <button class="nav-item admin-only" data-view="agents" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
@@ -519,6 +526,32 @@
                 <tbody id="leads-table-body"></tbody>
               </table>
             </div>
+          </div>
+        </section>
+
+        <section class="view" id="appointments-view">
+          <div class="content-heading">
+            <div>
+              <span class="section-kicker">Susulan berjadual</span>
+              <h2>Appointment Tracker</h2>
+              <p>Site visit dan meeting bagi lead yang telah diagihkan.</p>
+            </div>
+          </div>
+          <div class="table-card appointment-card">
+            <div class="table-toolbar appointment-toolbar">
+              <select id="appointment-status-filter" aria-label="Tapis status appointment">
+                <option value="all">Semua status</option>
+                <option value="scheduled">Scheduled</option>
+                <option value="show_up">Show Up</option>
+                <option value="no_show">No Show</option>
+                <option value="reschedule">Reschedule</option>
+              </select>
+              <select id="appointment-project-filter" aria-label="Tapis projek appointment">
+                <option value="all">Semua projek</option>
+              </select>
+              <span class="queue-label" id="appointment-count">0 appointment</span>
+            </div>
+            <div class="appointment-list" id="appointment-list"></div>
           </div>
         </section>
 
@@ -866,6 +899,34 @@
           <textarea id="contact-notes" rows="4" placeholder="Contoh: Berminat untuk site visit hujung minggu"></textarea>
           <p class="reset-error" id="contact-form-error" role="alert"></p>
           <button class="primary-button full" type="submit">Simpan perubahan</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal-backdrop" id="appointment-modal" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="appointment-modal-title">
+        <div class="modal-heading">
+          <div>
+            <span class="section-kicker" id="appointment-modal-kicker">Susulan lead</span>
+            <h2 id="appointment-modal-title">Tambah Appointment</h2>
+          </div>
+          <button class="modal-close" data-close-modal="appointment-modal" type="button" aria-label="Tutup">×</button>
+        </div>
+        <form id="appointment-form">
+          <p class="appointment-lead-summary" id="appointment-lead-summary"></p>
+          <label for="appointment-type">Jenis appointment</label>
+          <select id="appointment-type" required>
+            <option value="Site Visit">Site Visit</option>
+            <option value="Meeting">Meeting</option>
+          </select>
+          <label for="appointment-scheduled-at">Tarikh dan masa</label>
+          <input id="appointment-scheduled-at" type="datetime-local" required />
+          <label for="appointment-location">Lokasi (optional)</label>
+          <input id="appointment-location" type="text" placeholder="Contoh: Galeri jualan Armani Putrajaya" />
+          <label for="appointment-notes">Nota (optional)</label>
+          <textarea id="appointment-notes" rows="4" placeholder="Maklumat untuk site visit atau meeting"></textarea>
+          <p class="reset-error" id="appointment-form-error" role="alert"></p>
+          <button class="primary-button full" id="appointment-submit-button" type="submit">Simpan appointment</button>
         </form>
       </div>
     </div>

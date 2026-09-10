@@ -380,6 +380,30 @@ test('project dropdown shows live lead totals for every official status', () => 
   assert.match(css, /\.project-status-list/);
 });
 
+test('appointment tracker is synced from the server and scoped to assigned leads', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const html = fs.readFileSync('index.html', 'utf8');
+  assert.match(source, /const APPOINTMENT_STATUS_OPTIONS/);
+  assert.match(source, /state\.appointments = normalizeAppointments\(payload\.appointments\)/);
+  assert.match(source, /lead\.assignedAgentId === state\.currentUserId/);
+  assert.match(source, /action = reschedulingAppointmentId \? "reschedule_appointment" : "create_appointment"/);
+  assert.match(html, /data-view="appointments"/);
+  assert.match(html, /id="appointment-modal"/);
+});
+
+test('appointment reminders are server-side, deduplicated, and target the correct roles', () => {
+  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  assert.match(source, /const APPOINTMENTS_SHEET_NAME = "Appointments"/);
+  assert.match(source, /agent_3_days/);
+  assert.match(source, /agent_1_day/);
+  assert.match(source, /admin_1_day/);
+  assert.match(source, /agent_4_hours/);
+  assert.match(source, /agent_30_minutes/);
+  assert.match(source, /function processAppointmentReminders_/);
+  assert.match(source, /state\[slot\.key\] = canonicalLeadTimestamp_/);
+  assert.match(source, /url: `\/\?view=appointments&appointment=/);
+});
+
 test('an older server response cannot reset an agent GET LEAD choice', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const start = source.indexOf('function normalizeSheetAgent(input)');
