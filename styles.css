@@ -2458,7 +2458,9 @@ td small {
 
 .modal input[type="datetime-local"] {
   display: block;
+  inline-size: 100%;
   min-width: 0;
+  min-inline-size: 0;
   max-width: 100%;
 }
 
@@ -2710,6 +2712,11 @@ td small {
 .modal form {
   display: grid;
   margin-top: 13px;
+  min-width: 0;
+}
+
+.modal form > * {
+  min-width: 0;
 }
 
 #reset-code-fields {
