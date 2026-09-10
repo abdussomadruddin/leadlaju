@@ -587,9 +587,12 @@ function updateLeadStatusLocked_(input) {
       const statusUpdatedAt = new Date().toISOString();
       setRowValue_(headers, nextRow, "statusRevision", String(statusRevision));
       setRowValue_(headers, nextRow, "statusUpdatedAt", statusUpdatedAt);
+      latestStatusRevision = statusRevision;
+      latestStatusUpdatedAt = statusUpdatedAt;
       if (normalizeLeadStage_(status) === "new") {
         holdLeadRuntimeRow_(sheet, headers, rowNumber, nextRow);
         updated += 1;
+        if (idMatches) break;
         continue;
       } else {
         if (normalizeLeadStage_(status) === "contacted") {
@@ -609,8 +612,6 @@ function updateLeadStatusLocked_(input) {
       }
       sheet.getRange(rowNumber, 1, 1, nextRow.length).setValues([nextRow]);
       updated += 1;
-      latestStatusRevision = statusRevision;
-      latestStatusUpdatedAt = statusUpdatedAt;
       if (idMatches) break;
     }
   }

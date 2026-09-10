@@ -166,6 +166,14 @@ test('ordinary status changes do not advance the assignment revision', () => {
   assert.doesNotMatch(body, /assignmentRevision[^\n]*currentRevision \+ 1/);
 });
 
+test('new status updates return the new status revision before queue handling', () => {
+  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const start = source.indexOf('function updateLeadStatusLocked_(');
+  const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
+  assert.ok(body.indexOf('latestStatusRevision = statusRevision') < body.indexOf('if (normalizeLeadStage_(status) === "new")'));
+  assert.match(body, /status_revision: latestStatusRevision/);
+});
+
 test('server persists and returns lead notes through the sheet', () => {
   const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
   assert.match(source, /notes: \["nota", "notes", "catatan"\]/);
