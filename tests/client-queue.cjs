@@ -349,9 +349,11 @@ test('logout reaches the login screen before network cleanup completes', () => {
 test('agent sidebar hides the Google Sheet connection card', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('styles.css', 'utf8');
   assert.match(html, /class="sync-card admin-only-sync-card" hidden/);
   assert.match(source, /document\.querySelectorAll\("\.admin-only-sync-card"\)/);
   assert.match(source, /item\.hidden = !isAdmin\(\)/);
+  assert.match(css, /\.sync-card\[hidden\] \+ \.sidebar-user/);
 });
 
 test('mobile sidebar closes on content tap or left swipe and opens on right swipe', () => {

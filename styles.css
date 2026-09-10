@@ -698,6 +698,11 @@ svg {
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+/* The Google Sheets card is hidden for agents, so keep their account controls pinned to the sidebar footer. */
+.sync-card[hidden] + .sidebar-user {
+  margin-top: auto;
+}
+
 .avatar {
   display: grid;
   width: 36px;
