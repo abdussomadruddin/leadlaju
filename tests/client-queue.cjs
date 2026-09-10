@@ -310,3 +310,12 @@ test('agents explicitly start and stop lead availability from the dashboard', ()
   assert.match(source, /elements\.getLeadButton\?\.addEventListener/);
   assert.match(source, /elements\.stopLeadButton\?\.addEventListener/);
 });
+
+test('login UI is not blocked by the initial Google Sheet agent sync', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const start = source.indexOf('async function bootstrap()');
+  const body = source.slice(start, source.indexOf('\nlockViewportZoom()', start));
+  assert.ok(body.indexOf('showLogin()') < body.indexOf('initialAgentSyncPromise = syncGoogleSheet'));
+  assert.doesNotMatch(body, /await syncGoogleSheet\(\{ silent: true, agentsOnly: true \}\)/);
+  assert.match(source, /if \(!user && initialAgentSyncPromise\)/);
+});

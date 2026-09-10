@@ -100,6 +100,7 @@ let activeView = "dashboard";
 let tickTimer;
 let syncTimer;
 let syncInProgress = false;
+let initialAgentSyncPromise = null;
 let signupProjectSyncTimer;
 let followUpReminderTimer;
 let toastTimer;
@@ -720,7 +721,11 @@ async function handleLogin(event) {
     return;
   }
 
-  const user = state.agents.find((agent) => agent.email.toLowerCase() === email);
+  let user = state.agents.find((agent) => agent.email.toLowerCase() === email);
+  if (!user && initialAgentSyncPromise) {
+    await initialAgentSyncPromise;
+    user = state.agents.find((agent) => agent.email.toLowerCase() === email);
+  }
   if (!user || user.password !== password) {
     setLoginError("Emel atau kata laluan tidak betul.");
     return;
@@ -4332,7 +4337,6 @@ async function bootstrap() {
   state.integration = normalizeIntegration(state.integration);
   saveState();
   initRemoteDatabase();
-  await syncGoogleSheet({ silent: true, agentsOnly: true });
 
   const sessionUser = getSessionUser();
   if (sessionUser) {
@@ -4340,6 +4344,14 @@ async function bootstrap() {
   } else {
     showLogin();
   }
+
+  // The login screen must never wait on the comparatively slow Sheet endpoint.
+  // A first-time user still waits for this promise only after submitting credentials.
+  initialAgentSyncPromise = syncGoogleSheet({ silent: true, agentsOnly: true })
+    .catch(() => false)
+    .finally(() => {
+      initialAgentSyncPromise = null;
+    });
 }
 
 lockViewportZoom();
