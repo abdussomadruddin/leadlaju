@@ -240,6 +240,19 @@ test('agents must save a note before selecting passed, rejected, or cancelled', 
   assert.match(source, /acting_role: currentUser\?\.role \|\| ""/);
 });
 
+test('agents must CALL NOW before changing a New lead status', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const server = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const css = fs.readFileSync('styles.css', 'utf8');
+  assert.match(source, /const requiresCallNow = !isAdmin\(\) && visualStatus === "new"/);
+  assert.match(source, /data-lead-call="\$\{lead\.id\}"/);
+  assert.match(source, /if \(callNow\) handleCall\(callNow\.dataset\.leadCall\)/);
+  assert.match(source, /filter\(\(status\) => allowNew \|\| status\.value !== "new"\)/);
+  assert.match(source, /Ejen tidak boleh menukar status lead kembali kepada New/);
+  assert.match(server, /actingRole === "agent" && normalizeLeadStage_\(status\) === "new"/);
+  assert.match(css, /\.log-call-now-button/);
+});
+
 test('notes are confirmed in Google Sheet before a modal status update', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const start = source.indexOf('async function updateContact(');
@@ -364,6 +377,9 @@ test('notification click fetches the assigned lead directly for an instant dashb
   assert.match(worker, /leadlaju-notification-snapshots/);
   assert.match(worker, /async function cacheLeadSnapshot\(payload/);
   assert.match(worker, /await cacheLeadSnapshot\(payload\)/);
+  assert.match(worker, /async function broadcastLeadSnapshot\(payload/);
+  assert.match(worker, /type: "LEAD_SNAPSHOT"/);
+  assert.match(source, /event\.data\?\.type === "LEAD_SNAPSHOT"/);
   assert.match(worker, /new URL\(`\/__lead_snapshot__/);
   assert.match(pushApi, /leadSnapshot: input\.leadSnapshot/);
   assert.match(pushApi, /hasLeadSnapshot: Boolean\(notification\.leadSnapshot\)/);

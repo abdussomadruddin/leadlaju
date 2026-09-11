@@ -1833,8 +1833,8 @@ function formatSheetStatus(status) {
   return LEAD_STATUS_LABELS[normalizeSheetStatus(status)] || "New";
 }
 
-function renderLeadStatusOptions(currentStatus) {
-  return LEAD_STATUS_OPTIONS.map(
+function renderLeadStatusOptions(currentStatus, allowNew = isAdmin()) {
+  return LEAD_STATUS_OPTIONS.filter((status) => allowNew || status.value !== "new").map(
     (status) =>
       `<option value="${status.value}"${status.value === currentStatus ? " selected" : ""}>${status.label}</option>`,
   ).join("");
@@ -3235,13 +3235,18 @@ async function processExpiredLeads() {
 
 function setCallButtonLoading(leadId, isLoading) {
   const article = elements.activeLeadContainer.querySelector(".lead-alert");
-  if (!article || article.dataset.leadId !== leadId) return;
-  const button = article.querySelector(".call-button");
-  if (!button) return;
-  button.disabled = isLoading;
-  button.classList.toggle("is-loading", isLoading);
-  const label = button.querySelector(".call-button-copy b");
-  if (label) label.textContent = isLoading ? "CALLING..." : "CALL NOW";
+  const buttons = [...document.querySelectorAll(`[data-lead-call="${CSS.escape(leadId)}"]`)];
+  if (article?.dataset.leadId === leadId) {
+    const dashboardButton = article.querySelector(".call-button");
+    if (dashboardButton) buttons.push(dashboardButton);
+  }
+  buttons.forEach((button) => {
+    button.disabled = isLoading;
+    button.classList.toggle("is-loading", isLoading);
+    const label = button.querySelector(".call-button-copy b");
+    if (label) label.textContent = isLoading ? "CALLING..." : "CALL NOW";
+    else button.textContent = isLoading ? "CALLING..." : "CALL NOW";
+  });
 }
 
 function dialLeadPhone(phone) {
@@ -3618,6 +3623,7 @@ function renderLeadsTable() {
         .map((lead) => {
           const visualStatus = getLeadVisualStatus(lead);
           const statusOptions = renderLeadStatusOptions(visualStatus);
+          const requiresCallNow = !isAdmin() && visualStatus === "new";
           const contactedTime = lead.contactedAt ? `<small>Dihubungi ${formatDateTime(lead.contactedAt)}</small>` : "";
           const whatsappUrl = canViewLeadPhone(lead) ? whatsappLeadUrl(lead.phone) : "";
           const whatsappButton = whatsappUrl
@@ -3657,13 +3663,15 @@ function renderLeadsTable() {
               <td data-label="Ejen">${escapeHtml(assignedAgentLabel)}</td>
               <td data-label="Masa"><strong>Tarikh ${formatDateTime(lead.createdAt || lead.receivedAt)}</strong>${activeTime}${contactedTime}</td>
               <td data-label="Status">
-                <select
-                  class="lead-status-select ${visualStatus}"
-                  data-lead-status="${lead.id}"
-                  aria-label="Status ${escapeHtml(lead.name)}"
-                >
-                  ${statusOptions}
-                </select>
+                ${requiresCallNow
+                  ? `<button class="log-call-now-button" type="button" data-lead-call="${lead.id}">CALL NOW</button>`
+                  : `<select
+                      class="lead-status-select ${visualStatus}"
+                      data-lead-status="${lead.id}"
+                      aria-label="Status ${escapeHtml(lead.name)}"
+                    >
+                      ${statusOptions}
+                    </select>`}
               </td>
               <td class="lead-note-cell" data-label="Nota">
                 <textarea
@@ -4424,6 +4432,7 @@ function openContactModal(leadId) {
   elements.contactPhone.value = lead.phone;
   elements.contactEmail.value = lead.email || "";
   elements.contactProject.value = lead.project || "";
+  elements.contactStatus.innerHTML = renderLeadStatusOptions(getLeadVisualStatus(lead));
   elements.contactStatus.value = getLeadVisualStatus(lead);
   elements.contactNotes.value = lead.notes || "";
   elements.contactFormError.textContent = "";
@@ -4529,6 +4538,11 @@ async function updateLeadStatusFromLog(leadId, nextStatus, field = null) {
   if (!lead) return false;
 
   const normalizedStatus = normalizeSheetStatus(nextStatus);
+  if (getCurrentUser()?.role === "agent" && normalizedStatus === "new") {
+    if (field) field.value = getLeadVisualStatus(lead);
+    showToast("CALL NOW diperlukan", "Ejen tidak boleh menukar status lead kembali kepada New.", "error");
+    return false;
+  }
   if (getLeadVisualStatus(lead) === normalizedStatus) return true;
   if (
     getCurrentUser()?.role === "agent" &&
@@ -4866,10 +4880,12 @@ elements.leadsTableBody.addEventListener("click", (event) => {
   const remove = event.target.closest("[data-lead-delete]");
   const saveNote = event.target.closest("[data-lead-note-save]");
   const appointment = event.target.closest("[data-lead-appointment]");
+  const callNow = event.target.closest("[data-lead-call]");
   if (edit) openContactModal(edit.dataset.leadEdit);
   if (remove && isAdmin()) deleteLeadEverywhere(remove.dataset.leadDelete);
   if (saveNote) saveLeadNote(saveNote.dataset.leadNoteSave, saveNote);
   if (appointment) openAppointmentModal(appointment.dataset.leadAppointment);
+  if (callNow) handleCall(callNow.dataset.leadCall);
 });
 elements.appointmentForm?.addEventListener("submit", saveAppointment);
 elements.appointmentList?.addEventListener("click", (event) => {
@@ -4913,6 +4929,9 @@ elements.refreshButton?.addEventListener("click", () => {
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.data?.type === "LEAD_SNAPSHOT") {
+      showNotificationLeadImmediately(event.data.leadSnapshot);
+    }
     if (event.data?.type === "OPEN_DASHBOARD") {
       switchView("dashboard");
       if (event.data.leadSnapshot) showNotificationLeadImmediately(event.data.leadSnapshot);

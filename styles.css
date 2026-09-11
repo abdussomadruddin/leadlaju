@@ -2028,6 +2028,25 @@ td small {
   outline: 0;
 }
 
+.log-call-now-button {
+  width: 100%;
+  min-width: 112px;
+  min-height: 40px;
+  border: 0;
+  border-radius: 7px;
+  color: #fff;
+  background: #e63f3f;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.log-call-now-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .lead-status-select:disabled,
 .lead-status-select.is-saving {
   cursor: wait;

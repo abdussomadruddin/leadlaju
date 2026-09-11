@@ -1,9 +1,9 @@
-const CACHE_NAME = "leadlaju-pwa-v20260911-live-sync-v67";
+const CACHE_NAME = "leadlaju-pwa-v20260911-live-sync-v68";
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20260911-live-sync-v67",
-  "/app.js?v=20260911-live-sync-v67",
+  "/styles.css?v=20260911-live-sync-v68",
+  "/app.js?v=20260911-live-sync-v68",
   "/manifest.webmanifest?v=20260625-pwa-notifications",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",
@@ -108,13 +108,26 @@ async function showLeadNotification(payload = {}) {
   await self.registration.showNotification(title, options);
 }
 
+async function broadcastLeadSnapshot(payload = {}) {
+  if (!payload.leadId || !payload.leadSnapshot) return;
+  const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  clients.forEach((client) => client.postMessage({
+    type: "LEAD_SNAPSHOT",
+    leadId: payload.leadId,
+    leadSnapshot: payload.leadSnapshot,
+  }));
+}
+
 self.addEventListener("message", (event) => {
   if (event.data?.type === "SKIP_WAITING") {
     event.waitUntil(self.skipWaiting());
     return;
   }
   if (event.data?.type === "LEAD_NOTIFICATION") {
-    event.waitUntil(showLeadNotification(event.data.payload));
+    event.waitUntil(Promise.all([
+      showLeadNotification(event.data.payload),
+      broadcastLeadSnapshot(event.data.payload),
+    ]));
   }
 });
 
@@ -125,7 +138,10 @@ self.addEventListener("push", (event) => {
   } catch {
     payload = { body: event.data?.text() };
   }
-  event.waitUntil(showLeadNotification(payload));
+  event.waitUntil(Promise.all([
+    showLeadNotification(payload),
+    broadcastLeadSnapshot(payload),
+  ]));
 });
 
 self.addEventListener("notificationclick", (event) => {

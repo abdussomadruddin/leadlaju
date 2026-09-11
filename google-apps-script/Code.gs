@@ -890,6 +890,9 @@ function updateLeadStatusLocked_(input) {
   const actingAgentEmail = String(input.acting_agent_email || input.actingAgentEmail || "").trim().toLowerCase();
   const actingRole = String(input.acting_role || input.actingRole || "").trim().toLowerCase();
   if (statusIndex < 0) return { ok: false, error: "Kolum Status tidak dijumpai." };
+  if (actingRole === "agent" && normalizeLeadStage_(status) === "new") {
+    return { ok: false, error: "Ejen tidak boleh menukar status lead kepada New. Tekan CALL NOW untuk lead baharu." };
+  }
 
   let updated = 0;
   let latestStatusRevision = 0;
