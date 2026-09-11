@@ -41,6 +41,7 @@ function normalizeNotification(input = {}) {
     url: input.url || "/",
     view: input.view || null,
     leadId: input.leadId || null,
+    leadSnapshot: input.leadSnapshot && typeof input.leadSnapshot === "object" ? input.leadSnapshot : null,
     reminderType: input.reminderType || null,
     potentialCount: Number(input.potentialCount) || 0,
   };

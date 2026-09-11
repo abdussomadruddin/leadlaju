@@ -346,14 +346,20 @@ test('notification click fetches the assigned lead directly for an instant dashb
   const source = fs.readFileSync('app.js', 'utf8');
   const worker = fs.readFileSync('sw.js', 'utf8');
   const server = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const pushApi = fs.readFileSync('api/push.js', 'utf8');
   assert.match(source, /async function syncNotificationLead\(leadId\)/);
   assert.match(source, /url\.searchParams\.set\("lead_id", requestedId\)/);
   assert.match(source, /if \(event\.data\.leadId\) syncNotificationLead/);
   assert.match(source, /showNotificationLeadImmediately\(event\.data\.leadSnapshot\)/);
-  assert.match(worker, /leadId: event\.notification\.data\?\.leadId/);
-  assert.match(worker, /leadSnapshot: event\.notification\.data\?\.leadSnapshot/);
+  assert.match(worker, /leadId: notificationData\.leadId/);
+  assert.match(worker, /leadSnapshot: notificationData\.leadSnapshot/);
   assert.match(server, /event\?\.parameter\?\.lead_id/);
-  assert.match(server, /leadSnapshot: Object\.assign\(\{\}, lead, runtime\)/);
+  assert.match(source, /showCachedNotificationLead\(pendingNotificationLeadId\)/);
+  assert.match(worker, /notificationData\.leadId \? "OPEN_DASHBOARD"/);
+  assert.match(worker, /leadlaju-notification-snapshots/);
+  assert.match(pushApi, /leadSnapshot: input\.leadSnapshot/);
+  assert.match(server, /leadSnapshot: \{/);
+  assert.match(server, /queue_state: "active"/);
   assert.match(server, /view: "dashboard"/);
 });
 

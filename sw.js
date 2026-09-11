@@ -1,9 +1,9 @@
-const CACHE_NAME = "leadlaju-pwa-v20260911-live-sync-v65";
+const CACHE_NAME = "leadlaju-pwa-v20260911-live-sync-v66";
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20260911-live-sync-v65",
-  "/app.js?v=20260911-live-sync-v65",
+  "/styles.css?v=20260911-live-sync-v66",
+  "/app.js?v=20260911-live-sync-v66",
   "/manifest.webmanifest?v=20260625-pwa-notifications",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",
@@ -118,26 +118,37 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const targetUrl = new URL(event.notification.data?.url || "/", self.location.origin).href;
-  const view = event.notification.data?.view || null;
+  const notificationData = event.notification.data || {};
+  const targetUrl = new URL(notificationData.url || "/", self.location.origin).href;
+  const view = notificationData.view || null;
 
   event.waitUntil(
-    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+    (async () => {
+      if (notificationData.leadId && notificationData.leadSnapshot) {
+        const cache = await caches.open("leadlaju-notification-snapshots");
+        await cache.put(
+          new Request(`/__lead_snapshot__/${encodeURIComponent(notificationData.leadId)}`),
+          new Response(JSON.stringify(notificationData.leadSnapshot), {
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
       const existingClient = clients.find((client) => client.url.startsWith(self.location.origin));
       if (existingClient) {
-        existingClient.focus();
+        await existingClient.focus();
         existingClient.postMessage({
-          type: event.notification.data?.reminderType === "potential"
+          type: notificationData.reminderType === "potential"
             ? "OPEN_POTENTIAL_REMINDER"
-            : view ? "OPEN_VIEW" : "OPEN_DASHBOARD",
+            : notificationData.leadId ? "OPEN_DASHBOARD" : view ? "OPEN_VIEW" : "OPEN_DASHBOARD",
           view,
-          leadId: event.notification.data?.leadId || null,
-          leadSnapshot: event.notification.data?.leadSnapshot || null,
-          potentialCount: Number(event.notification.data?.potentialCount) || 0,
+          leadId: notificationData.leadId || null,
+          leadSnapshot: notificationData.leadSnapshot || null,
+          potentialCount: Number(notificationData.potentialCount) || 0,
         });
         return;
       }
-      return self.clients.openWindow(targetUrl);
-    }),
+      await self.clients.openWindow(targetUrl);
+    })(),
   );
 });

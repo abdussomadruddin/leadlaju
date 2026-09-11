@@ -683,7 +683,10 @@ function startAuthenticatedApp(user) {
   renderAll();
   enforceAgentNotificationAccess();
   if (getSheetEndpoint()) {
-    if (pendingNotificationLeadId) syncNotificationLead(pendingNotificationLeadId);
+    if (pendingNotificationLeadId) {
+      showCachedNotificationLead(pendingNotificationLeadId);
+      syncNotificationLead(pendingNotificationLeadId);
+    }
     syncGoogleSheet({ silent: true, notifyNewLeads: true }).finally(() => {
       if (pendingPotentialReminder) openPotentialReminderModal();
     });
@@ -1461,6 +1464,21 @@ async function showNotificationLeadImmediately(leadSnapshot) {
   switchView("dashboard");
   renderAll();
   return true;
+}
+
+async function showCachedNotificationLead(leadId) {
+  if (!("caches" in window) || !leadId) return false;
+  try {
+    const cache = await caches.open("leadlaju-notification-snapshots");
+    const request = new Request(`/__lead_snapshot__/${encodeURIComponent(leadId)}`);
+    const response = await cache.match(request);
+    if (!response) return false;
+    await cache.delete(request);
+    return showNotificationLeadImmediately(await response.json());
+  } catch (error) {
+    console.warn("Notification snapshot could not be opened", error);
+    return false;
+  }
 }
 
 async function registerServiceWorker() {
