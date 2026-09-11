@@ -355,9 +355,18 @@ test('notification click fetches the assigned lead directly for an instant dashb
   assert.match(worker, /leadSnapshot: notificationData\.leadSnapshot/);
   assert.match(server, /event\?\.parameter\?\.lead_id/);
   assert.match(source, /showCachedNotificationLead\(pendingNotificationLeadId\)/);
+  assert.match(source, /showLatestCachedNotificationLead\(\)/);
+  assert.match(source, /parseLeadTimestamp\(lead\.expires_at \|\| lead\.expiresAt, 0\) > now/);
+  const instantStart = source.indexOf('async function showNotificationLeadImmediately');
+  const instantBody = source.slice(instantStart, source.indexOf('\nasync function ', instantStart + 1));
+  assert.ok(instantBody.indexOf('renderAll();') < instantBody.indexOf('await savePromise'));
   assert.match(worker, /notificationData\.leadId \? "OPEN_DASHBOARD"/);
   assert.match(worker, /leadlaju-notification-snapshots/);
+  assert.match(worker, /async function cacheLeadSnapshot\(payload/);
+  assert.match(worker, /await cacheLeadSnapshot\(payload\)/);
+  assert.match(worker, /new URL\(`\/__lead_snapshot__/);
   assert.match(pushApi, /leadSnapshot: input\.leadSnapshot/);
+  assert.match(pushApi, /hasLeadSnapshot: Boolean\(notification\.leadSnapshot\)/);
   assert.match(server, /leadSnapshot: \{/);
   assert.match(server, /queue_state: "active"/);
   assert.match(server, /view: "dashboard"/);

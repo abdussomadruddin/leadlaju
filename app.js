@@ -682,6 +682,7 @@ function startAuthenticatedApp(user) {
   switchView(getRequestedStartView());
   renderAll();
   enforceAgentNotificationAccess();
+  showLatestCachedNotificationLead();
   if (getSheetEndpoint()) {
     if (pendingNotificationLeadId) {
       showCachedNotificationLead(pendingNotificationLeadId);
@@ -1458,11 +1459,24 @@ async function syncNotificationLead(leadId) {
 }
 
 async function showNotificationLeadImmediately(leadSnapshot) {
-  if (!leadSnapshot?.id) return false;
-  await addLead(leadSnapshot, { silent: true, updateExisting: true, notify: false, queueIfBlocked: true });
-  saveState();
+  if (!leadSnapshot?.id || !currentAgentMatches(
+    leadSnapshot.assigned_agent_id || leadSnapshot.assignedAgentId,
+    leadSnapshot.assigned_agent_email || leadSnapshot.assignedAgentEmail,
+    leadSnapshot.assigned_agent_name || leadSnapshot.assignedAgentName,
+  )) return false;
+  const savePromise = addLead(leadSnapshot, {
+    silent: true,
+    updateExisting: true,
+    notify: false,
+    queueIfBlocked: true,
+  });
   switchView("dashboard");
   renderAll();
+  const saved = await savePromise;
+  if (saved) {
+    saveState();
+    renderAll();
+  }
   return true;
 }
 
@@ -1470,13 +1484,50 @@ async function showCachedNotificationLead(leadId) {
   if (!("caches" in window) || !leadId) return false;
   try {
     const cache = await caches.open("leadlaju-notification-snapshots");
-    const request = new Request(`/__lead_snapshot__/${encodeURIComponent(leadId)}`);
+    const request = new Request(new URL(`/__lead_snapshot__/${encodeURIComponent(leadId)}`, window.location.origin));
     const response = await cache.match(request);
     if (!response) return false;
     await cache.delete(request);
     return showNotificationLeadImmediately(await response.json());
   } catch (error) {
     console.warn("Notification snapshot could not be opened", error);
+    return false;
+  }
+}
+
+async function showLatestCachedNotificationLead() {
+  if (!("caches" in window) || getCurrentUser()?.role !== "agent") return false;
+  try {
+    const cache = await caches.open("leadlaju-notification-snapshots");
+    const requests = await cache.keys();
+    const snapshots = (await Promise.all(requests.map(async (request) => {
+      const response = await cache.match(request);
+      if (!response) return null;
+      try {
+        return { request, lead: await response.json() };
+      } catch {
+        await cache.delete(request);
+        return null;
+      }
+    }))).filter((item) => item?.lead);
+    const now = Date.now();
+    const matching = snapshots
+      .filter(({ lead }) => currentAgentMatches(
+        lead.assigned_agent_id || lead.assignedAgentId,
+        lead.assigned_agent_email || lead.assignedAgentEmail,
+        lead.assigned_agent_name || lead.assignedAgentName,
+      ))
+      .filter(({ lead }) => normalizeSheetStatus(lead.status) === "new" &&
+        String(lead.queue_state || lead.queueState || "").toLowerCase() === "active" &&
+        parseLeadTimestamp(lead.expires_at || lead.expiresAt, 0) > now)
+      .sort((left, right) =>
+        parseLeadTimestamp(right.lead.received_at || right.lead.receivedAt, 0) -
+        parseLeadTimestamp(left.lead.received_at || left.lead.receivedAt, 0));
+    if (!matching.length) return false;
+    await cache.delete(matching[0].request);
+    return showNotificationLeadImmediately(matching[0].lead);
+  } catch (error) {
+    console.warn("Latest notification snapshot could not be opened", error);
     return false;
   }
 }

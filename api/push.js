@@ -91,6 +91,12 @@ module.exports = async function handler(request, response) {
   }
 
   const body = JSON.stringify(notification);
+  console.log("[push] sending", {
+    subscriptions: subscriptions.length,
+    leadId: notification.leadId,
+    hasLeadSnapshot: Boolean(notification.leadSnapshot),
+    payloadBytes: Buffer.byteLength(body),
+  });
   const results = await Promise.allSettled(
     subscriptions.map((subscription) =>
       webpush.sendNotification(subscription, body, {
@@ -113,6 +119,13 @@ module.exports = async function handler(request, response) {
     if (statusCode === 404 || statusCode === 410) {
       expired.push(subscriptions[index].endpoint);
     }
+  });
+
+  console.log("[push] completed", {
+    leadId: notification.leadId,
+    sent,
+    failed,
+    expired: expired.length,
   });
 
   response.status(200).json({ ok: true, sent, failed, expired });

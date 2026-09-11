@@ -1,9 +1,9 @@
-const CACHE_NAME = "leadlaju-pwa-v20260911-live-sync-v66";
+const CACHE_NAME = "leadlaju-pwa-v20260911-live-sync-v67";
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20260911-live-sync-v66",
-  "/app.js?v=20260911-live-sync-v66",
+  "/styles.css?v=20260911-live-sync-v67",
+  "/app.js?v=20260911-live-sync-v67",
   "/manifest.webmanifest?v=20260625-pwa-notifications",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",
@@ -66,7 +66,19 @@ self.addEventListener("fetch", (event) => {
   );
 });
 
+async function cacheLeadSnapshot(payload = {}) {
+  if (!payload.leadId || !payload.leadSnapshot) return;
+  const cache = await caches.open("leadlaju-notification-snapshots");
+  await cache.put(
+    new Request(new URL(`/__lead_snapshot__/${encodeURIComponent(payload.leadId)}`, self.location.origin)),
+    new Response(JSON.stringify(payload.leadSnapshot), {
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+}
+
 async function showLeadNotification(payload = {}) {
+  await cacheLeadSnapshot(payload);
   const title = payload.title || "Lead baru masuk";
   const options = {
     body: payload.body || "Lead baru perlu dihubungi dalam masa 5 minit.",
@@ -124,15 +136,7 @@ self.addEventListener("notificationclick", (event) => {
 
   event.waitUntil(
     (async () => {
-      if (notificationData.leadId && notificationData.leadSnapshot) {
-        const cache = await caches.open("leadlaju-notification-snapshots");
-        await cache.put(
-          new Request(`/__lead_snapshot__/${encodeURIComponent(notificationData.leadId)}`),
-          new Response(JSON.stringify(notificationData.leadSnapshot), {
-            headers: { "Content-Type": "application/json" },
-          }),
-        );
-      }
+      await cacheLeadSnapshot(notificationData);
       const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
       const existingClient = clients.find((client) => client.url.startsWith(self.location.origin));
       if (existingClient) {
