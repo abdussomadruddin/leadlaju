@@ -229,7 +229,7 @@ test('server counts every assigned non-new lead for each agent', () => {
 
 test('dashboard GET is read-only while maintenance runs through the trigger refresh', () => {
   const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
-  const start = source.indexOf('function doGet()');
+  const start = source.indexOf('function doGet(event)');
   const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
   assert.match(body, /readExistingHeaders_\(sheet\)/);
   assert.doesNotMatch(body, /ensureLeadIds_|ensureLeadTimestamps_|notifyUnsentLeadPushes_|syncAgentHandledCounts_/);

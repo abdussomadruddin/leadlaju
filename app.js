@@ -12,7 +12,7 @@ const DEFAULT_AGENT_PASSWORD = "Agent123!";
 const NOTIFICATION_ICON = "/assets/icon-192.png";
 const NOTIFICATION_BADGE = "/assets/badge-96.png";
 const MALAYSIA_TIME_ZONE = "Asia/Kuala_Lumpur";
-const DEFAULT_SYNC_INTERVAL_SECONDS = 5;
+const DEFAULT_SYNC_INTERVAL_SECONDS = 2;
 const FOLLOW_UP_REMINDER_SLOTS = [
   { time: "09:00", label: "9 pagi" },
   { time: "15:00", label: "3 petang" },
@@ -139,6 +139,8 @@ let dismissedAdminReminderKeys = loadAdminReminderKeys(ADMIN_REMINDER_DISMISSED_
 let notifiedAdminReminderKeys = loadAdminReminderKeys(ADMIN_REMINDER_NOTIFIED_KEY);
 let latestAdminReminder = null;
 let pendingPotentialReminder = new URLSearchParams(window.location.search).get("reminder") === "potential";
+let pendingNotificationLeadId = new URLSearchParams(window.location.search).get("lead") || "";
+let globalLoadingCount = 0;
 const expiringLeadIds = new Set();
 
 const elements = {
@@ -193,6 +195,13 @@ const elements = {
   potentialReminderTitle: document.querySelector("#potential-reminder-title"),
   potentialReminderDescription: document.querySelector("#potential-reminder-description"),
   closePotentialReminder: document.querySelector("#close-potential-reminder"),
+  leadAvailabilityModal: document.querySelector("#lead-availability-modal"),
+  leadAvailabilityKicker: document.querySelector("#lead-availability-kicker"),
+  leadAvailabilityTitle: document.querySelector("#lead-availability-title"),
+  leadAvailabilityDescription: document.querySelector("#lead-availability-description"),
+  closeLeadAvailability: document.querySelector("#close-lead-availability"),
+  globalLoadingOverlay: document.querySelector("#global-loading-overlay"),
+  globalLoadingMessage: document.querySelector("#global-loading-message"),
   enableRequiredNotifications: document.querySelector("#enable-required-notifications"),
   addToHomeScreen: document.querySelector("#add-to-home-screen"),
   closeNotificationReminder: document.querySelector("#close-notification-reminder"),
@@ -673,6 +682,7 @@ function startAuthenticatedApp(user) {
   renderAll();
   enforceAgentNotificationAccess();
   if (getSheetEndpoint()) {
+    if (pendingNotificationLeadId) syncNotificationLead(pendingNotificationLeadId);
     syncGoogleSheet({ silent: true, notifyNewLeads: true }).finally(() => {
       if (pendingPotentialReminder) openPotentialReminderModal();
     });
@@ -1159,8 +1169,21 @@ function getAgent(agentId) {
   return state.agents.find((agent) => agent.id === agentId);
 }
 
+function currentAgentMatches(assignedAgentId, assignedAgentEmail = "", assignedAgentName = "") {
+  const user = getCurrentUser();
+  if (!user || user.role !== "agent") return false;
+  if (assignedAgentId && assignedAgentId === user.id) return true;
+  if (assignedAgentEmail && String(assignedAgentEmail).trim().toLowerCase() === String(user.email || "").trim().toLowerCase()) return true;
+  return Boolean(assignedAgentName) &&
+    String(assignedAgentName).trim().toLowerCase() === String(user.name || "").trim().toLowerCase();
+}
+
+function currentAgentOwnsLead(lead) {
+  return Boolean(lead) && currentAgentMatches(lead.assignedAgentId, lead.assignedAgentEmail, lead.assignedAgentName);
+}
+
 function canAccessLead(lead) {
-  return Boolean(lead) && (isAdmin() || lead.assignedAgentId === state.currentUserId);
+  return Boolean(lead) && (isAdmin() || currentAgentOwnsLead(lead));
 }
 
 function normalizeUnixTimestamp(value, fallback = Date.now()) {
@@ -1286,6 +1309,24 @@ function showToast(title, message, tone = "success") {
   toastTimer = window.setTimeout(() => elements.toast.classList.remove("visible"), 3200);
 }
 
+function setGlobalLoading(active, message = "Sedang diproses...") {
+  globalLoadingCount = Math.max(0, globalLoadingCount + (active ? 1 : -1));
+  const visible = globalLoadingCount > 0;
+  elements.globalLoadingMessage.textContent = message;
+  elements.globalLoadingOverlay.classList.toggle("visible", visible);
+  elements.globalLoadingOverlay.setAttribute("aria-hidden", String(!visible));
+}
+
+function openLeadAvailabilityConfirmation(ready) {
+  elements.leadAvailabilityKicker.textContent = ready ? "GET LEAD aktif" : "STOP LEAD aktif";
+  elements.leadAvailabilityTitle.textContent = ready ? "Anda sedang dalam queue" : "Status anda OFFLINE";
+  elements.leadAvailabilityDescription.textContent = ready
+    ? "Anda sedang queue tunggu giliran untuk dapatkan lead. Jika lead tersedia, anda akan menerima lead di dashboard utama."
+    : "Status anda OFFLINE sekarang dan berhenti queue giliran untuk menerima lead.";
+  elements.leadAvailabilityModal.classList.add("open");
+  elements.leadAvailabilityModal.setAttribute("aria-hidden", "false");
+}
+
 function loadNotifiedLeadKeys() {
   try {
     const saved = JSON.parse(localStorage.getItem(NOTIFIED_LEADS_KEY) || "[]");
@@ -1365,7 +1406,8 @@ function leadNotificationKey(lead) {
 function shouldNotifyForLead(lead) {
   if (!lead || lead.status !== "new") return false;
   if (Number(lead.expiresAt) && lead.expiresAt <= Date.now()) return false;
-  return Boolean(state.currentUserId) && lead.assignedAgentId === state.currentUserId;
+  if (Boolean(state.currentUserId) && lead.assignedAgentId === state.currentUserId) return true;
+  return typeof currentAgentOwnsLead === "function" && currentAgentOwnsLead(lead);
 }
 
 function markLeadNotificationSeen(lead) {
@@ -1387,6 +1429,28 @@ function getRequestedStartView() {
   const params = new URLSearchParams(window.location.search);
   const requestedView = params.get("view") || window.location.hash.replace(/^#/, "");
   return ["dashboard", "leads", "appointments", "agents", "projects", "integration"].includes(requestedView) ? requestedView : "dashboard";
+}
+
+async function syncNotificationLead(leadId) {
+  const requestedId = String(leadId || "").trim();
+  if (!requestedId || !getSheetEndpoint()) return false;
+  try {
+    const url = new URL(getSheetEndpoint());
+    url.searchParams.set("lead_id", requestedId);
+    url.searchParams.set("_", Date.now().toString());
+    const response = await fetch(url, { cache: "no-store" });
+    const payload = await response.json();
+    if (!response.ok || !payload?.ok || !payload.lead) return false;
+    await addLead(payload.lead, { silent: true, updateExisting: true, notify: false, queueIfBlocked: true });
+    saveState();
+    switchView("dashboard");
+    renderAll();
+    pendingNotificationLeadId = "";
+    return true;
+  } catch (error) {
+    console.warn("Notification lead sync failed", error);
+    return false;
+  }
 }
 
 async function registerServiceWorker() {
@@ -1815,6 +1879,7 @@ function applyLeadRuntimeFromSheet(lead, runtime, now = Date.now()) {
   if (!isActiveLeadStatus(lead.status)) {
     if (runtime.assignedAgentId) lead.assignedAgentId = runtime.assignedAgentId;
     if (runtime.assignedAgentName) lead.assignedAgentName = runtime.assignedAgentName;
+    if (runtime.assignedAgentEmail) lead.assignedAgentEmail = runtime.assignedAgentEmail;
     if (runtime.receivedAt) lead.receivedAt = runtime.receivedAt;
     lead.expiresAt = null;
     lead.queuedAt = null;
@@ -1829,6 +1894,7 @@ function applyLeadRuntimeFromSheet(lead, runtime, now = Date.now()) {
     lead.status = "new";
     lead.assignedAgentId = runtime.assignedAgentId;
     lead.assignedAgentName = runtime.assignedAgentName || lead.assignedAgentName || "";
+    lead.assignedAgentEmail = runtime.assignedAgentEmail || lead.assignedAgentEmail || "";
     lead.receivedAt = runtime.receivedAt || lead.receivedAt || now;
     lead.expiresAt = runtime.expiresAt || lead.expiresAt || lead.receivedAt + RESPONSE_WINDOW_MS;
     lead.queuedAt = null;
@@ -2371,6 +2437,7 @@ async function updateAgentPresence(online, force = false) {
     action: "update_agent_presence",
     agent: {
       id: user.id,
+      email: user.email,
       online,
       notification_enabled: Notification.permission === "granted",
       session_started_at: agentPresenceSessionStartedAt,
@@ -2389,40 +2456,37 @@ async function setAgentLeadAvailability(ready) {
     return false;
   }
 
-  if (ready) {
-    const subscribed = await syncPushSubscription(true).catch(() => false);
-    if (!subscribed) {
-      showToast("Notifikasi belum sedia", "Pastikan loceng dan notifikasi pelayar telah diaktifkan sebelum GET LEAD.", "error");
-      return false;
-    }
-    await updateAgentPresence(true, true);
-  }
-
   const button = ready ? elements.getLeadButton : elements.stopLeadButton;
   button.disabled = true;
+  setGlobalLoading(true, ready ? "Memasuki giliran lead..." : "Menghentikan agihan lead...");
   let result;
   try {
+    if (ready) {
+      const subscribed = await syncPushSubscription(true).catch(() => false);
+      if (!subscribed) {
+        showToast("Notifikasi belum sedia", "Pastikan loceng dan notifikasi pelayar telah diaktifkan sebelum GET LEAD.", "error");
+        return false;
+      }
+      await updateAgentPresence(true, true);
+    }
     result = await postGoogleSheetActionWithResponse({
       action: "set_agent_lead_availability",
-      agent: { id: user.id, ready },
+      agent: { id: user.id, email: user.email, ready },
     }, "Lead availability update failed");
   } catch (error) {
     showToast("Status tidak dikemas kini", error.message || "Semak sambungan dan cuba lagi.", "error");
     return false;
   } finally {
     button.disabled = false;
+    setGlobalLoading(false);
   }
 
   user.leadReady = Boolean(result?.lead_ready ?? ready);
   user.online = user.leadReady && Notification.permission === "granted";
   saveState();
   renderAll();
-  await syncGoogleSheet({ silent: true, notifyNewLeads: true });
-  showToast(
-    user.leadReady ? "Sedia menerima lead" : "Agihan lead dihentikan",
-    user.leadReady ? "Anda kini dimasukkan ke giliran agihan lead baharu." : "Lead baharu tidak akan dihantar kepada anda.",
-    user.leadReady ? "success" : "default",
-  );
+  syncGoogleSheet({ silent: true, notifyNewLeads: true });
+  openLeadAvailabilityConfirmation(user.leadReady);
   return true;
 }
 
@@ -3193,10 +3257,14 @@ async function handleCall(leadId) {
 
 function getVisibleActiveLead() {
   const newLeads = state.leads
-    .filter((lead) => lead.status === "new")
+    .filter((lead) =>
+      lead.status === "new" &&
+      lead.queueState !== "queued" &&
+      (!Number(lead.expiresAt) || lead.expiresAt > Date.now()),
+    )
     .sort((a, b) => a.expiresAt - b.expiresAt);
   if (isAdmin()) return newLeads[0] || null;
-  return newLeads.find((lead) => lead.assignedAgentId === state.currentUserId) || null;
+  return newLeads.find(currentAgentOwnsLead) || null;
 }
 
 function canViewLeadPhone(lead) {
@@ -3562,7 +3630,8 @@ function renderAppointments() {
   const visible = state.appointments
     .filter((appointment) => {
       const lead = findLeadForAppointment(appointment);
-      return isAdmin() || (lead && lead.assignedAgentId === state.currentUserId);
+      return isAdmin() || currentAgentOwnsLead(lead) ||
+        currentAgentMatches(appointment.assignedAgentId, "", appointment.assignedAgentName);
     })
     .sort((left, right) => left.scheduledAt - right.scheduledAt);
   const projects = [...new Set(visible.map((appointment) => appointment.project).filter(Boolean))].sort();
@@ -3672,6 +3741,7 @@ async function saveAppointment(event) {
   });
   const action = editingAppointmentId ? "update_appointment" : reschedulingAppointmentId ? "reschedule_appointment" : "create_appointment";
   elements.appointmentSubmitButton.disabled = true;
+  setGlobalLoading(true, "Menyimpan appointment...");
   try {
     await postGoogleSheetActionWithResponse({ action, appointment }, "Appointment update failed");
     pendingAppointmentRequestId = null;
@@ -3682,6 +3752,7 @@ async function saveAppointment(event) {
     elements.appointmentFormError.textContent = error?.message || "Appointment tidak dapat disimpan.";
   } finally {
     elements.appointmentSubmitButton.disabled = false;
+    setGlobalLoading(false);
   }
 }
 
@@ -3689,6 +3760,7 @@ async function updateAppointmentStatus(appointmentId, status) {
   const appointment = state.appointments.find((item) => item.id === appointmentId);
   const lead = findLeadForAppointment(appointment);
   if (!appointment || !lead || !canAccessLead(lead)) return;
+  setGlobalLoading(true, "Mengemas kini appointment...");
   try {
     await postGoogleSheetActionWithResponse({
       action: "update_appointment_status",
@@ -3698,6 +3770,8 @@ async function updateAppointmentStatus(appointmentId, status) {
     showToast("Appointment dikemas kini", `${lead.name}: ${formatAppointmentStatus(status)}.`);
   } catch (error) {
     showToast("Status gagal disimpan", error?.message || "Cuba lagi.", "error");
+  } finally {
+    setGlobalLoading(false);
   }
 }
 
@@ -3706,6 +3780,7 @@ async function deleteAppointment(appointmentId) {
   const lead = findLeadForAppointment(appointment);
   if (!appointment || !lead || !canAccessLead(lead)) return;
   if (!confirmPermanentDelete("appointment", `${appointment.leadName || lead.name} pada ${formatDateTime(appointment.scheduledAt)}`)) return;
+  setGlobalLoading(true, "Memadam appointment...");
   try {
     await postGoogleSheetActionWithResponse({
       action: "delete_appointment",
@@ -3715,6 +3790,8 @@ async function deleteAppointment(appointmentId) {
     showToast("Appointment dipadam", `${lead.name} telah dikemas kini.`);
   } catch (error) {
     showToast("Appointment gagal dipadam", error?.message || "Cuba lagi.", "error");
+  } finally {
+    setGlobalLoading(false);
   }
 }
 
@@ -4292,6 +4369,7 @@ async function updateContact(event) {
     elements.contactFormError.textContent = "Nama, nombor telefon dan projek diperlukan.";
     return;
   }
+  setGlobalLoading(true, "Menyimpan perubahan lead...");
   try {
     await persistLead(lead);
     const noteSynced = await updateLeadNotesInSheet(lead, lead.notes);
@@ -4307,6 +4385,8 @@ async function updateContact(event) {
   } catch (error) {
     console.error(error);
     elements.contactFormError.textContent = "Perubahan tidak dapat disimpan ke dashboard.";
+  } finally {
+    setGlobalLoading(false);
   }
 }
 
@@ -4334,6 +4414,7 @@ async function saveLeadNote(leadId, button = null) {
     button.disabled = true;
     button.textContent = "Menyimpan...";
   }
+  setGlobalLoading(true, "Menyimpan nota...");
 
   try {
     if (remoteDatabaseMode) {
@@ -4359,6 +4440,7 @@ async function saveLeadNote(leadId, button = null) {
       button.disabled = false;
       button.textContent = "Simpan nota";
     }
+    setGlobalLoading(false);
   }
 }
 
@@ -4395,6 +4477,7 @@ async function updateLeadStatusFromLog(leadId, nextStatus, field = null) {
     field.disabled = true;
     field.classList.add("is-saving");
   }
+  setGlobalLoading(true, "Menyimpan status lead...");
 
   try {
     applySheetStatusToLead(lead, normalizedStatus);
@@ -4422,6 +4505,7 @@ async function updateLeadStatusFromLog(leadId, nextStatus, field = null) {
       field.classList.remove("is-saving");
       field.value = getLeadVisualStatus(lead);
     }
+    setGlobalLoading(false);
   }
 }
 
@@ -4740,6 +4824,7 @@ elements.contactForm.addEventListener("submit", updateContact);
 elements.integrationForm.addEventListener("submit", saveIntegration);
 elements.syncNowButton.addEventListener("click", () => syncGoogleSheet());
 elements.closePotentialReminder?.addEventListener("click", () => closeModal(elements.potentialReminderModal));
+elements.closeLeadAvailability?.addEventListener("click", () => closeModal(elements.leadAvailabilityModal));
 elements.refreshButton?.addEventListener("click", () => {
   elements.refreshButton.disabled = true;
   elements.refreshButton.classList.add("is-syncing");
@@ -4748,7 +4833,10 @@ elements.refreshButton?.addEventListener("click", () => {
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.addEventListener("message", (event) => {
-    if (event.data?.type === "OPEN_DASHBOARD") switchView("dashboard");
+    if (event.data?.type === "OPEN_DASHBOARD") {
+      switchView("dashboard");
+      if (event.data.leadId) syncNotificationLead(event.data.leadId);
+    }
     if (event.data?.type === "OPEN_VIEW") switchView(event.data.view || "dashboard");
     if (event.data?.type === "OPEN_POTENTIAL_REMINDER") handlePotentialReminderNotification();
   });
@@ -4799,7 +4887,7 @@ elements.resetPasswordModal.addEventListener("click", (event) => {
   if (event.target === elements.resetPasswordModal) closeModal(elements.resetPasswordModal);
 });
 
-[elements.agentPasswordModal, elements.contactModal, elements.appointmentModal, elements.potentialReminderModal].forEach((modal) => {
+[elements.agentPasswordModal, elements.contactModal, elements.appointmentModal, elements.potentialReminderModal, elements.leadAvailabilityModal].forEach((modal) => {
   modal.addEventListener("click", (event) => {
     if (event.target === modal) closeModal(modal);
   });
@@ -4844,6 +4932,7 @@ document.addEventListener("keydown", (event) => {
     closeModal(elements.contactModal);
     closeModal(elements.appointmentModal);
     closeModal(elements.potentialReminderModal);
+    closeModal(elements.leadAvailabilityModal);
     setMobileSidebarOpen(false);
   }
 });

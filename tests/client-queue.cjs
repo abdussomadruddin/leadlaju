@@ -328,6 +328,30 @@ test('agents explicitly start and stop lead availability from the dashboard', ()
   assert.match(source, /elements\.stopLeadButton\?\.addEventListener/);
   assert.match(source, /elements\.getLeadButton\.disabled = ready/);
   assert.match(source, /elements\.stopLeadButton\.disabled = !ready/);
+  assert.match(source, /openLeadAvailabilityConfirmation\(user\.leadReady\)/);
+  assert.match(html, /id="lead-availability-modal"/);
+});
+
+test('dashboard polling uses a two-second interval and shows global action loading', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('styles.css', 'utf8');
+  assert.match(source, /const DEFAULT_SYNC_INTERVAL_SECONDS = 2/);
+  assert.match(source, /function setGlobalLoading\(active/);
+  assert.match(html, /id="global-loading-overlay"/);
+  assert.match(css, /\.netflix-loader/);
+});
+
+test('notification click fetches the assigned lead directly for an instant dashboard card', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const worker = fs.readFileSync('sw.js', 'utf8');
+  const server = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  assert.match(source, /async function syncNotificationLead\(leadId\)/);
+  assert.match(source, /url\.searchParams\.set\("lead_id", requestedId\)/);
+  assert.match(source, /if \(event\.data\.leadId\) syncNotificationLead/);
+  assert.match(worker, /leadId: event\.notification\.data\?\.leadId/);
+  assert.match(server, /event\?\.parameter\?\.lead_id/);
+  assert.match(server, /view: "dashboard"/);
 });
 
 test('login UI is not blocked by the initial Google Sheet agent sync', () => {
@@ -410,6 +434,7 @@ test('appointments follow the current Log Lead owner and support edit and delete
   assert.match(server, /function updateAppointment_/);
   assert.match(server, /function deleteAppointment_/);
   assert.match(server, /filterSubscriptionsForAgent_\(subscriptions, agent\)/);
+  assert.match(source, /currentAgentMatches\(appointment\.assignedAgentId/);
 });
 
 test('appointment writes do not wait behind the lead distribution lock', () => {

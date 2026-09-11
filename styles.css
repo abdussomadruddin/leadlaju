@@ -2648,6 +2648,54 @@ td small {
   text-align: center;
 }
 
+.availability-confirmation-card {
+  text-align: center;
+}
+
+.availability-confirmation-card .modal-heading {
+  justify-content: center;
+}
+
+.availability-confirmation-card > p {
+  margin: 18px 0 22px;
+  color: var(--ink-600);
+  line-height: 1.6;
+}
+
+.global-loading-overlay {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: none;
+  place-items: center;
+  background: rgba(8, 14, 27, 0.64);
+  backdrop-filter: blur(4px);
+}
+
+.global-loading-overlay.visible {
+  display: grid;
+}
+
+.global-loading-content {
+  display: grid;
+  justify-items: center;
+  gap: 15px;
+  color: #fff;
+}
+
+.netflix-loader {
+  width: 46px;
+  height: 46px;
+  border: 5px solid rgba(255, 255, 255, 0.24);
+  border-top-color: #ef3f3f;
+  border-radius: 50%;
+  animation: loading-spin 720ms linear infinite;
+}
+
+@keyframes loading-spin {
+  to { transform: rotate(360deg); }
+}
+
 .notification-required-card .modal-heading {
   justify-content: center;
 }

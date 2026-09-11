@@ -225,10 +225,15 @@ const PUSH_HEADERS = [
   { field: "updatedAt", label: "Updated At" },
 ];
 
-function doGet() {
+function doGet(event) {
   try {
     const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
     const sheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
+    const requestedLeadId = String(event?.parameter?.lead_id || "").trim();
+    if (requestedLeadId) {
+      const lead = findAppointmentLeadInSheet_(sheet, requestedLeadId);
+      return jsonResponse({ ok: Boolean(lead), lead: lead || null, error: lead ? "" : "Lead tidak dijumpai." });
+    }
     const agentsSheet = getOrCreateSheet_(spreadsheet, AGENTS_SHEET_NAME);
     const projectsSheet = getOrCreateSheet_(spreadsheet, PROJECTS_SHEET_NAME);
     const remindersSheet = getOrCreateSheet_(spreadsheet, REMINDERS_SHEET_NAME);
@@ -1273,8 +1278,11 @@ function updateAgentPresence_(input) {
   const headers = ensureRequiredHeadersBySpec_(sheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
   const values = sheet.getDataRange().getDisplayValues();
   const id = String(input.id || "").trim();
+  const email = String(input.email || "").trim().toLowerCase();
   for (let index = 1; index < values.length; index += 1) {
-    if (getCellBySpec_(headers, values[index], AGENT_FIELD_ALIASES, "id") !== id) continue;
+    const rowId = getCellBySpec_(headers, values[index], AGENT_FIELD_ALIASES, "id");
+    const rowEmail = getCellBySpec_(headers, values[index], AGENT_FIELD_ALIASES, "email").toLowerCase();
+    if ((!id || rowId !== id) && (!email || rowEmail !== email)) continue;
     const row = values[index].slice(0, headers.length);
     const online = Boolean(input.online);
     const sessionStartedRaw = String(input.session_started_at || input.sessionStartedAt || "").trim();
@@ -1297,10 +1305,13 @@ function setAgentLeadAvailability_(input) {
   const headers = ensureRequiredHeadersBySpec_(sheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
   const values = sheet.getDataRange().getDisplayValues();
   const id = String(input.id || "").trim();
+  const email = String(input.email || "").trim().toLowerCase();
   const ready = Boolean(input.ready);
 
   for (let index = 1; index < values.length; index += 1) {
-    if (getCellBySpec_(headers, values[index], AGENT_FIELD_ALIASES, "id") !== id) continue;
+    const rowId = getCellBySpec_(headers, values[index], AGENT_FIELD_ALIASES, "id");
+    const rowEmail = getCellBySpec_(headers, values[index], AGENT_FIELD_ALIASES, "email").toLowerCase();
+    if ((!id || rowId !== id) && (!email || rowEmail !== email)) continue;
     const row = values[index].slice(0, headers.length);
     const active = normalizeAgentActive_(getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "active"));
     const notificationsEnabled = getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "notificationEnabled") === "yes";
@@ -2110,7 +2121,8 @@ function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
         body: `${lead.name}\nNombor dibuka selepas CALL NOW. Diberikan kepada ${agent.name}.`,
         tag: `leadlaju-active-${agent.id}`,
         leadId: lead.id,
-        url: "/",
+        view: "dashboard",
+        url: `/?view=dashboard&lead=${encodeURIComponent(lead.id)}`,
         requireInteraction: true,
       });
       if (result.ok !== false) {
