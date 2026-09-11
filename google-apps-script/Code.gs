@@ -487,6 +487,22 @@ function findAppointmentLead_(leads, leadId) {
   return (leads || []).find((lead) => String(lead.id || "").trim() === String(leadId || "").trim()) || null;
 }
 
+function findAppointmentLeadInSheet_(sheet, leadId) {
+  const normalizedId = String(leadId || "").trim();
+  if (!sheet || !normalizedId || sheet.getLastRow() < 2) return null;
+  const headers = readExistingHeaders_(sheet);
+  const idAliases = FIELD_ALIASES.id || [];
+  const idIndex = headers.findIndex((header) => idAliases.includes(header));
+  if (idIndex < 0) return null;
+  const idRange = sheet.getRange(2, idIndex + 1, sheet.getLastRow() - 1, 1);
+  const match = idRange.createTextFinder(normalizedId).matchEntireCell(true).findNext();
+  if (!match) return null;
+  const rowNumber = match.getRow();
+  const row = sheet.getRange(rowNumber, 1, 1, headers.length).getDisplayValues()[0];
+  const lead = mapRow_(headers, row, rowNumber);
+  return lead.name && lead.phone ? lead : null;
+}
+
 function appointmentActorAllowed_(input, lead) {
   const role = String(input.acting_role || input.actingRole || "").trim().toLowerCase();
   if (role === "admin") return true;
@@ -536,8 +552,7 @@ function appointmentInput_(input, lead, parentAppointmentId) {
 function createAppointment_(input) {
   const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
   const leadsSheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
-  ensureRequiredHeaders_(leadsSheet);
-  const lead = findAppointmentLead_(readLeads_(leadsSheet), input.lead_id || input.leadId);
+  const lead = findAppointmentLeadInSheet_(leadsSheet, input.lead_id || input.leadId);
   if (!lead?.assigned_agent_id) return { ok: false, error: "Lead mesti telah diagihkan kepada ejen sebelum appointment dibuat." };
   if (!appointmentActorAllowed_(input, lead)) return { ok: false, error: "Anda hanya boleh membuat appointment untuk lead sendiri." };
   const appointment = appointmentInput_(input, lead, "");
@@ -562,12 +577,11 @@ function findAppointmentRow_(sheet, headers, appointmentId) {
 function updateAppointmentStatus_(input) {
   const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
   const leadsSheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
-  const leads = readLeads_(leadsSheet);
   const sheet = getOrCreateSheet_(spreadsheet, APPOINTMENTS_SHEET_NAME);
   const headers = ensureRequiredHeadersBySpec_(sheet, APPOINTMENT_HEADERS, APPOINTMENT_FIELD_ALIASES);
   const found = findAppointmentRow_(sheet, headers, String(input.id || input.appointment_id || "").trim());
   if (!found) return { ok: false, error: "Appointment tidak dijumpai." };
-  const lead = findAppointmentLead_(leads, getCellBySpec_(headers, found.row, APPOINTMENT_FIELD_ALIASES, "leadId"));
+  const lead = findAppointmentLeadInSheet_(leadsSheet, getCellBySpec_(headers, found.row, APPOINTMENT_FIELD_ALIASES, "leadId"));
   if (!lead || !appointmentActorAllowed_(input, lead)) return { ok: false, error: "Anda tidak boleh mengemas kini appointment ini." };
   const status = normalizeAppointmentStatus_(input.status);
   if (!["show_up", "no_show"].includes(status)) return { ok: false, error: "Pilih status Show Up atau No Show." };
@@ -579,13 +593,12 @@ function updateAppointmentStatus_(input) {
 function rescheduleAppointment_(input) {
   const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
   const leadsSheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
-  const leads = readLeads_(leadsSheet);
   const sheet = getOrCreateSheet_(spreadsheet, APPOINTMENTS_SHEET_NAME);
   const headers = ensureRequiredHeadersBySpec_(sheet, APPOINTMENT_HEADERS, APPOINTMENT_FIELD_ALIASES);
   const appointmentId = String(input.id || input.appointment_id || "").trim();
   const found = findAppointmentRow_(sheet, headers, appointmentId);
   if (!found) return { ok: false, error: "Appointment tidak dijumpai." };
-  const lead = findAppointmentLead_(leads, getCellBySpec_(headers, found.row, APPOINTMENT_FIELD_ALIASES, "leadId"));
+  const lead = findAppointmentLeadInSheet_(leadsSheet, getCellBySpec_(headers, found.row, APPOINTMENT_FIELD_ALIASES, "leadId"));
   if (!lead || !appointmentActorAllowed_(input, lead)) return { ok: false, error: "Anda tidak boleh mengubah appointment ini." };
   const next = appointmentInput_(input, lead, appointmentId);
   if (next.error) return { ok: false, error: next.error };

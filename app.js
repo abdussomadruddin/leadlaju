@@ -3642,7 +3642,7 @@ async function saveAppointment(event) {
   const appointment = appointmentActionPayload({
     id: reschedulingAppointmentId || "",
     request_id: pendingAppointmentRequestId,
-    lead_id: lead.id,
+    lead_id: lead.dedupeKey || lead.id,
     type: elements.appointmentType.value,
     scheduled_at: elements.appointmentScheduledAt.value,
     location: elements.appointmentLocation.value.trim(),
