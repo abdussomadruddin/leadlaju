@@ -385,8 +385,14 @@ function doPost(event) {
     if (payload.action === "update_appointment_status") {
       return jsonResponse(updateAppointmentStatus_(payload.appointment || payload));
     }
+    if (payload.action === "update_appointment") {
+      return jsonResponse(updateAppointment_(payload.appointment || payload));
+    }
     if (payload.action === "reschedule_appointment") {
       return jsonResponse(rescheduleAppointment_(payload.appointment || payload));
+    }
+    if (payload.action === "delete_appointment") {
+      return jsonResponse(deleteAppointment_(payload.appointment || payload));
     }
     if (payload.action === "register_push_subscription") {
       return jsonResponse(registerPushSubscription_(payload));
@@ -459,13 +465,17 @@ function parseAppointmentReminderState_(value) {
 
 function readAppointments_(sheet, headers, leads) {
   if (!sheet || !headers.length || sheet.getLastRow() < 2) return [];
-  const leadById = new Map((leads || []).map((lead) => [String(lead.id || "").trim(), lead]));
   return sheet.getDataRange().getDisplayValues().slice(1).map((row) => {
     const leadId = getCellBySpec_(headers, row, APPOINTMENT_FIELD_ALIASES, "leadId");
-    const lead = leadById.get(leadId);
+    const lead = findAppointmentLeadForRecord_(leads, {
+      leadId,
+      leadName: getCellBySpec_(headers, row, APPOINTMENT_FIELD_ALIASES, "leadName"),
+      project: getCellBySpec_(headers, row, APPOINTMENT_FIELD_ALIASES, "project"),
+      assignedAgentId: getCellBySpec_(headers, row, APPOINTMENT_FIELD_ALIASES, "assignedAgentId"),
+    });
     return {
       id: getCellBySpec_(headers, row, APPOINTMENT_FIELD_ALIASES, "id"),
-      lead_id: leadId,
+      lead_id: lead ? lead.id : leadId,
       lead_name: getCellBySpec_(headers, row, APPOINTMENT_FIELD_ALIASES, "leadName"),
       project: getCellBySpec_(headers, row, APPOINTMENT_FIELD_ALIASES, "project"),
       type: getCellBySpec_(headers, row, APPOINTMENT_FIELD_ALIASES, "type") || "Site Visit",
@@ -481,6 +491,30 @@ function readAppointments_(sheet, headers, leads) {
       assigned_agent_name: lead ? lead.assigned_agent_name : getCellBySpec_(headers, row, APPOINTMENT_FIELD_ALIASES, "assignedAgentName"),
     };
   }).filter((appointment) => appointment.id && appointment.lead_id);
+}
+
+function appointmentMatchKey_(name, project) {
+  return `${String(name || "").trim().toLowerCase()}|${normalizeProjectName_(project)}`;
+}
+
+function findAppointmentLeadForRecord_(leads, record) {
+  const leadId = String(record.leadId || "").trim();
+  const direct = (leads || []).find((lead) => String(lead.id || "").trim() === leadId);
+  if (direct) return direct;
+  const key = appointmentMatchKey_(record.leadName, record.project);
+  const matches = (leads || []).filter((lead) => appointmentMatchKey_(lead.name, lead.project) === key);
+  const assignedAgentId = String(record.assignedAgentId || "").trim();
+  return matches.find((lead) => assignedAgentId && String(lead.assigned_agent_id || "").trim() === assignedAgentId) ||
+    (matches.length === 1 ? matches[0] : null);
+}
+
+function findAppointmentLeadForRow_(leadsSheet, appointmentHeaders, appointmentRow) {
+  return findAppointmentLeadForRecord_(readLeads_(leadsSheet), {
+    leadId: getCellBySpec_(appointmentHeaders, appointmentRow, APPOINTMENT_FIELD_ALIASES, "leadId"),
+    leadName: getCellBySpec_(appointmentHeaders, appointmentRow, APPOINTMENT_FIELD_ALIASES, "leadName"),
+    project: getCellBySpec_(appointmentHeaders, appointmentRow, APPOINTMENT_FIELD_ALIASES, "project"),
+    assignedAgentId: getCellBySpec_(appointmentHeaders, appointmentRow, APPOINTMENT_FIELD_ALIASES, "assignedAgentId"),
+  });
 }
 
 function findAppointmentLead_(leads, leadId) {
@@ -581,13 +615,56 @@ function updateAppointmentStatus_(input) {
   const headers = ensureRequiredHeadersBySpec_(sheet, APPOINTMENT_HEADERS, APPOINTMENT_FIELD_ALIASES);
   const found = findAppointmentRow_(sheet, headers, String(input.id || input.appointment_id || "").trim());
   if (!found) return { ok: false, error: "Appointment tidak dijumpai." };
-  const lead = findAppointmentLeadInSheet_(leadsSheet, getCellBySpec_(headers, found.row, APPOINTMENT_FIELD_ALIASES, "leadId"));
+  const lead = findAppointmentLeadForRow_(leadsSheet, headers, found.row);
   if (!lead || !appointmentActorAllowed_(input, lead)) return { ok: false, error: "Anda tidak boleh mengemas kini appointment ini." };
   const status = normalizeAppointmentStatus_(input.status);
   if (!["show_up", "no_show"].includes(status)) return { ok: false, error: "Pilih status Show Up atau No Show." };
   const appointment = { status, updatedAt: canonicalLeadTimestamp_(new Date()) };
   sheet.getRange(found.rowNumber, 1, 1, headers.length).setValues([appointmentRow_(headers, appointment, found.row)]);
   return { ok: true, status };
+}
+
+function updateAppointment_(input) {
+  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const leadsSheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
+  const sheet = getOrCreateSheet_(spreadsheet, APPOINTMENTS_SHEET_NAME);
+  const headers = ensureRequiredHeadersBySpec_(sheet, APPOINTMENT_HEADERS, APPOINTMENT_FIELD_ALIASES);
+  const appointmentId = String(input.id || input.appointment_id || "").trim();
+  const found = findAppointmentRow_(sheet, headers, appointmentId);
+  if (!found) return { ok: false, error: "Appointment tidak dijumpai." };
+  const lead = findAppointmentLeadForRow_(leadsSheet, headers, found.row);
+  if (!lead || !appointmentActorAllowed_(input, lead)) return { ok: false, error: "Anda tidak boleh mengubah appointment ini." };
+  const next = appointmentInput_(input, lead, getCellBySpec_(headers, found.row, APPOINTMENT_FIELD_ALIASES, "parentAppointmentId"));
+  if (next.error) return { ok: false, error: next.error };
+  const update = {
+    leadId: lead.id,
+    leadName: lead.name,
+    project: lead.project,
+    type: next.type,
+    scheduledAt: next.scheduledAt,
+    location: next.location,
+    notes: next.notes,
+    assignedAgentId: lead.assigned_agent_id,
+    assignedAgentName: lead.assigned_agent_name,
+    updatedAt: canonicalLeadTimestamp_(new Date()),
+    reminderState: "{}",
+  };
+  sheet.getRange(found.rowNumber, 1, 1, headers.length).setValues([appointmentRow_(headers, update, found.row)]);
+  return { ok: true, appointment: readAppointments_(sheet, headers, [lead]).find((item) => item.id === appointmentId) };
+}
+
+function deleteAppointment_(input) {
+  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const leadsSheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
+  const sheet = getOrCreateSheet_(spreadsheet, APPOINTMENTS_SHEET_NAME);
+  const headers = ensureRequiredHeadersBySpec_(sheet, APPOINTMENT_HEADERS, APPOINTMENT_FIELD_ALIASES);
+  const appointmentId = String(input.id || input.appointment_id || "").trim();
+  const found = findAppointmentRow_(sheet, headers, appointmentId);
+  if (!found) return { ok: false, error: "Appointment tidak dijumpai." };
+  const lead = findAppointmentLeadForRow_(leadsSheet, headers, found.row);
+  if (!lead || !appointmentActorAllowed_(input, lead)) return { ok: false, error: "Anda tidak boleh memadam appointment ini." };
+  sheet.deleteRow(found.rowNumber);
+  return { ok: true, id: appointmentId };
 }
 
 function rescheduleAppointment_(input) {
@@ -598,7 +675,7 @@ function rescheduleAppointment_(input) {
   const appointmentId = String(input.id || input.appointment_id || "").trim();
   const found = findAppointmentRow_(sheet, headers, appointmentId);
   if (!found) return { ok: false, error: "Appointment tidak dijumpai." };
-  const lead = findAppointmentLeadInSheet_(leadsSheet, getCellBySpec_(headers, found.row, APPOINTMENT_FIELD_ALIASES, "leadId"));
+  const lead = findAppointmentLeadForRow_(leadsSheet, headers, found.row);
   if (!lead || !appointmentActorAllowed_(input, lead)) return { ok: false, error: "Anda tidak boleh mengubah appointment ini." };
   const next = appointmentInput_(input, lead, appointmentId);
   if (next.error) return { ok: false, error: next.error };
@@ -1692,7 +1769,6 @@ function processAppointmentReminders_(spreadsheet, leads, agents) {
   const values = sheet.getDataRange().getDisplayValues();
   if (values.length < 2) return { ok: true, sent: 0, processed: 0 };
 
-  const leadById = new Map((leads || []).map((lead) => [String(lead.id || "").trim(), lead]));
   const subscriptions = readPushSubscriptions_(spreadsheet);
   const now = Date.now();
   const reminderWindowMs = 15 * 60 * 1000;
@@ -1712,7 +1788,12 @@ function processAppointmentReminders_(spreadsheet, leads, agents) {
     if (!scheduledAt) return;
     const scheduledTime = parseLeadTimestamp_(scheduledAt).getTime();
     if (!isFinite(scheduledTime)) return;
-    const lead = leadById.get(getCellBySpec_(headers, row, APPOINTMENT_FIELD_ALIASES, "leadId"));
+    const lead = findAppointmentLeadForRecord_(leads, {
+      leadId: getCellBySpec_(headers, row, APPOINTMENT_FIELD_ALIASES, "leadId"),
+      leadName: getCellBySpec_(headers, row, APPOINTMENT_FIELD_ALIASES, "leadName"),
+      project: getCellBySpec_(headers, row, APPOINTMENT_FIELD_ALIASES, "project"),
+      assignedAgentId: getCellBySpec_(headers, row, APPOINTMENT_FIELD_ALIASES, "assignedAgentId"),
+    });
     const state = parseAppointmentReminderState_(getCellBySpec_(headers, row, APPOINTMENT_FIELD_ALIASES, "reminderState"));
     const appointmentId = getCellBySpec_(headers, row, APPOINTMENT_FIELD_ALIASES, "id");
     let changed = false;
@@ -1748,6 +1829,7 @@ function processAppointmentReminders_(spreadsheet, leads, agents) {
       const nextRow = row.slice(0, headers.length);
       setRowValueBySpec_(headers, nextRow, APPOINTMENT_FIELD_ALIASES, "reminderState", JSON.stringify(state));
       if (lead) {
+        setRowValueBySpec_(headers, nextRow, APPOINTMENT_FIELD_ALIASES, "leadId", lead.id || "");
         setRowValueBySpec_(headers, nextRow, APPOINTMENT_FIELD_ALIASES, "assignedAgentId", lead.assigned_agent_id || "");
         setRowValueBySpec_(headers, nextRow, APPOINTMENT_FIELD_ALIASES, "assignedAgentName", lead.assigned_agent_name || "");
       }

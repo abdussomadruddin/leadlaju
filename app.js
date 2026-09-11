@@ -118,6 +118,7 @@ let editingAgentId = null;
 let selectedContactId = null;
 let selectedAppointmentLeadId = null;
 let reschedulingAppointmentId = null;
+let editingAppointmentId = null;
 let pendingAppointmentRequestId = null;
 let remoteDatabaseClient = null;
 let remoteDatabaseMode = false;
@@ -3540,13 +3541,27 @@ function appointmentDateTimeLocalValue(value) {
   return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
 }
 
+function findLeadForAppointment(appointment) {
+  if (!appointment) return null;
+  const appointmentLeadId = String(appointment.leadId || "").trim();
+  const direct = state.leads.find((lead) =>
+    [lead.id, lead.dedupeKey].some((id) => String(id || "").trim() === appointmentLeadId),
+  );
+  if (direct) return direct;
+  const matches = state.leads.filter((lead) =>
+    String(lead.name || "").trim().toLowerCase() === String(appointment.leadName || "").trim().toLowerCase() &&
+    String(lead.project || "").trim().toLowerCase() === String(appointment.project || "").trim().toLowerCase(),
+  );
+  return matches.find((lead) => lead.assignedAgentId === appointment.assignedAgentId) || (matches.length === 1 ? matches[0] : null);
+}
+
 function renderAppointments() {
   if (!elements.appointmentList) return;
   const selectedStatus = elements.appointmentStatusFilter.value || "all";
   const selectedProject = elements.appointmentProjectFilter.value || "all";
   const visible = state.appointments
     .filter((appointment) => {
-      const lead = state.leads.find((item) => item.id === appointment.leadId);
+      const lead = findLeadForAppointment(appointment);
       return isAdmin() || (lead && lead.assignedAgentId === state.currentUserId);
     })
     .sort((left, right) => left.scheduledAt - right.scheduledAt);
@@ -3563,15 +3578,21 @@ function renderAppointments() {
   elements.appointmentCount.textContent = `${filtered.length} appointment`;
   elements.appointmentList.innerHTML = filtered.length
     ? filtered.map((appointment) => {
-      const lead = state.leads.find((item) => item.id === appointment.leadId);
-      const owner = lead?.assignedAgentId ? getAgent(lead.assignedAgentId)?.name || appointment.assignedAgentName : "Tiada ejen";
-      const actionButtons = appointment.status === "scheduled"
-        ? `<div class="appointment-actions">
+      const lead = findLeadForAppointment(appointment);
+      const owner = lead?.assignedAgentId
+        ? getAgent(lead.assignedAgentId)?.name || lead.assignedAgentName || appointment.assignedAgentName || "Tiada ejen"
+        : appointment.assignedAgentName || "Tiada ejen";
+      const statusButtons = appointment.status === "scheduled"
+        ? `
             <button class="contact-edit-button success" type="button" data-appointment-status="show_up" data-appointment-id="${appointment.id}">Show Up</button>
             <button class="contact-edit-button danger" type="button" data-appointment-status="no_show" data-appointment-id="${appointment.id}">No Show</button>
-            <button class="contact-edit-button" type="button" data-appointment-reschedule="${appointment.id}">Reschedule</button>
-          </div>`
+            <button class="contact-edit-button" type="button" data-appointment-reschedule="${appointment.id}">Reschedule</button>`
         : "";
+      const actionButtons = `<div class="appointment-actions">
+          ${statusButtons}
+          <button class="contact-edit-button" type="button" data-appointment-edit="${appointment.id}">Edit</button>
+          <button class="contact-edit-button danger" type="button" data-appointment-delete="${appointment.id}">Padam</button>
+        </div>`;
       return `<article class="appointment-item">
         <div class="appointment-item-heading">
           <span class="status-badge appointment-${appointment.status}">${formatAppointmentStatus(appointment.status)}</span>
@@ -3598,19 +3619,20 @@ function renderAppointments() {
     : '<p class="empty-state">Tiada appointment untuk dipaparkan.</p>';
 }
 
-function openAppointmentModal(leadId, appointmentId = null) {
-  const lead = state.leads.find((item) => item.id === leadId);
+function openAppointmentModal(leadId, appointmentId = null, mode = "create") {
+  const appointment = appointmentId ? state.appointments.find((item) => item.id === appointmentId) : null;
+  const lead = appointment ? findLeadForAppointment(appointment) : state.leads.find((item) => item.id === leadId);
   if (!lead?.assignedAgentId || !canAccessLead(lead)) {
     showToast("Lead belum layak", "Appointment hanya boleh dibuat untuk lead yang telah diagihkan kepada anda.", "error");
     return;
   }
-  const appointment = appointmentId ? state.appointments.find((item) => item.id === appointmentId) : null;
-  selectedAppointmentLeadId = leadId;
-  reschedulingAppointmentId = appointment?.id || null;
+  selectedAppointmentLeadId = lead.id;
+  reschedulingAppointmentId = mode === "reschedule" ? appointment?.id || null : null;
+  editingAppointmentId = mode === "edit" ? appointment?.id || null : null;
   pendingAppointmentRequestId = `appointment-${crypto.randomUUID?.() || makeId("request")}`;
   elements.appointmentForm.reset();
-  elements.appointmentModalKicker.textContent = appointment ? "Jadual baharu" : "Susulan lead";
-  elements.appointmentModalTitle.textContent = appointment ? "Reschedule Appointment" : "Tambah Appointment";
+  elements.appointmentModalKicker.textContent = mode === "reschedule" ? "Jadual baharu" : "Susulan lead";
+  elements.appointmentModalTitle.textContent = mode === "edit" ? "Edit Appointment" : mode === "reschedule" ? "Reschedule Appointment" : "Tambah Appointment";
   elements.appointmentLeadSummary.textContent = `${lead.name} · ${lead.project}`;
   elements.appointmentType.value = appointment?.type || "Site Visit";
   elements.appointmentScheduledAt.value = appointmentDateTimeLocalValue(appointment?.scheduledAt || Date.now() + 24 * 60 * 60 * 1000);
@@ -3618,7 +3640,7 @@ function openAppointmentModal(leadId, appointmentId = null) {
   elements.appointmentLocation.value = appointment?.location || "";
   elements.appointmentNotes.value = appointment?.notes || "";
   elements.appointmentFormError.textContent = "";
-  elements.appointmentSubmitButton.textContent = appointment ? "Simpan jadual baharu" : "Simpan appointment";
+  elements.appointmentSubmitButton.textContent = mode === "edit" ? "Simpan perubahan" : mode === "reschedule" ? "Simpan jadual baharu" : "Simpan appointment";
   elements.appointmentModal.classList.add("open");
   elements.appointmentModal.setAttribute("aria-hidden", "false");
 }
@@ -3640,7 +3662,7 @@ async function saveAppointment(event) {
     return;
   }
   const appointment = appointmentActionPayload({
-    id: reschedulingAppointmentId || "",
+    id: editingAppointmentId || reschedulingAppointmentId || "",
     request_id: pendingAppointmentRequestId,
     lead_id: lead.dedupeKey || lead.id,
     type: elements.appointmentType.value,
@@ -3648,14 +3670,14 @@ async function saveAppointment(event) {
     location: elements.appointmentLocation.value.trim(),
     notes: elements.appointmentNotes.value.trim(),
   });
-  const action = reschedulingAppointmentId ? "reschedule_appointment" : "create_appointment";
+  const action = editingAppointmentId ? "update_appointment" : reschedulingAppointmentId ? "reschedule_appointment" : "create_appointment";
   elements.appointmentSubmitButton.disabled = true;
   try {
     await postGoogleSheetActionWithResponse({ action, appointment }, "Appointment update failed");
     pendingAppointmentRequestId = null;
     closeModal(elements.appointmentModal);
     await syncGoogleSheet({ silent: true });
-    showToast(reschedulingAppointmentId ? "Appointment dijadual semula" : "Appointment disimpan", `${lead.name} telah dikemas kini.`);
+    showToast(reschedulingAppointmentId ? "Appointment dijadual semula" : editingAppointmentId ? "Appointment dikemas kini" : "Appointment disimpan", `${lead.name} telah dikemas kini.`);
   } catch (error) {
     elements.appointmentFormError.textContent = error?.message || "Appointment tidak dapat disimpan.";
   } finally {
@@ -3665,7 +3687,7 @@ async function saveAppointment(event) {
 
 async function updateAppointmentStatus(appointmentId, status) {
   const appointment = state.appointments.find((item) => item.id === appointmentId);
-  const lead = appointment && state.leads.find((item) => item.id === appointment.leadId);
+  const lead = findLeadForAppointment(appointment);
   if (!appointment || !lead || !canAccessLead(lead)) return;
   try {
     await postGoogleSheetActionWithResponse({
@@ -3676,6 +3698,23 @@ async function updateAppointmentStatus(appointmentId, status) {
     showToast("Appointment dikemas kini", `${lead.name}: ${formatAppointmentStatus(status)}.`);
   } catch (error) {
     showToast("Status gagal disimpan", error?.message || "Cuba lagi.", "error");
+  }
+}
+
+async function deleteAppointment(appointmentId) {
+  const appointment = state.appointments.find((item) => item.id === appointmentId);
+  const lead = findLeadForAppointment(appointment);
+  if (!appointment || !lead || !canAccessLead(lead)) return;
+  if (!confirmPermanentDelete("appointment", `${appointment.leadName || lead.name} pada ${formatDateTime(appointment.scheduledAt)}`)) return;
+  try {
+    await postGoogleSheetActionWithResponse({
+      action: "delete_appointment",
+      appointment: appointmentActionPayload({ id: appointmentId }),
+    }, "Appointment delete failed");
+    await syncGoogleSheet({ silent: true });
+    showToast("Appointment dipadam", `${lead.name} telah dikemas kini.`);
+  } catch (error) {
+    showToast("Appointment gagal dipadam", error?.message || "Cuba lagi.", "error");
   }
 }
 
@@ -4672,11 +4711,18 @@ elements.appointmentForm?.addEventListener("submit", saveAppointment);
 elements.appointmentList?.addEventListener("click", (event) => {
   const status = event.target.closest("[data-appointment-status]");
   const reschedule = event.target.closest("[data-appointment-reschedule]");
+  const edit = event.target.closest("[data-appointment-edit]");
+  const remove = event.target.closest("[data-appointment-delete]");
   if (status) updateAppointmentStatus(status.dataset.appointmentId, status.dataset.appointmentStatus);
   if (reschedule) {
     const appointment = state.appointments.find((item) => item.id === reschedule.dataset.appointmentReschedule);
-    if (appointment) openAppointmentModal(appointment.leadId, appointment.id);
+    if (appointment) openAppointmentModal(appointment.leadId, appointment.id, "reschedule");
   }
+  if (edit) {
+    const appointment = state.appointments.find((item) => item.id === edit.dataset.appointmentEdit);
+    if (appointment) openAppointmentModal(appointment.leadId, appointment.id, "edit");
+  }
+  if (remove) deleteAppointment(remove.dataset.appointmentDelete);
 });
 elements.leadsTableBody.addEventListener("change", (event) => {
   const statusField = event.target.closest("[data-lead-status]");

@@ -3173,7 +3173,7 @@ td small {
 
   .appointment-actions .contact-edit-button {
     min-height: 38px;
-    flex: 1;
+    flex: 1 1 calc(33.333% - 8px);
   }
 
   .page-title p,

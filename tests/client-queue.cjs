@@ -224,7 +224,9 @@ test('lead status updates use the same-origin confirmation proxy', () => {
   assert.match(proxy, /payload\.action === "set_agent_lead_availability"/);
   assert.match(proxy, /"create_appointment"/);
   assert.match(proxy, /"update_appointment_status"/);
+  assert.match(proxy, /"update_appointment"/);
   assert.match(proxy, /"reschedule_appointment"/);
+  assert.match(proxy, /"delete_appointment"/);
   assert.match(proxy, /await fetch\(GOOGLE_SHEET_ENDPOINT/);
   assert.match(proxy, /response\.status\(result\?\.ok \? 200 : 409\)/);
 });
@@ -389,12 +391,25 @@ test('appointment tracker is synced from the server and scoped to assigned leads
   assert.match(source, /const APPOINTMENT_STATUS_OPTIONS/);
   assert.match(source, /state\.appointments = normalizeAppointments\(payload\.appointments\)/);
   assert.match(source, /lead\.assignedAgentId === state\.currentUserId/);
-  assert.match(source, /action = reschedulingAppointmentId \? "reschedule_appointment" : "create_appointment"/);
+  assert.match(source, /editingAppointmentId \? "update_appointment" : reschedulingAppointmentId \? "reschedule_appointment" : "create_appointment"/);
   assert.match(source, /request_id: pendingAppointmentRequestId/);
   assert.match(source, /lead_id: lead\.dedupeKey \|\| lead\.id/);
   assert.match(source, /pendingAppointmentRequestId = `appointment-/);
   assert.match(html, /data-view="appointments"/);
   assert.match(html, /id="appointment-modal"/);
+});
+
+test('appointments follow the current Log Lead owner and support edit and delete', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const server = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  assert.match(source, /\[lead\.id, lead\.dedupeKey\]/);
+  assert.match(source, /data-appointment-edit=/);
+  assert.match(source, /data-appointment-delete=/);
+  assert.match(source, /confirmPermanentDelete\("appointment"/);
+  assert.match(server, /function findAppointmentLeadForRecord_/);
+  assert.match(server, /function updateAppointment_/);
+  assert.match(server, /function deleteAppointment_/);
+  assert.match(server, /filterSubscriptionsForAgent_\(subscriptions, agent\)/);
 });
 
 test('appointment writes do not wait behind the lead distribution lock', () => {

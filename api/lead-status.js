@@ -25,7 +25,9 @@ module.exports = async function handler(request, response) {
   const appointmentActions = new Set([
     "create_appointment",
     "update_appointment_status",
+    "update_appointment",
     "reschedule_appointment",
+    "delete_appointment",
   ]);
   const updatingAppointment = appointmentActions.has(payload.action);
   if (updatingLeadStatus && (!payload.lead?.id || !payload.lead?.status)) {
