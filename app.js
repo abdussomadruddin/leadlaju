@@ -1453,6 +1453,15 @@ async function syncNotificationLead(leadId) {
   }
 }
 
+async function showNotificationLeadImmediately(leadSnapshot) {
+  if (!leadSnapshot?.id) return false;
+  await addLead(leadSnapshot, { silent: true, updateExisting: true, notify: false, queueIfBlocked: true });
+  saveState();
+  switchView("dashboard");
+  renderAll();
+  return true;
+}
+
 async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
@@ -4835,6 +4844,7 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.addEventListener("message", (event) => {
     if (event.data?.type === "OPEN_DASHBOARD") {
       switchView("dashboard");
+      if (event.data.leadSnapshot) showNotificationLeadImmediately(event.data.leadSnapshot);
       if (event.data.leadId) syncNotificationLead(event.data.leadId);
     }
     if (event.data?.type === "OPEN_VIEW") switchView(event.data.view || "dashboard");

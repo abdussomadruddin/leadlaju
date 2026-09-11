@@ -2121,6 +2121,7 @@ function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
         body: `${lead.name}\nNombor dibuka selepas CALL NOW. Diberikan kepada ${agent.name}.`,
         tag: `leadlaju-active-${agent.id}`,
         leadId: lead.id,
+        leadSnapshot: Object.assign({}, lead, runtime),
         view: "dashboard",
         url: `/?view=dashboard&lead=${encodeURIComponent(lead.id)}`,
         requireInteraction: true,

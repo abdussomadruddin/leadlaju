@@ -1,9 +1,9 @@
-const CACHE_NAME = "leadlaju-pwa-v20260911-live-sync-v63";
+const CACHE_NAME = "leadlaju-pwa-v20260911-live-sync-v64";
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20260911-live-sync-v63",
-  "/app.js?v=20260911-live-sync-v63",
+  "/styles.css?v=20260911-live-sync-v64",
+  "/app.js?v=20260911-live-sync-v64",
   "/manifest.webmanifest?v=20260625-pwa-notifications",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",
@@ -78,6 +78,7 @@ async function showLeadNotification(payload = {}) {
     data: {
       url: payload.url || "/",
       leadId: payload.leadId || null,
+      leadSnapshot: payload.leadSnapshot || null,
       view: payload.view || null,
       reminderType: payload.reminderType || null,
       potentialCount: Number(payload.potentialCount) || 0,
@@ -131,6 +132,7 @@ self.addEventListener("notificationclick", (event) => {
             : view ? "OPEN_VIEW" : "OPEN_DASHBOARD",
           view,
           leadId: event.notification.data?.leadId || null,
+          leadSnapshot: event.notification.data?.leadSnapshot || null,
           potentialCount: Number(event.notification.data?.potentialCount) || 0,
         });
         return;

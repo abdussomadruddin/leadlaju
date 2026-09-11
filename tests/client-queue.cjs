@@ -349,8 +349,11 @@ test('notification click fetches the assigned lead directly for an instant dashb
   assert.match(source, /async function syncNotificationLead\(leadId\)/);
   assert.match(source, /url\.searchParams\.set\("lead_id", requestedId\)/);
   assert.match(source, /if \(event\.data\.leadId\) syncNotificationLead/);
+  assert.match(source, /showNotificationLeadImmediately\(event\.data\.leadSnapshot\)/);
   assert.match(worker, /leadId: event\.notification\.data\?\.leadId/);
+  assert.match(worker, /leadSnapshot: event\.notification\.data\?\.leadSnapshot/);
   assert.match(server, /event\?\.parameter\?\.lead_id/);
+  assert.match(server, /leadSnapshot: Object\.assign\(\{\}, lead, runtime\)/);
   assert.match(server, /view: "dashboard"/);
 });
 
