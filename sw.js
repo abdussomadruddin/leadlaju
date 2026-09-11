@@ -1,9 +1,9 @@
-const CACHE_NAME = "leadlaju-pwa-v20260910-browser-refresh-v58";
+const CACHE_NAME = "leadlaju-pwa-v20260911-potential-reminder-v59";
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20260910-browser-refresh-v58",
-  "/app.js?v=20260910-browser-refresh-v58",
+  "/styles.css?v=20260911-potential-reminder-v59",
+  "/app.js?v=20260911-potential-reminder-v59",
   "/manifest.webmanifest?v=20260625-pwa-notifications",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",
@@ -78,7 +78,9 @@ async function showLeadNotification(payload = {}) {
     data: {
       url: payload.url || "/",
       leadId: payload.leadId || null,
-      view: payload.view || null
+      view: payload.view || null,
+      reminderType: payload.reminderType || null,
+      potentialCount: Number(payload.potentialCount) || 0,
     }
   };
   if (String(options.tag).startsWith("leadlaju-active-")) {
@@ -124,9 +126,12 @@ self.addEventListener("notificationclick", (event) => {
       if (existingClient) {
         existingClient.focus();
         existingClient.postMessage({
-          type: view ? "OPEN_VIEW" : "OPEN_DASHBOARD",
+          type: event.notification.data?.reminderType === "potential"
+            ? "OPEN_POTENTIAL_REMINDER"
+            : view ? "OPEN_VIEW" : "OPEN_DASHBOARD",
           view,
-          leadId: event.notification.data?.leadId || null
+          leadId: event.notification.data?.leadId || null,
+          potentialCount: Number(event.notification.data?.potentialCount) || 0,
         });
         return;
       }

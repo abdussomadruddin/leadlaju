@@ -2644,7 +2644,15 @@ td small {
   text-align: center;
 }
 
+.potential-reminder-card {
+  text-align: center;
+}
+
 .notification-required-card .modal-heading {
+  justify-content: center;
+}
+
+.potential-reminder-card .modal-heading {
   justify-content: center;
 }
 
@@ -2659,6 +2667,17 @@ td small {
   background: #eef4ff;
 }
 
+.potential-reminder-icon {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  margin: 22px auto 16px;
+  place-items: center;
+  border-radius: 50%;
+  color: #b97813;
+  background: var(--amber-soft);
+}
+
 .notification-required-icon svg,
 .notification-enable-button svg {
   width: 24px;
@@ -2669,7 +2688,23 @@ td small {
   stroke-width: 1.8;
 }
 
+.potential-reminder-icon svg {
+  width: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
 .notification-required-card > p {
+  margin: 0 auto 20px;
+  max-width: 340px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.potential-reminder-card > p {
   margin: 0 auto 20px;
   max-width: 340px;
   color: var(--muted);

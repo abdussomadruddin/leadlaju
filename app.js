@@ -136,6 +136,7 @@ let sentFollowUpReminderKeys = loadFollowUpReminderKeys();
 let dismissedAdminReminderKeys = loadAdminReminderKeys(ADMIN_REMINDER_DISMISSED_KEY);
 let notifiedAdminReminderKeys = loadAdminReminderKeys(ADMIN_REMINDER_NOTIFIED_KEY);
 let latestAdminReminder = null;
+let pendingPotentialReminder = new URLSearchParams(window.location.search).get("reminder") === "potential";
 const expiringLeadIds = new Set();
 
 const elements = {
@@ -186,6 +187,10 @@ const elements = {
   notificationButton: document.querySelector("#notification-button"),
   refreshButton: document.querySelector("#refresh-button"),
   notificationRequiredModal: document.querySelector("#notification-required-modal"),
+  potentialReminderModal: document.querySelector("#potential-reminder-modal"),
+  potentialReminderTitle: document.querySelector("#potential-reminder-title"),
+  potentialReminderDescription: document.querySelector("#potential-reminder-description"),
+  closePotentialReminder: document.querySelector("#close-potential-reminder"),
   enableRequiredNotifications: document.querySelector("#enable-required-notifications"),
   addToHomeScreen: document.querySelector("#add-to-home-screen"),
   closeNotificationReminder: document.querySelector("#close-notification-reminder"),
@@ -666,7 +671,11 @@ function startAuthenticatedApp(user) {
   renderAll();
   enforceAgentNotificationAccess();
   if (getSheetEndpoint()) {
-    syncGoogleSheet({ silent: true, notifyNewLeads: true });
+    syncGoogleSheet({ silent: true, notifyNewLeads: true }).finally(() => {
+      if (pendingPotentialReminder) openPotentialReminderModal();
+    });
+  } else if (pendingPotentialReminder) {
+    openPotentialReminderModal();
   }
 }
 
@@ -2922,6 +2931,46 @@ async function processAdminReminderFromSheet(input) {
   await sendAdminFollowUpNotification(reminder);
 }
 
+function getCurrentAgentPotentialLeads() {
+  const user = getCurrentUser();
+  if (user?.role !== "agent") return [];
+  return state.leads.filter(
+    (lead) => lead.assignedAgentId === user.id && getLeadVisualStatus(lead) === "potential",
+  );
+}
+
+function clearPotentialReminderRequest() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete("reminder");
+  window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+function openPotentialReminderModal() {
+  const user = getCurrentUser();
+  if (!pendingPotentialReminder || user?.role !== "agent" || document.body.classList.contains("logged-out")) return;
+  const count = getCurrentAgentPotentialLeads().length;
+  pendingPotentialReminder = false;
+  clearPotentialReminderRequest();
+  switchView("leads");
+  elements.potentialReminderTitle.textContent = count
+    ? `${count} prospek panas menunggu`
+    : "Tiada prospek panas menunggu";
+  elements.potentialReminderDescription.textContent = count
+    ? `Anda mempunyai ${count} lead berstatus Potential. Jangan lepaskan peluang ini - follow up sekarang kerana prospek ini sudah satu langkah lagi untuk close.`
+    : "Semua lead Potential anda sudah dikemas kini. Teruskan semak Log Lead untuk follow up seterusnya.";
+  elements.potentialReminderModal.classList.add("open");
+  elements.potentialReminderModal.setAttribute("aria-hidden", "false");
+}
+
+async function handlePotentialReminderNotification() {
+  const user = getCurrentUser();
+  if (user?.role !== "agent" || document.body.classList.contains("logged-out")) return;
+  pendingPotentialReminder = true;
+  switchView("leads");
+  await syncGoogleSheet({ silent: true });
+  openPotentialReminderModal();
+}
+
 async function remindAllAgentsForFollowUp() {
   if (!isAdmin()) {
     showToast("Admin sahaja", "Hanya admin boleh hantar reminder kepada semua agent.", "error");
@@ -4640,6 +4689,7 @@ elements.agentPasswordForm.addEventListener("submit", updateAgentPassword);
 elements.contactForm.addEventListener("submit", updateContact);
 elements.integrationForm.addEventListener("submit", saveIntegration);
 elements.syncNowButton.addEventListener("click", () => syncGoogleSheet());
+elements.closePotentialReminder?.addEventListener("click", () => closeModal(elements.potentialReminderModal));
 elements.refreshButton?.addEventListener("click", () => {
   elements.refreshButton.disabled = true;
   elements.refreshButton.classList.add("is-syncing");
@@ -4650,6 +4700,7 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.addEventListener("message", (event) => {
     if (event.data?.type === "OPEN_DASHBOARD") switchView("dashboard");
     if (event.data?.type === "OPEN_VIEW") switchView(event.data.view || "dashboard");
+    if (event.data?.type === "OPEN_POTENTIAL_REMINDER") handlePotentialReminderNotification();
   });
 }
 
@@ -4698,7 +4749,7 @@ elements.resetPasswordModal.addEventListener("click", (event) => {
   if (event.target === elements.resetPasswordModal) closeModal(elements.resetPasswordModal);
 });
 
-[elements.agentPasswordModal, elements.contactModal, elements.appointmentModal].forEach((modal) => {
+[elements.agentPasswordModal, elements.contactModal, elements.appointmentModal, elements.potentialReminderModal].forEach((modal) => {
   modal.addEventListener("click", (event) => {
     if (event.target === modal) closeModal(modal);
   });
@@ -4742,6 +4793,7 @@ document.addEventListener("keydown", (event) => {
     closeModal(elements.agentPasswordModal);
     closeModal(elements.contactModal);
     closeModal(elements.appointmentModal);
+    closeModal(elements.potentialReminderModal);
     setMobileSidebarOpen(false);
   }
 });

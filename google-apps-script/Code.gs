@@ -12,6 +12,9 @@ const PUSH_API_URL = "https://leadlaju.vercel.app/api/push";
 const PUSH_NOTIFY_SECRET = "leadlaju-push-notify-v1";
 const RESPONSE_WINDOW_MINUTES = 5;
 const AGENT_PRESENCE_TIMEOUT_MINUTES = 60;
+const POTENTIAL_REMINDER_HOUR = 8;
+const POTENTIAL_REMINDER_WINDOW_MINUTES = 15;
+const POTENTIAL_REMINDER_PROPERTY = "leadlaju_potential_reminder_keys";
 const LEAD_STATUS_VALUES = [
   "New",
   "Contacted",
@@ -1587,6 +1590,106 @@ function sendNewAgentSignupPush_(spreadsheet, agent) {
   });
 }
 
+function malaysiaReminderDateKey_(value) {
+  return Utilities.formatDate(value || new Date(), MALAYSIA_TIME_ZONE, "yyyy-MM-dd");
+}
+
+function potentialReminderIsDue_(value) {
+  const time = Utilities.formatDate(value || new Date(), MALAYSIA_TIME_ZONE, "HH:mm");
+  const [hour, minute] = time.split(":").map(Number);
+  return hour === POTENTIAL_REMINDER_HOUR && minute >= 0 && minute < POTENTIAL_REMINDER_WINDOW_MINUTES;
+}
+
+function getPotentialReminderKeys_() {
+  try {
+    const raw = PropertiesService.getScriptProperties().getProperty(POTENTIAL_REMINDER_PROPERTY) || "[]";
+    const parsed = JSON.parse(raw);
+    return new Set(Array.isArray(parsed) ? parsed : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function reservePotentialReminderKeys_(keys) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) return new Set();
+  try {
+    const sent = getPotentialReminderKeys_();
+    const reserved = keys.filter((key) => !sent.has(key));
+    if (reserved.length) {
+      reserved.forEach((key) => sent.add(key));
+      PropertiesService.getScriptProperties().setProperty(
+        POTENTIAL_REMINDER_PROPERTY,
+        JSON.stringify(Array.from(sent).slice(-500)),
+      );
+    }
+    return new Set(reserved);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function isPotentialReminderAgent_(agent) {
+  return Boolean(
+    agent &&
+      !roleIsAdmin_(agent.role) &&
+      agent.active === "active" &&
+      agent.notification_enabled &&
+      agent.last_seen_at,
+  );
+}
+
+function potentialLeadCountsByAgent_(leads) {
+  const counts = new Map();
+  (leads || []).forEach((lead) => {
+    const agentId = String(lead.assigned_agent_id || "").trim();
+    if (!agentId || normalizeLeadStage_(lead.status) !== "potential") return;
+    counts.set(agentId, (counts.get(agentId) || 0) + 1);
+  });
+  return counts;
+}
+
+function processPotentialLeadReminders_(spreadsheet, leads, agents) {
+  const now = new Date();
+  if (!potentialReminderIsDue_(now)) return { ok: true, sent: 0, agents: 0, due: false };
+
+  const subscriptions = readPushSubscriptions_(spreadsheet, { agentOnly: true });
+  const dateKey = malaysiaReminderDateKey_(now);
+  const counts = potentialLeadCountsByAgent_(leads);
+  const candidates = (agents || [])
+    .filter(isPotentialReminderAgent_)
+    .map((agent) => ({
+      agent,
+      count: counts.get(String(agent.id || "").trim()) || 0,
+      subscriptions: filterSubscriptionsForAgent_(subscriptions, agent),
+    }))
+    .filter((candidate) => candidate.count > 0 && candidate.subscriptions.length > 0);
+
+  const keys = candidates.map((candidate) => `${dateKey}:${candidate.agent.id}`);
+  const reserved = reservePotentialReminderKeys_(keys);
+  let sent = 0;
+  let agentsNotified = 0;
+
+  candidates.forEach((candidate) => {
+    const key = `${dateKey}:${candidate.agent.id}`;
+    if (!reserved.has(key)) return;
+    const result = sendPushViaApi_(spreadsheet, candidate.subscriptions, {
+      title: "Prospek panas menunggu",
+      body: `Anda ada ${candidate.count} lead Potential. Rugi jika tidak follow up - prospek ini dah satu langkah lagi untuk close.`,
+      tag: `leadlaju-potential-${dateKey}-${candidate.agent.id}`,
+      view: "leads",
+      url: "/?view=leads&reminder=potential",
+      reminderType: "potential",
+      potentialCount: candidate.count,
+      requireInteraction: true,
+    });
+    sent += Number(result.sent || 0);
+    agentsNotified += 1;
+  });
+
+  return { ok: true, sent, agents: agentsNotified, due: true };
+}
+
 function processAppointmentReminders_(spreadsheet, leads, agents) {
   const sheet = getOrCreateSheet_(spreadsheet, APPOINTMENTS_SHEET_NAME);
   const headers = ensureRequiredHeadersBySpec_(sheet, APPOINTMENT_HEADERS, APPOINTMENT_FIELD_ALIASES);
@@ -2157,7 +2260,14 @@ function refreshSheetTemplate_() {
   syncAgentHandledCounts_(leads, agentsSheet, agentHeaders);
   const pushResult = notifyUnsentLeadPushes_(spreadsheet, sheet, headers);
   const appointmentReminders = processAppointmentReminders_(spreadsheet, leads, agents);
-  return { ok: true, refreshed_at: new Date().toISOString(), push: pushResult, appointment_reminders: appointmentReminders };
+  const potentialReminders = processPotentialLeadReminders_(spreadsheet, leads, agents);
+  return {
+    ok: true,
+    refreshed_at: new Date().toISOString(),
+    push: pushResult,
+    appointment_reminders: appointmentReminders,
+    potential_reminders: potentialReminders,
+  };
 }
 
 function sendResetCode_(payload) {
