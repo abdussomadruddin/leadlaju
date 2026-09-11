@@ -515,7 +515,7 @@ function appointmentInput_(input, lead, parentAppointmentId) {
   }
   const now = canonicalLeadTimestamp_(new Date());
   return {
-    id: `appointment-${Utilities.getUuid()}`,
+    id: String(input.request_id || input.requestId || "").trim() || `appointment-${Utilities.getUuid()}`,
     leadId: lead.id,
     leadName: lead.name,
     project: lead.project,
@@ -534,24 +534,19 @@ function appointmentInput_(input, lead, parentAppointmentId) {
 }
 
 function createAppointment_(input) {
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(8000)) return { ok: false, error: "Appointment sedang dikemas kini. Cuba lagi." };
-  try {
-    const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const leadsSheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
-    const leadHeaders = ensureRequiredHeaders_(leadsSheet);
-    const lead = findAppointmentLead_(readLeads_(leadsSheet), input.lead_id || input.leadId);
-    if (!lead?.assigned_agent_id) return { ok: false, error: "Lead mesti telah diagihkan kepada ejen sebelum appointment dibuat." };
-    if (!appointmentActorAllowed_(input, lead)) return { ok: false, error: "Anda hanya boleh membuat appointment untuk lead sendiri." };
-    const appointment = appointmentInput_(input, lead, "");
-    if (appointment.error) return { ok: false, error: appointment.error };
-    const sheet = getOrCreateSheet_(spreadsheet, APPOINTMENTS_SHEET_NAME);
-    const headers = ensureRequiredHeadersBySpec_(sheet, APPOINTMENT_HEADERS, APPOINTMENT_FIELD_ALIASES);
-    sheet.appendRow(appointmentRow_(headers, appointment));
-    return { ok: true, appointment: readAppointments_(sheet, headers, [lead]).find((item) => item.id === appointment.id) };
-  } finally {
-    lock.releaseLock();
-  }
+  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const leadsSheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
+  ensureRequiredHeaders_(leadsSheet);
+  const lead = findAppointmentLead_(readLeads_(leadsSheet), input.lead_id || input.leadId);
+  if (!lead?.assigned_agent_id) return { ok: false, error: "Lead mesti telah diagihkan kepada ejen sebelum appointment dibuat." };
+  if (!appointmentActorAllowed_(input, lead)) return { ok: false, error: "Anda hanya boleh membuat appointment untuk lead sendiri." };
+  const appointment = appointmentInput_(input, lead, "");
+  if (appointment.error) return { ok: false, error: appointment.error };
+  const sheet = getOrCreateSheet_(spreadsheet, APPOINTMENTS_SHEET_NAME);
+  const headers = ensureRequiredHeadersBySpec_(sheet, APPOINTMENT_HEADERS, APPOINTMENT_FIELD_ALIASES);
+  const existing = findAppointmentRow_(sheet, headers, appointment.id);
+  if (!existing) sheet.appendRow(appointmentRow_(headers, appointment));
+  return { ok: true, appointment: readAppointments_(sheet, headers, [lead]).find((item) => item.id === appointment.id) };
 }
 
 function findAppointmentRow_(sheet, headers, appointmentId) {
@@ -565,52 +560,40 @@ function findAppointmentRow_(sheet, headers, appointmentId) {
 }
 
 function updateAppointmentStatus_(input) {
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(8000)) return { ok: false, error: "Appointment sedang dikemas kini. Cuba lagi." };
-  try {
-    const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const leadsSheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
-    const leads = readLeads_(leadsSheet);
-    const sheet = getOrCreateSheet_(spreadsheet, APPOINTMENTS_SHEET_NAME);
-    const headers = ensureRequiredHeadersBySpec_(sheet, APPOINTMENT_HEADERS, APPOINTMENT_FIELD_ALIASES);
-    const found = findAppointmentRow_(sheet, headers, String(input.id || input.appointment_id || "").trim());
-    if (!found) return { ok: false, error: "Appointment tidak dijumpai." };
-    const lead = findAppointmentLead_(leads, getCellBySpec_(headers, found.row, APPOINTMENT_FIELD_ALIASES, "leadId"));
-    if (!lead || !appointmentActorAllowed_(input, lead)) return { ok: false, error: "Anda tidak boleh mengemas kini appointment ini." };
-    const status = normalizeAppointmentStatus_(input.status);
-    if (!["show_up", "no_show"].includes(status)) return { ok: false, error: "Pilih status Show Up atau No Show." };
-    const appointment = { status, updatedAt: canonicalLeadTimestamp_(new Date()) };
-    sheet.getRange(found.rowNumber, 1, 1, headers.length).setValues([appointmentRow_(headers, appointment, found.row)]);
-    return { ok: true, status };
-  } finally {
-    lock.releaseLock();
-  }
+  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const leadsSheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
+  const leads = readLeads_(leadsSheet);
+  const sheet = getOrCreateSheet_(spreadsheet, APPOINTMENTS_SHEET_NAME);
+  const headers = ensureRequiredHeadersBySpec_(sheet, APPOINTMENT_HEADERS, APPOINTMENT_FIELD_ALIASES);
+  const found = findAppointmentRow_(sheet, headers, String(input.id || input.appointment_id || "").trim());
+  if (!found) return { ok: false, error: "Appointment tidak dijumpai." };
+  const lead = findAppointmentLead_(leads, getCellBySpec_(headers, found.row, APPOINTMENT_FIELD_ALIASES, "leadId"));
+  if (!lead || !appointmentActorAllowed_(input, lead)) return { ok: false, error: "Anda tidak boleh mengemas kini appointment ini." };
+  const status = normalizeAppointmentStatus_(input.status);
+  if (!["show_up", "no_show"].includes(status)) return { ok: false, error: "Pilih status Show Up atau No Show." };
+  const appointment = { status, updatedAt: canonicalLeadTimestamp_(new Date()) };
+  sheet.getRange(found.rowNumber, 1, 1, headers.length).setValues([appointmentRow_(headers, appointment, found.row)]);
+  return { ok: true, status };
 }
 
 function rescheduleAppointment_(input) {
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(8000)) return { ok: false, error: "Appointment sedang dikemas kini. Cuba lagi." };
-  try {
-    const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const leadsSheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
-    const leads = readLeads_(leadsSheet);
-    const sheet = getOrCreateSheet_(spreadsheet, APPOINTMENTS_SHEET_NAME);
-    const headers = ensureRequiredHeadersBySpec_(sheet, APPOINTMENT_HEADERS, APPOINTMENT_FIELD_ALIASES);
-    const appointmentId = String(input.id || input.appointment_id || "").trim();
-    const found = findAppointmentRow_(sheet, headers, appointmentId);
-    if (!found) return { ok: false, error: "Appointment tidak dijumpai." };
-    const lead = findAppointmentLead_(leads, getCellBySpec_(headers, found.row, APPOINTMENT_FIELD_ALIASES, "leadId"));
-    if (!lead || !appointmentActorAllowed_(input, lead)) return { ok: false, error: "Anda tidak boleh mengubah appointment ini." };
-    const next = appointmentInput_(input, lead, appointmentId);
-    if (next.error) return { ok: false, error: next.error };
-    sheet.getRange(found.rowNumber, 1, 1, headers.length).setValues([
-      appointmentRow_(headers, { status: "reschedule", updatedAt: canonicalLeadTimestamp_(new Date()) }, found.row),
-    ]);
-    sheet.appendRow(appointmentRow_(headers, next));
-    return { ok: true, appointment: readAppointments_(sheet, headers, [lead]).find((item) => item.id === next.id) };
-  } finally {
-    lock.releaseLock();
-  }
+  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const leadsSheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.getSheets()[0];
+  const leads = readLeads_(leadsSheet);
+  const sheet = getOrCreateSheet_(spreadsheet, APPOINTMENTS_SHEET_NAME);
+  const headers = ensureRequiredHeadersBySpec_(sheet, APPOINTMENT_HEADERS, APPOINTMENT_FIELD_ALIASES);
+  const appointmentId = String(input.id || input.appointment_id || "").trim();
+  const found = findAppointmentRow_(sheet, headers, appointmentId);
+  if (!found) return { ok: false, error: "Appointment tidak dijumpai." };
+  const lead = findAppointmentLead_(leads, getCellBySpec_(headers, found.row, APPOINTMENT_FIELD_ALIASES, "leadId"));
+  if (!lead || !appointmentActorAllowed_(input, lead)) return { ok: false, error: "Anda tidak boleh mengubah appointment ini." };
+  const next = appointmentInput_(input, lead, appointmentId);
+  if (next.error) return { ok: false, error: next.error };
+  sheet.getRange(found.rowNumber, 1, 1, headers.length).setValues([
+    appointmentRow_(headers, { status: "reschedule", updatedAt: canonicalLeadTimestamp_(new Date()) }, found.row),
+  ]);
+  if (!findAppointmentRow_(sheet, headers, next.id)) sheet.appendRow(appointmentRow_(headers, next));
+  return { ok: true, appointment: readAppointments_(sheet, headers, [lead]).find((item) => item.id === next.id) };
 }
 
 function registerPushSubscription_(payload) {

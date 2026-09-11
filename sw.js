@@ -1,9 +1,9 @@
-const CACHE_NAME = "leadlaju-pwa-v20260911-potential-reminder-v59";
+const CACHE_NAME = "leadlaju-pwa-v20260911-appointment-save-v60";
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20260911-potential-reminder-v59",
-  "/app.js?v=20260911-potential-reminder-v59",
+  "/styles.css?v=20260911-appointment-save-v60",
+  "/app.js?v=20260911-appointment-save-v60",
   "/manifest.webmanifest?v=20260625-pwa-notifications",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",

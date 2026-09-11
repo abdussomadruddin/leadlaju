@@ -390,8 +390,20 @@ test('appointment tracker is synced from the server and scoped to assigned leads
   assert.match(source, /state\.appointments = normalizeAppointments\(payload\.appointments\)/);
   assert.match(source, /lead\.assignedAgentId === state\.currentUserId/);
   assert.match(source, /action = reschedulingAppointmentId \? "reschedule_appointment" : "create_appointment"/);
+  assert.match(source, /request_id: pendingAppointmentRequestId/);
+  assert.match(source, /pendingAppointmentRequestId = `appointment-/);
   assert.match(html, /data-view="appointments"/);
   assert.match(html, /id="appointment-modal"/);
+});
+
+test('appointment writes do not wait behind the lead distribution lock', () => {
+  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const start = source.indexOf('function createAppointment_(');
+  const end = source.indexOf('\nfunction findAppointmentRow_', start);
+  const createAppointment = source.slice(start, end);
+  assert.doesNotMatch(createAppointment, /LockService|getScriptLock|tryLock/);
+  assert.match(createAppointment, /findAppointmentRow_\(sheet, headers, appointment\.id\)/);
+  assert.match(source, /input\.request_id \|\| input\.requestId/);
 });
 
 test('appointment reminders are server-side, deduplicated, and target the correct roles', () => {

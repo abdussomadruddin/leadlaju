@@ -118,6 +118,7 @@ let editingAgentId = null;
 let selectedContactId = null;
 let selectedAppointmentLeadId = null;
 let reschedulingAppointmentId = null;
+let pendingAppointmentRequestId = null;
 let remoteDatabaseClient = null;
 let remoteDatabaseMode = false;
 let claimingLeadId = null;
@@ -3606,6 +3607,7 @@ function openAppointmentModal(leadId, appointmentId = null) {
   const appointment = appointmentId ? state.appointments.find((item) => item.id === appointmentId) : null;
   selectedAppointmentLeadId = leadId;
   reschedulingAppointmentId = appointment?.id || null;
+  pendingAppointmentRequestId = `appointment-${crypto.randomUUID?.() || makeId("request")}`;
   elements.appointmentForm.reset();
   elements.appointmentModalKicker.textContent = appointment ? "Jadual baharu" : "Susulan lead";
   elements.appointmentModalTitle.textContent = appointment ? "Reschedule Appointment" : "Tambah Appointment";
@@ -3639,6 +3641,7 @@ async function saveAppointment(event) {
   }
   const appointment = appointmentActionPayload({
     id: reschedulingAppointmentId || "",
+    request_id: pendingAppointmentRequestId,
     lead_id: lead.id,
     type: elements.appointmentType.value,
     scheduled_at: elements.appointmentScheduledAt.value,
@@ -3649,6 +3652,7 @@ async function saveAppointment(event) {
   elements.appointmentSubmitButton.disabled = true;
   try {
     await postGoogleSheetActionWithResponse({ action, appointment }, "Appointment update failed");
+    pendingAppointmentRequestId = null;
     closeModal(elements.appointmentModal);
     await syncGoogleSheet({ silent: true });
     showToast(reschedulingAppointmentId ? "Appointment dijadual semula" : "Appointment disimpan", `${lead.name} telah dikemas kini.`);
