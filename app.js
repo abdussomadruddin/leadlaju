@@ -187,6 +187,7 @@ const elements = {
   activeLeadTemplate: document.querySelector("#active-lead-template"),
   queueLabel: document.querySelector("#queue-label"),
   navLeadCount: document.querySelector("#nav-lead-count"),
+  navAppointmentCount: document.querySelector("#nav-appointment-count"),
   notificationCount: document.querySelector("#notification-count"),
   notificationButton: document.querySelector("#notification-button"),
   refreshButton: document.querySelector("#refresh-button"),
@@ -3643,6 +3644,7 @@ function renderAppointments() {
         currentAgentMatches(appointment.assignedAgentId, "", appointment.assignedAgentName);
     })
     .sort((left, right) => left.scheduledAt - right.scheduledAt);
+  elements.navAppointmentCount.textContent = visible.length;
   const projects = [...new Set(visible.map((appointment) => appointment.project).filter(Boolean))].sort();
   elements.appointmentProjectFilter.innerHTML = [
     '<option value="all">Semua projek</option>',
