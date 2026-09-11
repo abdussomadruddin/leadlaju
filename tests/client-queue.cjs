@@ -222,6 +222,9 @@ test('lead status updates use the same-origin confirmation proxy', () => {
   const proxy = fs.readFileSync('api/lead-status.js', 'utf8');
   assert.match(proxy, /payload\.action === "update_lead_status"/);
   assert.match(proxy, /payload\.action === "set_agent_lead_availability"/);
+  assert.match(proxy, /"create_appointment"/);
+  assert.match(proxy, /"update_appointment_status"/);
+  assert.match(proxy, /"reschedule_appointment"/);
   assert.match(proxy, /await fetch\(GOOGLE_SHEET_ENDPOINT/);
   assert.match(proxy, /response\.status\(result\?\.ok \? 200 : 409\)/);
 });

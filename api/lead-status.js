@@ -22,13 +22,22 @@ module.exports = async function handler(request, response) {
   }
   const updatingLeadStatus = payload.action === "update_lead_status";
   const updatingAvailability = payload.action === "set_agent_lead_availability";
+  const appointmentActions = new Set([
+    "create_appointment",
+    "update_appointment_status",
+    "reschedule_appointment",
+  ]);
+  const updatingAppointment = appointmentActions.has(payload.action);
   if (updatingLeadStatus && (!payload.lead?.id || !payload.lead?.status)) {
     return response.status(400).json({ ok: false, error: "Invalid lead status update" });
   }
   if (updatingAvailability && (!payload.agent?.id || typeof payload.agent.ready !== "boolean")) {
     return response.status(400).json({ ok: false, error: "Invalid agent lead availability update" });
   }
-  if (!updatingLeadStatus && !updatingAvailability) {
+  if (updatingAppointment && !payload.appointment?.lead_id && !payload.appointment?.id) {
+    return response.status(400).json({ ok: false, error: "Invalid appointment update" });
+  }
+  if (!updatingLeadStatus && !updatingAvailability && !updatingAppointment) {
     return response.status(400).json({ ok: false, error: "Unsupported update action" });
   }
 
