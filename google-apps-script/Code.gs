@@ -943,8 +943,8 @@ function updateLeadStatusLocked_(input) {
             if (actingAgentName) setRowValue_(headers, nextRow, "assignedAgentName", actingAgentName);
             if (actingAgentEmail) setRowValue_(headers, nextRow, "assignedAgentEmail", actingAgentEmail);
           }
-          markLatestAssignmentOutcome_(headers, nextRow, "contacted", new Date());
         }
+        markLatestAssignmentOutcome_(headers, nextRow, normalizeLeadStage_(status), new Date());
         setRowValue_(headers, nextRow, "expiresAt", "");
         setRowValue_(headers, nextRow, "queueState", normalizeLeadStage_(status));
       }
@@ -1151,6 +1151,32 @@ function expireOverdueLeadAssignments_(sheet, headers, now) {
     expired += 1;
   }
   return { expired };
+}
+
+function reconcileResolvedAssignmentOutcomes_(sheet, headers, now) {
+  const values = sheet.getDataRange().getDisplayValues();
+  if (values.length < 2) return { repaired: 0 };
+
+  const resolvedAt = now || new Date();
+  let repaired = 0;
+  for (let index = 1; index < values.length; index += 1) {
+    const row = values[index];
+    const stage = normalizeLeadStage_(getCell_(headers, row, "status"));
+    if (stage === "new") continue;
+    const history = parseAssignmentHistory_(headers, row);
+    const pendingIndex = history.map((entry) => entry.outcome).lastIndexOf("pending");
+    if (pendingIndex < 0) continue;
+
+    history[pendingIndex].outcome = stage;
+    history[pendingIndex].resolvedAt = resolvedAt.toISOString();
+    const nextRow = row.slice(0, headers.length);
+    setRowValue_(headers, nextRow, "assignmentHistory", JSON.stringify(history));
+    setRowValue_(headers, nextRow, "expiresAt", "");
+    setRowValue_(headers, nextRow, "queueState", stage);
+    sheet.getRange(index + 1, 1, 1, nextRow.length).setValues([nextRow]);
+    repaired += 1;
+  }
+  return { repaired };
 }
 
 function replaceAgents_(agentsInput) {
@@ -2414,6 +2440,7 @@ function refreshSheetTemplate_() {
   ensureLeadTimestamps_(sheet, headers);
   ensureLeadSources_(sheet, headers);
   normalizeLegacyLeadStatuses_(sheet, headers);
+  const assignmentOutcomeRepair = reconcileResolvedAssignmentOutcomes_(sheet, headers, new Date());
   ensureLeadValidations_(sheet, headers);
   let leads = readLeads_(sheet);
   const projects = ensureProjectsFromLeads_(projectsSheet, projectHeaders, leads);
@@ -2429,6 +2456,7 @@ function refreshSheetTemplate_() {
     ok: true,
     refreshed_at: new Date().toISOString(),
     push: pushResult,
+    assignment_outcomes: assignmentOutcomeRepair,
     appointment_reminders: appointmentReminders,
     potential_reminders: potentialReminders,
   };

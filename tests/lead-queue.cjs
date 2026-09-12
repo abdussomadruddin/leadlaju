@@ -184,6 +184,16 @@ test('ordinary status changes do not advance the assignment revision', () => {
   assert.doesNotMatch(body, /assignmentRevision[^\n]*currentRevision \+ 1/);
 });
 
+test('every resolved lead status closes pending assignment history', () => {
+  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const updateStart = source.indexOf('function updateLeadStatusLocked_(');
+  const updateBody = source.slice(updateStart, source.indexOf('\nfunction ', updateStart + 1));
+  assert.match(updateBody, /markLatestAssignmentOutcome_\(headers, nextRow, normalizeLeadStage_\(status\), new Date\(\)\)/);
+  assert.match(source, /function reconcileResolvedAssignmentOutcomes_\(sheet, headers, now\)/);
+  assert.match(source, /history\[pendingIndex\]\.outcome = stage/);
+  assert.match(source, /reconcileResolvedAssignmentOutcomes_\(sheet, headers, new Date\(\)\)/);
+});
+
 test('status updates are not blocked by queue push delivery', () => {
   const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
   const start = source.indexOf('function updateLeadStatus_(');
