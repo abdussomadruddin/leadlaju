@@ -22,6 +22,7 @@ module.exports = async function handler(request, response) {
   }
   const updatingLeadStatus = payload.action === "update_lead_status";
   const updatingAvailability = payload.action === "set_agent_lead_availability";
+  const expiringLead = payload.action === "expire_lead";
   const appointmentActions = new Set([
     "create_appointment",
     "update_appointment_status",
@@ -36,10 +37,13 @@ module.exports = async function handler(request, response) {
   if (updatingAvailability && (!payload.agent?.id || typeof payload.agent.ready !== "boolean")) {
     return response.status(400).json({ ok: false, error: "Invalid agent lead availability update" });
   }
+  if (expiringLead && (!payload.lead?.id || !Number.isFinite(Number(payload.lead.assignment_revision ?? payload.lead.assignmentRevision)))) {
+    return response.status(400).json({ ok: false, error: "Invalid lead expiry request" });
+  }
   if (updatingAppointment && !payload.appointment?.lead_id && !payload.appointment?.id) {
     return response.status(400).json({ ok: false, error: "Invalid appointment update" });
   }
-  if (!updatingLeadStatus && !updatingAvailability && !updatingAppointment) {
+  if (!updatingLeadStatus && !updatingAvailability && !expiringLead && !updatingAppointment) {
     return response.status(400).json({ ok: false, error: "Unsupported update action" });
   }
 

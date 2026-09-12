@@ -246,6 +246,7 @@ test('lead status updates use the same-origin confirmation proxy', () => {
   const proxy = fs.readFileSync('api/lead-status.js', 'utf8');
   assert.match(proxy, /payload\.action === "update_lead_status"/);
   assert.match(proxy, /payload\.action === "set_agent_lead_availability"/);
+  assert.match(proxy, /payload\.action === "expire_lead"/);
   assert.match(proxy, /"create_appointment"/);
   assert.match(proxy, /"update_appointment_status"/);
   assert.match(proxy, /"update_appointment"/);
@@ -253,6 +254,39 @@ test('lead status updates use the same-origin confirmation proxy', () => {
   assert.match(proxy, /"delete_appointment"/);
   assert.match(proxy, /await fetch\(GOOGLE_SHEET_ENDPOINT/);
   assert.match(proxy, /response\.status\(result\?\.ok \? 200 : 409\)/);
+});
+
+test('expiry requests reach the Google Apps Script proxy with their canonical assignment revision', async () => {
+  const handler = require('../api/lead-status.js');
+  const originalFetch = global.fetch;
+  const calls = [];
+  const response = {
+    setHeader() {},
+    status(code) { this.statusCode = code; return this; },
+    json(payload) { this.payload = payload; return this; },
+  };
+  global.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return { json: async () => ({ ok: true, expired: 1 }) };
+  };
+  try {
+    await handler(
+      {
+        method: 'POST',
+        body: { action: 'expire_lead', lead: { id: 'lead-123', assignment_revision: 7 } },
+      },
+      response,
+    );
+  } finally {
+    global.fetch = originalFetch;
+  }
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.payload, { ok: true, expired: 1 });
+  assert.equal(calls.length, 1);
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    action: 'expire_lead',
+    lead: { id: 'lead-123', assignment_revision: 7 },
+  });
 });
 
 test('agents must save a note before selecting passed, rejected, or cancelled', () => {

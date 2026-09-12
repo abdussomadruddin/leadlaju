@@ -88,6 +88,44 @@ test('minute queue processing expires assignments even when the agent app is clo
   assert.match(source, /holdLeadRuntimeRow_\(sheet, headers, index \+ 1, row/);
 });
 
+test('successful frontend expiry immediately uses the canonical dispatcher', () => {
+  const now = Date.now();
+  const f = fixture([
+    lead('expired', {
+      assigned_agent_id: 'a', queue_state: 'active', assignment_revision: '1',
+      expires_at: new Date(now - 1000).toISOString(),
+      assignment_history: JSON.stringify([{ agentId: 'a', outcome: 'pending' }]),
+    }),
+    lead('waiting'),
+  ], [{ id: 'a', eligible_project_ids: ['project-armani'] }, { id: 'b', eligible_project_ids: ['project-armani'] }], { nowMs: now });
+
+  const result = f.expire({ id: 'expired', assignment_revision: 1 });
+  assert.equal(result.ok, true);
+  assert.equal(result.expired, 1);
+  const rows = f.rows();
+  assert.equal(rows.filter(row => row.queue_state === 'active').length, 2);
+  assert.equal(rows.find(row => row.id === 'expired').assignment_history.filter(entry => entry.outcome === 'missed').length, 1);
+});
+
+test('stale expiry rejection does not invoke a new dispatch', () => {
+  const futureExpiry = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+  const f = fixture([
+    lead('active', {
+      assigned_agent_id: 'a', queue_state: 'active', assignment_revision: '2',
+      expires_at: futureExpiry, assignment_history: JSON.stringify([{ agentId: 'a', outcome: 'pending' }]),
+    }),
+    lead('waiting'),
+  ], [{ id: 'a', eligible_project_ids: ['project-armani'] }, { id: 'b', eligible_project_ids: ['project-armani'] }]);
+
+  const result = f.expire({ id: 'active', assignment_revision: 1 });
+  assert.equal(result.ok, false);
+  assert.equal(result.stale, true);
+  const rows = f.rows();
+  assert.equal(rows.find(row => row.id === 'active').queue_state, 'active');
+  assert.equal(rows.find(row => row.id === 'waiting').assigned_agent_id, '');
+  assert.equal(rows.filter(row => row.queue_state === 'active').length, 1);
+});
+
 test('burst assigns one per agent and holds excess without a timer', () => {
   const f = fixture(Array.from({ length: 6 }, (_, i) => lead(String(i))));
   f.run();
