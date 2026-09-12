@@ -3782,7 +3782,7 @@ function renderLeadsTable() {
               <td data-label="Lead">
                 <strong>${escapeHtml(lead.name)}</strong>
                 <small>${escapeHtml(displayLeadPhone(lead))}</small>
-                <small>${canViewLeadPhone(lead) && lead.email ? escapeHtml(lead.email) : "Emel dibuka selepas CALL NOW"}</small>
+                <small>${canViewLeadPhone(lead) && lead.email ? escapeHtml(lead.email) : "No Phone, Whatsapp & Emel dibuka selepas CALL NOW"}</small>
                 ${leadContactActions}
               </td>
               <td data-label="Projek / Sumber">
