@@ -39,6 +39,16 @@ const LEAD_QUEUE_STATE_VALUES = [
   "client",
 ];
 const LEAD_VALIDATION_VERSION = "lead-status-queue-v2";
+const ASSIGNMENT_OUTCOME_BY_STAGE = {
+  contacted: "contacted",
+  passed: "passed",
+  all_offer_presented: "all_offer_presented",
+  need_follow_up: "need_follow_up",
+  potential: "potential",
+  rejected: "rejected",
+  cancelled: "cancelled",
+  client: "client",
+};
 // Used only when a legacy sheet has no lead rows to seed the first project list.
 const INITIAL_PROJECT_NAMES = ["Armani Putrajaya", "BBSAP Sitiawan"];
 
@@ -818,9 +828,13 @@ function deleteLead_(input) {
 }
 
 function updateLeadStatus_(input) {
-  // Status edits are independent from assignment revisions and must not wait for
-  // push delivery. The minute queue trigger will release or assign the next lead.
-  return updateLeadStatusLocked_(input);
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(8000)) return { ok: false, error: "Agihan lead sedang berjalan. Cuba sekali lagi." };
+  try {
+    return updateLeadStatusLocked_(input);
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function updateLeadNotes_(input) {
@@ -889,6 +903,7 @@ function updateLeadStatusLocked_(input) {
   const actingAgentName = String(input.acting_agent_name || input.actingAgentName || "").trim();
   const actingAgentEmail = String(input.acting_agent_email || input.actingAgentEmail || "").trim().toLowerCase();
   const actingRole = String(input.acting_role || input.actingRole || "").trim().toLowerCase();
+  const requestedAssignmentRevision = Number(input.assignment_revision ?? input.assignmentRevision);
   if (statusIndex < 0) return { ok: false, error: "Kolum Status tidak dijumpai." };
   if (actingRole === "agent" && normalizeLeadStage_(status) === "new") {
     return { ok: false, error: "Ejen tidak boleh menukar status lead kepada New. Tekan CALL NOW untuk lead baharu." };
@@ -907,6 +922,26 @@ function updateLeadStatusLocked_(input) {
 
     if (idMatches || fallbackMatches) {
       const stage = normalizeLeadStage_(status);
+      const currentAssignmentRevision = Number(getCell_(headers, row, "assignmentRevision")) || 0;
+      const currentAgentId = getCell_(headers, row, "assignedAgentId");
+      const currentLeadStage = normalizeLeadStage_(getCell_(headers, row, "status"));
+      if (
+        actingRole === "agent" &&
+        (!Number.isFinite(requestedAssignmentRevision) || requestedAssignmentRevision !== currentAssignmentRevision)
+      ) {
+        return { ok: false, stale: true, error: "Assignment lead telah berubah." };
+      }
+      if (actingRole === "agent" && actingAgentId && currentAgentId !== actingAgentId) {
+        return { ok: false, stale: true, error: "Lead ini bukan lagi assignment semasa ejen." };
+      }
+      if (actingRole === "agent" && currentLeadStage === "new") {
+        const currentQueueState = getCell_(headers, row, "queueState");
+        const expiryValue = getCell_(headers, row, "expiresAt");
+        const expiryTime = expiryValue ? parseLeadTimestamp_(expiryValue).getTime() : 0;
+        if (currentQueueState !== "active" || !currentAgentId || !expiryTime || expiryTime <= Date.now()) {
+          return { ok: false, stale: true, error: "Masa assignment lead telah tamat." };
+        }
+      }
       const requiresAgentNote = ["passed", "rejected", "cancelled"].includes(stage);
       const isAgentAction = actingRole === "agent" || Boolean(actingAgentId);
       if (isAgentAction && requiresAgentNote && !getCell_(headers, row, "notes").trim()) {
@@ -944,7 +979,8 @@ function updateLeadStatusLocked_(input) {
             if (actingAgentEmail) setRowValue_(headers, nextRow, "assignedAgentEmail", actingAgentEmail);
           }
         }
-        markLatestAssignmentOutcome_(headers, nextRow, normalizeLeadStage_(status), new Date());
+        const assignmentOutcome = ASSIGNMENT_OUTCOME_BY_STAGE[stage];
+        if (assignmentOutcome) markLatestAssignmentOutcome_(headers, nextRow, assignmentOutcome, new Date());
         setRowValue_(headers, nextRow, "expiresAt", "");
         setRowValue_(headers, nextRow, "queueState", normalizeLeadStage_(status));
       }
@@ -1162,12 +1198,15 @@ function reconcileResolvedAssignmentOutcomes_(sheet, headers, now) {
   for (let index = 1; index < values.length; index += 1) {
     const row = values[index];
     const stage = normalizeLeadStage_(getCell_(headers, row, "status"));
-    if (stage === "new") continue;
+    const assignmentOutcome = ASSIGNMENT_OUTCOME_BY_STAGE[stage];
+    if (!assignmentOutcome) continue;
     const history = parseAssignmentHistory_(headers, row);
-    const pendingIndex = history.map((entry) => entry.outcome).lastIndexOf("pending");
-    if (pendingIndex < 0) continue;
+    const pendingIndex = history.length - 1;
+    if (pendingIndex < 0 || history[pendingIndex].outcome !== "pending") continue;
+    const currentAgentId = getCell_(headers, row, "assignedAgentId");
+    if (currentAgentId && String(history[pendingIndex].agentId || "") !== currentAgentId) continue;
 
-    history[pendingIndex].outcome = stage;
+    history[pendingIndex].outcome = assignmentOutcome;
     history[pendingIndex].resolvedAt = resolvedAt.toISOString();
     const nextRow = row.slice(0, headers.length);
     setRowValue_(headers, nextRow, "assignmentHistory", JSON.stringify(history));

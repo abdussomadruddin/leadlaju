@@ -135,6 +135,7 @@ test('contacted status sends the acting agent identity to the server', () => {
   assert.match(source, /acting_agent_id: actingAgent\?\.id \|\| ""/);
   assert.match(source, /acting_agent_name: actingAgent\?\.name \|\| ""/);
   assert.match(source, /acting_agent_email: actingAgent\?\.email \|\| ""/);
+  assert.match(source, /assignment_revision: Number\(lead\.assignmentRevision\) \|\| 0/);
 });
 
 test('CALL NOW starts a protected keepalive status write before opening the phone app', () => {
@@ -148,6 +149,16 @@ test('CALL NOW starts a protected keepalive status write before opening the phon
   assert.ok(callBody.indexOf('renderAll()') < callBody.indexOf('dialLeadPhone(callablePhone)'));
   assert.ok(callBody.indexOf('const statusUpdatePromise = updateLeadStatusInSheet') < callBody.indexOf('dialLeadPhone(callablePhone)'));
   assert.ok(callBody.indexOf('dialLeadPhone(callablePhone)') < callBody.indexOf('await statusUpdatePromise'));
+});
+
+test('CALL NOW restores local lead state when the authoritative status write fails', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const start = source.indexOf('async function handleCall(');
+  const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
+  assert.match(body, /const previousLead = \{ \.\.\.lead \}/);
+  assert.match(body, /await statusUpdatePromise/);
+  assert.match(body, /if \(!remoteDatabaseMode\) \{\s*Object\.assign\(lead, previousLead\);\s*saveState\(\);\s*renderAll\(\);/);
+  assert.match(body, /showToast\("CALL NOW gagal", error\?\.message/);
 });
 
 test('lead display falls back to the server agent name', () => {
@@ -228,7 +239,7 @@ test('edit lead modal receives the server-confirmed status revision', () => {
   assert.match(statusWriter, /postGoogleSheetActionWithResponse/);
   assert.match(source, /fetch\("\/api\/lead-status"/);
   assert.match(statusWriter, /lead\.statusRevision = Number\(result\.status_revision\)/);
-  assert.doesNotMatch(statusWriter, /assignment_revision/);
+  assert.match(statusWriter, /assignment_revision: Number\(lead\.assignmentRevision\) \|\| 0/);
 });
 
 test('lead status updates use the same-origin confirmation proxy', () => {

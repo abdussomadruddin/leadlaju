@@ -2432,6 +2432,7 @@ async function updateLeadStatusInSheet(lead, status) {
         acting_agent_id: actingAgent?.id || "",
         acting_agent_name: actingAgent?.name || "",
         acting_agent_email: actingAgent?.email || "",
+        assignment_revision: Number(lead.assignmentRevision) || 0,
       },
     },
     "Lead sheet status update failed",
@@ -3299,6 +3300,7 @@ async function handleCall(leadId) {
   }
   if (claimingLeadId) return;
 
+  const previousLead = { ...lead };
   claimingLeadId = leadId;
   const updateToken = Symbol("call-now-status-update");
   pendingLeadStatusUpdates.set(leadId, { status: "contacted", token: updateToken });
@@ -3366,6 +3368,11 @@ async function handleCall(leadId) {
 
   } catch (error) {
     console.error(error);
+    if (!remoteDatabaseMode) {
+      Object.assign(lead, previousLead);
+      saveState();
+      renderAll();
+    }
     showToast("CALL NOW gagal", error?.message || "Semak sambungan Google Sheet dan cuba lagi.", "error");
     if (remoteDatabaseMode) {
       await loadRemoteState(state.currentUserId);
