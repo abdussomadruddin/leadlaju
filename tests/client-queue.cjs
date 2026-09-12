@@ -531,15 +531,158 @@ test('appointment writes do not wait behind the lead distribution lock', () => {
   assert.doesNotMatch(createAppointment, /readLeads_/);
 });
 
-test('expired CALL NOW disappears locally before the server sync starts', () => {
+test('expired CALL NOW uses the authoritative server action without a local queue mutation', () => {
   const source = fs.readFileSync('app.js', 'utf8');
-  const start = source.indexOf('async function processExpiredLeads()');
+  const start = source.indexOf('async function requestExpiredAssignment(');
   const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
-  assert.match(body, /Number\(lead\.expiresAt\) > 0/);
-  assert.ok(body.indexOf('queueLead(lead, now') < body.indexOf('expireLeadInSheet(lead)'));
-  assert.ok(body.indexOf('renderAll()') < body.indexOf('expireLeadInSheet(lead)'));
-  assert.match(body, /expireLeadInSheet\(lead\)\s*\.then\(\(\) => syncGoogleSheet/);
-  assert.doesNotMatch(body, /await expireLeadInSheet/);
+  assert.match(body, /Date\.now\(\) < Number\(lead\.expiresAt\)/);
+  assert.match(body, /await expireLeadInSheet\(\{ \.\.\.lead \}\)/);
+  assert.match(body, /await syncGoogleSheet\(\{ silent: true, notifyNewLeads: true \}\)/);
+  assert.doesNotMatch(body, /queueLead|lead\.status\s*=|lead\.queueState\s*=/);
+});
+
+test('foreground expiry has one assignment timer and a 2.5 second local watchdog', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  assert.match(source, /const EXPIRY_WATCHDOG_INTERVAL_MS = 2500/);
+  assert.match(source, /Math\.max\(0, Number\(lead\.expiresAt\) - Date\.now\(\)\)/);
+  assert.match(source, /window\.setTimeout\(\s*\(\) => requestExpiredAssignment\(key\)/);
+  assert.match(source, /if \(!document\.hidden\) processExpiredLeads\(\)/);
+});
+
+test('expiry requests are deduplicated by lead id and assignment revision', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  assert.match(source, /`\$\{lead\.id\}:\$\{Number\(lead\.assignmentRevision\) \|\| 0\}`/);
+  assert.doesNotMatch(source, /function expiryAssignmentKey\(lead\) \{[^}]*dedupeKey/);
+  assert.match(source, /requestState\?\.inFlight/);
+  assert.match(source, /requestState\?\.completed/);
+  assert.match(source, /expiryRequestStates\.set\(expectedKey, \{ inFlight: true/);
+});
+
+test('leads sharing a dedupe key retain distinct expiry request identities', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const start = source.indexOf('function expiryAssignmentKey(');
+  const end = source.indexOf('\nfunction ', start + 1);
+  const context = vm.createContext({ Number });
+  vm.runInContext(source.slice(start, end), context);
+  const first = context.expiryAssignmentKey({ id: 'lead-a', dedupeKey: 'shared', assignmentRevision: 3 });
+  const second = context.expiryAssignmentKey({ id: 'lead-b', dedupeKey: 'shared', assignmentRevision: 3 });
+  assert.equal(first, 'lead-a:3');
+  assert.equal(second, 'lead-b:3');
+  assert.notEqual(first, second);
+});
+
+test('admin dashboard does not expire active assignments owned by unrelated agents', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const start = source.indexOf('function getCurrentExpiryAssignment(');
+  const end = source.indexOf('\nfunction ', start + 1);
+  const context = vm.createContext({
+    state: { leads: [{
+      id: 'other-agent-lead', status: 'new', queueState: 'active', assignedAgentId: 'agent-b',
+      expiresAt: Date.now() - 1, assignmentRevision: 2,
+    }] },
+    currentAgentOwnsLead: () => false,
+  });
+  vm.runInContext(source.slice(start, end), context);
+  assert.equal(context.getCurrentExpiryAssignment(), null);
+  assert.doesNotMatch(source.slice(start, end), /isAdmin\(/);
+});
+
+test('a stale assignment timer revalidates the exact assignment before expiry', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const start = source.indexOf('async function requestExpiredAssignment(');
+  const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
+  assert.match(body, /state\.leads\.find\(\(item\) => expiryAssignmentKey\(item\) === expectedKey\)/);
+  assert.match(body, /lead\.queueState !== "active"/);
+  assert.match(body, /!lead\.assignedAgentId/);
+});
+
+test('focus and visibility immediately recheck an overdue assignment', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  assert.match(source, /window\.addEventListener\("focus", \(\) => \{\s*processExpiredLeads\(\)/);
+  assert.match(source, /document\.addEventListener\("visibilitychange", \(\) => \{\s*if \(!document\.hidden\) \{\s*processExpiredLeads\(\)/);
+});
+
+test('failed expiry stays authoritative locally and becomes retryable', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const start = source.indexOf('async function requestExpiredAssignment(');
+  const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
+  assert.match(body, /retryAfter: Date\.now\(\) \+ EXPIRY_RETRY_DELAY_MS/);
+  assert.match(body, /completed: false/);
+  assert.doesNotMatch(body, /queueLead|missed/);
+  assert.match(source, /return postGoogleSheetActionWithResponse\(/);
+});
+
+test('actual response handling keeps a clock-skew server rejection retryable and unchanged', async () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const lead = {
+    id: 'clock-skew', dedupeKey: 'clock-skew', status: 'new', queueState: 'active',
+    assignedAgentId: 'agent-a', expiresAt: Date.now() - 1, assignmentRevision: 4,
+    assignmentHistory: [{ agentId: 'agent-a', outcome: 'pending' }],
+  };
+  let responseReads = 0;
+  const context = vm.createContext({
+    state: { leads: [lead] },
+    window: { setTimeout, clearTimeout },
+    Date, Number, Map, console,
+    expiryAssignmentTimer: null, expiryAssignmentTimerKey: '',
+    expiryRequestStates: new Map(), EXPIRY_RETRY_DELAY_MS: 3000,
+    currentAgentOwnsLead: () => true,
+    getSheetEndpoint: () => 'https://example.test/exec',
+    fetch: async () => ({
+      ok: true,
+      json: async () => {
+        responseReads += 1;
+        return { ok: false, error: 'Masa assignment lead belum tamat.' };
+      },
+    }),
+    syncGoogleSheet: async () => true,
+    saveState: () => {},
+  });
+  const responseStart = source.indexOf('async function postGoogleSheetActionWithResponse(');
+  const responseEnd = source.indexOf('\nasync function updateLeadStatusInSheet(', responseStart);
+  const expiryPostStart = source.indexOf('async function expireLeadInSheet(');
+  const expiryPostEnd = source.indexOf('\nfunction syncLeadRuntimeInSheet(', expiryPostStart);
+  const expiryStart = source.indexOf('function expiryAssignmentKey(');
+  const expiryEnd = source.indexOf('\nfunction processExpiredLeads(', expiryStart);
+  vm.runInContext(source.slice(responseStart, responseEnd), context);
+  vm.runInContext(source.slice(expiryPostStart, expiryPostEnd), context);
+  vm.runInContext(source.slice(expiryStart, expiryEnd), context);
+
+  const before = structuredClone(lead);
+  const key = context.expiryAssignmentKey(lead);
+  assert.equal(await context.requestExpiredAssignment(key), false);
+  assert.deepEqual(lead, before);
+  assert.equal(responseReads, 1);
+  assert.equal(context.expiryRequestStates.get(key).completed, false);
+  assert.ok(context.expiryRequestStates.get(key).retryAfter > Date.now());
+
+  context.expiryRequestStates.get(key).retryAfter = 0;
+  assert.equal(await context.requestExpiredAssignment(key), false);
+  assert.equal(responseReads, 2);
+  assert.deepEqual(lead, before);
+});
+
+test('actual response handler rejects HTTP and application failures but returns ok responses', async () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const start = source.indexOf('async function postGoogleSheetActionWithResponse(');
+  const end = source.indexOf('\nasync function updateLeadStatusInSheet(', start);
+  const context = vm.createContext({
+    state: { integration: {} },
+    getSheetEndpoint: () => 'https://example.test/exec',
+    saveState: () => {},
+    console,
+    fetch: async () => ({ ok: false, status: 503, json: async () => ({ error: 'Unavailable' }) }),
+  });
+  vm.runInContext(source.slice(start, end), context);
+
+  await assert.rejects(context.postGoogleSheetActionWithResponse({}, 'test'), /Unavailable/);
+  context.fetch = async () => ({ ok: true, json: async () => ({ ok: false, error: 'Belum tamat' }) });
+  await assert.rejects(context.postGoogleSheetActionWithResponse({}, 'test'), /Belum tamat/);
+  context.fetch = async () => ({ ok: true, json: async () => ({ ok: true, updated: 1 }) });
+  assert.deepEqual(
+    await context.postGoogleSheetActionWithResponse({}, 'test'),
+    { ok: true, updated: 1 },
+  );
 });
 
 test('appointment reminders are server-side, deduplicated, and target the correct roles', () => {

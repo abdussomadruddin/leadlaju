@@ -13,6 +13,8 @@ const NOTIFICATION_ICON = "/assets/icon-192.png";
 const NOTIFICATION_BADGE = "/assets/badge-96.png";
 const MALAYSIA_TIME_ZONE = "Asia/Kuala_Lumpur";
 const DEFAULT_SYNC_INTERVAL_SECONDS = 2;
+const EXPIRY_WATCHDOG_INTERVAL_MS = 2500;
+const EXPIRY_RETRY_DELAY_MS = 3000;
 const FOLLOW_UP_REMINDER_SLOTS = [
   { time: "09:00", label: "9 pagi" },
   { time: "15:00", label: "3 petang" },
@@ -106,6 +108,9 @@ let state = loadState();
 let activeView = "dashboard";
 let tickTimer;
 let syncTimer;
+let expiryWatchdogTimer;
+let expiryAssignmentTimer;
+let expiryAssignmentTimerKey = "";
 let syncInProgress = false;
 let syncCompletionWaiters = [];
 let initialAgentSyncPromise = null;
@@ -142,7 +147,7 @@ let latestAdminReminder = null;
 let pendingPotentialReminder = new URLSearchParams(window.location.search).get("reminder") === "potential";
 let pendingNotificationLeadId = new URLSearchParams(window.location.search).get("lead") || "";
 let globalLoadingCount = 0;
-const expiringLeadIds = new Set();
+const expiryRequestStates = new Map();
 
 const elements = {
   sidebar: document.querySelector("#sidebar"),
@@ -684,9 +689,9 @@ function startAuthenticatedApp(user) {
   window.clearInterval(tickTimer);
   tickTimer = window.setInterval(() => {
     clearExpiredLocalCooldowns();
-    processExpiredLeads();
     updateCountdown();
   }, 1000);
+  scheduleExpiryWatchdog();
   registerServiceWorker();
   syncPushSubscription().catch((error) => console.warn("Push subscription sync failed", error));
   markCurrentLeadNotificationsSeen();
@@ -713,6 +718,7 @@ function showLogin() {
   window.clearInterval(tickTimer);
   window.clearInterval(syncTimer);
   window.clearInterval(followUpReminderTimer);
+  stopExpiryWatchdog();
   setMobileSidebarOpen(false);
   elements.appShell.setAttribute("aria-hidden", "true");
   document.body.classList.remove("auth-pending", "authenticated");
@@ -2492,7 +2498,7 @@ async function updateLeadRuntimeInSheet(lead) {
 
 async function expireLeadInSheet(lead) {
   if (!lead) return false;
-  return postGoogleSheetAction(
+  return postGoogleSheetActionWithResponse(
     {
       action: "expire_lead",
       lead: {
@@ -2501,7 +2507,6 @@ async function expireLeadInSheet(lead) {
       },
     },
     "Lead expiry sync failed",
-    { waitForSend: true },
   );
 }
 
@@ -3236,32 +3241,107 @@ async function requestNotifications() {
   );
 }
 
-async function processExpiredLeads() {
-  const now = Date.now();
-  const expiredLeads = state.leads.filter(
-    (lead) =>
-      lead.status === "new" &&
-      lead.assignedAgentId === state.currentUserId &&
-      Number(lead.expiresAt) > 0 &&
-      lead.expiresAt <= now &&
-      !expiringLeadIds.has(lead.id),
-  );
-  for (const lead of expiredLeads) {
-    expiringLeadIds.add(lead.id);
-    // Remove the expired assignment before waiting for the server so the agent
-    // never keeps seeing CALL NOW after the five-minute response window.
-    queueLead(lead, now, {
-      resetPassCount: false,
-      previousAgentId: lead.assignedAgentId,
-    });
-    saveState();
-    renderAll();
+function expiryAssignmentKey(lead) {
+  return lead ? `${lead.id}:${Number(lead.assignmentRevision) || 0}` : "";
+}
 
-    expireLeadInSheet(lead)
-      .then(() => syncGoogleSheet({ silent: true, notifyNewLeads: true }))
-      .catch((error) => console.warn("Lead expiry sync failed", error))
-      .finally(() => expiringLeadIds.delete(lead.id));
+function getCurrentExpiryAssignment() {
+  const assignments = state.leads
+    .filter((lead) =>
+      lead.status === "new" &&
+      lead.queueState === "active" &&
+      lead.assignedAgentId &&
+      Number(lead.expiresAt) > 0 &&
+      currentAgentOwnsLead(lead),
+    )
+    .sort((left, right) => left.expiresAt - right.expiresAt);
+  return assignments[0] || null;
+}
+
+function clearExpiryAssignmentTimer() {
+  window.clearTimeout(expiryAssignmentTimer);
+  expiryAssignmentTimer = null;
+  expiryAssignmentTimerKey = "";
+}
+
+function syncExpiryAssignmentTimer() {
+  const lead = getCurrentExpiryAssignment();
+  const key = expiryAssignmentKey(lead);
+  for (const trackedKey of expiryRequestStates.keys()) {
+    if (!state.leads.some((item) => expiryAssignmentKey(item) === trackedKey && item.status === "new" && item.queueState === "active")) {
+      expiryRequestStates.delete(trackedKey);
+    }
   }
+  if (!lead) {
+    clearExpiryAssignmentTimer();
+    return;
+  }
+  if (expiryAssignmentTimerKey === key) return;
+  clearExpiryAssignmentTimer();
+  expiryAssignmentTimerKey = key;
+  expiryAssignmentTimer = window.setTimeout(
+    () => requestExpiredAssignment(key),
+    Math.max(0, Number(lead.expiresAt) - Date.now()),
+  );
+}
+
+async function requestExpiredAssignment(expectedKey) {
+  const lead = state.leads.find((item) => expiryAssignmentKey(item) === expectedKey);
+  if (
+    !lead ||
+    lead.status !== "new" ||
+    lead.queueState !== "active" ||
+    !lead.assignedAgentId ||
+    !currentAgentOwnsLead(lead) ||
+    Date.now() < Number(lead.expiresAt)
+  ) {
+    syncExpiryAssignmentTimer();
+    return false;
+  }
+
+  const requestState = expiryRequestStates.get(expectedKey);
+  if (requestState?.inFlight || Number(requestState?.retryAfter) > Date.now() || requestState?.completed) return false;
+  expiryRequestStates.set(expectedKey, { inFlight: true, retryAfter: 0, completed: false });
+  try {
+    await expireLeadInSheet({ ...lead });
+    expiryRequestStates.set(expectedKey, { inFlight: false, retryAfter: 0, completed: true });
+    await syncGoogleSheet({ silent: true, notifyNewLeads: true });
+    return true;
+  } catch (error) {
+    expiryRequestStates.set(expectedKey, {
+      inFlight: false,
+      retryAfter: Date.now() + EXPIRY_RETRY_DELAY_MS,
+      completed: false,
+    });
+    console.warn("Lead expiry sync failed", error);
+    return false;
+  } finally {
+    syncExpiryAssignmentTimer();
+  }
+}
+
+function processExpiredLeads() {
+  const lead = getCurrentExpiryAssignment();
+  if (!lead || Date.now() < Number(lead.expiresAt)) {
+    syncExpiryAssignmentTimer();
+    return false;
+  }
+  requestExpiredAssignment(expiryAssignmentKey(lead));
+  return true;
+}
+
+function scheduleExpiryWatchdog() {
+  window.clearInterval(expiryWatchdogTimer);
+  expiryWatchdogTimer = window.setInterval(() => {
+    if (!document.hidden) processExpiredLeads();
+  }, EXPIRY_WATCHDOG_INTERVAL_MS);
+  syncExpiryAssignmentTimer();
+}
+
+function stopExpiryWatchdog() {
+  window.clearInterval(expiryWatchdogTimer);
+  expiryWatchdogTimer = null;
+  clearExpiryAssignmentTimer();
 }
 
 function setCallButtonLoading(leadId, isLoading) {
@@ -4228,6 +4308,7 @@ function enforceSingleActiveLead() {
 
 function renderAll() {
   enforceSingleActiveLead();
+  syncExpiryAssignmentTimer();
   renderUser();
   renderAdminReminderAlert();
   renderActiveLead();
@@ -5199,11 +5280,13 @@ window.addEventListener("appinstalled", () => {
 });
 
 window.addEventListener("focus", () => {
+  processExpiredLeads();
   checkFollowUpReminder();
   if (latestAdminReminder) sendAdminFollowUpNotification(latestAdminReminder);
 });
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) {
+    processExpiredLeads();
     checkFollowUpReminder();
     if (latestAdminReminder) sendAdminFollowUpNotification(latestAdminReminder);
   }
