@@ -461,6 +461,65 @@ test('notification click fetches the assigned lead directly for an instant dashb
   assert.match(server, /view: "dashboard"/);
 });
 
+test('notification timing instrumentation leaves the immediate snapshot render path unchanged', async () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const helperStart = source.indexOf('function leadTimingKey(');
+  const helperEnd = source.indexOf('\nfunction shouldNotifyForLead(', helperStart);
+  const instantStart = source.indexOf('async function showNotificationLeadImmediately');
+  const instantEnd = source.indexOf('\nasync function showCachedNotificationLead', instantStart);
+  const snapshot = { id: 'lead-timing', assignment_revision: 9, assigned_agent_id: 'agent-a' };
+  const logs = [];
+  let releaseSave;
+  const context = vm.createContext({
+    state: { leads: [] },
+    Date, Number, String, Boolean, console: { log: (...args) => logs.push(args) },
+    performance: { now: () => 42 },
+    document: { visibilityState: 'visible', hasFocus: () => true },
+    navigator: { serviceWorker: { controller: {} } },
+    getCurrentUser: () => ({ role: 'agent' }),
+    currentAgentMatches: () => true,
+    switchView() {},
+    canAccessLead: () => true,
+    isVisuallyExpiredAssignment: () => false,
+    getVisibleActiveLead: () => context.state.leads[0] || null,
+    renderAll: () => logs.push(['render']),
+    saveState() {},
+    addLead: (input, options) => {
+      const lead = { id: 'local-id', dedupeKey: input.id, assignmentRevision: input.assignment_revision };
+      context.state.leads.unshift(lead);
+      options.onStateCommit(lead);
+      return new Promise(resolve => { releaseSave = () => resolve('added'); });
+    },
+  });
+  vm.runInContext(source.slice(helperStart, helperEnd), context);
+  vm.runInContext(source.slice(instantStart, instantEnd), context);
+
+  const before = structuredClone(snapshot);
+  const pending = context.showNotificationLeadImmediately(snapshot);
+  assert.deepEqual(snapshot, before);
+  assert.deepEqual(context.state.leads[0], { id: 'local-id', dedupeKey: 'lead-timing', assignmentRevision: 9 });
+  assert.ok(logs.some(([event]) => event === 'render'));
+  assert.ok(logs.some(([event]) => String(event).includes('APP_STATE_COMMIT')));
+  assert.ok(logs.every(([event, details]) => event === 'render' || (!JSON.stringify(details).includes('phone') && !JSON.stringify(details).includes('email') && !JSON.stringify(details).includes('notes'))));
+  releaseSave();
+  assert.equal(await pending, true);
+});
+
+test('service worker timing logs only correlation and timing metadata', () => {
+  const worker = fs.readFileSync('sw.js', 'utf8');
+  const timingStart = worker.indexOf('function logLeadTiming(');
+  const timingEnd = worker.indexOf('\nself.addEventListener("install"', timingStart);
+  const timingBody = worker.slice(timingStart, timingEnd);
+  assert.match(worker, /logLeadTiming\("SW_PUSH", payload\)/);
+  assert.match(worker, /logLeadTiming\("SW_NOTIFICATION_START", payload\)/);
+  assert.match(worker, /logLeadTiming\("SW_BROADCAST_START", payload\)/);
+  assert.match(worker, /logLeadTiming\("SW_BROADCAST_COMPLETE", payload\)/);
+  assert.match(timingBody, /key: leadTimingKey\(payload\)/);
+  assert.match(timingBody, /epoch: Date\.now\(\)/);
+  assert.match(timingBody, /performance:/);
+  assert.doesNotMatch(timingBody, /payload\.(leadSnapshot|phone|email|name|notes)/);
+});
+
 test('login UI is not blocked by the initial Google Sheet agent sync', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const start = source.indexOf('async function bootstrap()');
@@ -934,6 +993,58 @@ test('failed expiry stays authoritative locally and becomes retryable', () => {
   assert.match(body, /completed: false/);
   assert.doesNotMatch(body, /queueLead|missed/);
   assert.match(source, /return postGoogleSheetActionWithResponse\(/);
+});
+
+test('watchdog performs second and third expiry retries after retryAfter', async () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  let now = 10_000;
+  let expiryCalls = 0;
+  const lead = {
+    id: 'retry-three-times', status: 'new', queueState: 'active', assignedAgentId: 'agent-a',
+    expiresAt: 9_000, assignmentRevision: 8, assignmentHistory: [],
+  };
+  let watchdogCallback;
+  const context = vm.createContext({
+    state: { leads: [lead] }, Date: { now: () => now }, Number, Map, Set,
+    document: { hidden: false },
+    window: {
+      setTimeout: () => 1,
+      clearTimeout() {},
+      setInterval: callback => { watchdogCallback = callback; return 2; },
+      clearInterval() {},
+    },
+    expiryAssignmentTimer: null, expiryAssignmentTimerKey: '', expiryWatchdogTimer: null,
+    expiryRequestStates: new Map(), locallyExpiredAssignments: new Set(),
+    EXPIRY_RETRY_DELAY_MS: 3000, EXPIRY_WATCHDOG_INTERVAL_MS: 2500,
+    currentAgentOwnsLead: () => true,
+    expireLeadInSheet: async () => {
+      expiryCalls += 1;
+      if (expiryCalls < 3) throw new Error('Temporary upstream failure');
+      return { ok: true, expired: 1 };
+    },
+    syncGoogleSheetFresh: async () => true,
+    renderAll() {}, console: { warn() {} },
+  });
+  const start = source.indexOf('function expiryAssignmentKey(');
+  const end = source.indexOf('\nfunction setCallButtonLoading(', start);
+  vm.runInContext(source.slice(start, end), context);
+
+  context.scheduleExpiryWatchdog();
+  await context.requestExpiredAssignment('retry-three-times:8');
+  assert.equal(expiryCalls, 1);
+  assert.equal(context.expiryRequestStates.get('retry-three-times:8').completed, false);
+
+  now += 3001;
+  watchdogCallback();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(expiryCalls, 2);
+  assert.equal(context.expiryRequestStates.get('retry-three-times:8').completed, false);
+
+  now += 3001;
+  watchdogCallback();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(expiryCalls, 3);
+  assert.equal(context.expiryRequestStates.get('retry-three-times:8').completed, true);
 });
 
 test('actual response handling keeps a clock-skew server rejection retryable and unchanged', async () => {

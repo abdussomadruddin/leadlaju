@@ -13,6 +13,22 @@ const APP_SHELL = [
   "/assets/badge-96.png"
 ];
 
+function leadTimingKey(payload = {}) {
+  const snapshot = payload.leadSnapshot || {};
+  const leadId = String(payload.leadId || snapshot.id || "").trim();
+  const revision = Number(snapshot.assignment_revision ?? snapshot.assignmentRevision) || 0;
+  return `${leadId}:${revision}`;
+}
+
+function logLeadTiming(eventName, payload = {}) {
+  const timing = {
+    key: leadTimingKey(payload),
+    epoch: Date.now(),
+    performance: typeof self.performance?.now === "function" ? self.performance.now() : null,
+  };
+  console.log(`[LeadLajuTiming] ${eventName}`, timing);
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
@@ -78,6 +94,7 @@ async function cacheLeadSnapshot(payload = {}) {
 }
 
 async function showLeadNotification(payload = {}) {
+  logLeadTiming("SW_NOTIFICATION_START", payload);
   await cacheLeadSnapshot(payload);
   const title = payload.title || "Lead baru masuk";
   const options = {
@@ -110,12 +127,14 @@ async function showLeadNotification(payload = {}) {
 
 async function broadcastLeadSnapshot(payload = {}) {
   if (!payload.leadId || !payload.leadSnapshot) return;
+  logLeadTiming("SW_BROADCAST_START", payload);
   const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
   clients.forEach((client) => client.postMessage({
     type: "LEAD_SNAPSHOT",
     leadId: payload.leadId,
     leadSnapshot: payload.leadSnapshot,
   }));
+  logLeadTiming("SW_BROADCAST_COMPLETE", payload);
 }
 
 self.addEventListener("message", (event) => {
@@ -138,6 +157,7 @@ self.addEventListener("push", (event) => {
   } catch {
     payload = { body: event.data?.text() };
   }
+  logLeadTiming("SW_PUSH", payload);
   event.waitUntil(Promise.all([
     showLeadNotification(payload),
     broadcastLeadSnapshot(payload),

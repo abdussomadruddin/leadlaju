@@ -1428,6 +1428,29 @@ function leadNotificationKey(lead) {
   return [lead.id || lead.dedupeKey, lead.assignedAgentId || "unassigned", lead.passCount || 0, lead.status].join(":");
 }
 
+function leadTimingKey(lead = {}) {
+  const leadId = String(lead.id || lead.dedupeKey || "").trim();
+  const revision = Number(lead.assignment_revision ?? lead.assignmentRevision) || 0;
+  return `${leadId}:${revision}`;
+}
+
+function logLeadTiming(eventName, lead = {}) {
+  console.log(`[LeadLajuTiming] ${eventName}`, {
+    key: leadTimingKey(lead),
+    epoch: Date.now(),
+    performance: typeof performance?.now === "function" ? performance.now() : null,
+    visibility: document.visibilityState,
+    focused: document.hasFocus(),
+    role: getCurrentUser()?.role || "none",
+    controlled: Boolean(navigator.serviceWorker?.controller),
+  });
+}
+
+function timingSnapshotLead(leadSnapshot) {
+  const sourceId = String(leadSnapshot?.id || "").trim();
+  return state.leads.find((lead) => lead.dedupeKey === sourceId || lead.id === sourceId) || null;
+}
+
 function shouldNotifyForLead(lead) {
   if (!lead || lead.status !== "new") return false;
   if (Number(lead.expiresAt) && lead.expiresAt <= Date.now()) return false;
@@ -1484,14 +1507,26 @@ async function showNotificationLeadImmediately(leadSnapshot) {
     leadSnapshot.assigned_agent_email || leadSnapshot.assignedAgentEmail,
     leadSnapshot.assigned_agent_name || leadSnapshot.assignedAgentName,
   )) return false;
+  logLeadTiming("APP_SNAPSHOT_START", leadSnapshot);
   const savePromise = addLead(leadSnapshot, {
     silent: true,
     updateExisting: true,
     notify: false,
     queueIfBlocked: true,
+    onStateCommit: () => logLeadTiming("APP_STATE_COMMIT", leadSnapshot),
   });
   switchView("dashboard");
+  logLeadTiming("APP_RENDER_START", leadSnapshot);
   renderAll();
+  logLeadTiming("APP_RENDER_END", leadSnapshot);
+  const committedLead = timingSnapshotLead(leadSnapshot);
+  const activeLead = getVisibleActiveLead();
+  if (activeLead && leadTimingKey(activeLead) === leadTimingKey(leadSnapshot)) {
+    logLeadTiming("APP_CALL_NOW_VISIBLE", leadSnapshot);
+  }
+  if (committedLead && canAccessLead(committedLead) && !isVisuallyExpiredAssignment(committedLead)) {
+    logLeadTiming("APP_LOG_LEAD_VISIBLE", leadSnapshot);
+  }
   const saved = await savePromise;
   if (saved) {
     saveState();
@@ -2126,6 +2161,7 @@ async function addLead(input, options = {}) {
     }
     if (!changed && !shouldMigrateLocalNotes) return false;
     saveState();
+    options.onStateCommit?.(existingLead);
     try {
       await persistLead(existingLead);
     } catch (error) {
@@ -2176,6 +2212,7 @@ async function addLead(input, options = {}) {
 
   state.leads.unshift(lead);
   saveState();
+  options.onStateCommit?.(lead);
   try {
     await persistNewLead(lead);
   } catch (error) {
@@ -5328,6 +5365,7 @@ elements.refreshButton?.addEventListener("click", () => {
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.addEventListener("message", (event) => {
     if (event.data?.type === "LEAD_SNAPSHOT") {
+      logLeadTiming("APP_MESSAGE_RECEIVED", event.data.leadSnapshot || {});
       showNotificationLeadImmediately(event.data.leadSnapshot);
     }
     if (event.data?.type === "OPEN_DASHBOARD") {
