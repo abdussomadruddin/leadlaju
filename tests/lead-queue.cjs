@@ -26,7 +26,13 @@ function fixture(rows, agents = [{ id: 'a', eligible_project_ids: ['project-arma
     ensureRequiredHeadersBySpec_: () => headers,
     ensureProjectsFromLeads_: () => [{ id: 'project-armani', name: 'Armani Putrajaya', active: true }, { id: 'project-bbsap', name: 'BBSAP Sitiawan', active: true }],
     ensureAgentProjectEligibility_: () => {},
-    readPushSubscriptions_: () => [],
+    readPushSubscriptions_: () => agents.map(agent => ({
+      endpoint: `https://push.example/${agent.id}`,
+      p256dh: 'test-key',
+      auth: 'test-auth',
+      agentId: agent.id,
+      agentEmail: agent.email || '',
+    })),
     mapRow_: (headers, row) => {
       const mapped = Object.fromEntries(headers.map((key, i) => [key, row[i]]));
       try { mapped.assignment_history = JSON.parse(mapped.assignment_history || '[]'); } catch { mapped.assignment_history = []; }

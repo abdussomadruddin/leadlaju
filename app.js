@@ -3219,17 +3219,25 @@ async function processExpiredLeads() {
     (lead) =>
       lead.status === "new" &&
       lead.assignedAgentId === state.currentUserId &&
+      Number(lead.expiresAt) > 0 &&
       lead.expiresAt <= now &&
       !expiringLeadIds.has(lead.id),
   );
   for (const lead of expiredLeads) {
     expiringLeadIds.add(lead.id);
-    try {
-      await expireLeadInSheet(lead);
-      await syncGoogleSheet({ silent: true, notifyNewLeads: true });
-    } finally {
-      expiringLeadIds.delete(lead.id);
-    }
+    // Remove the expired assignment before waiting for the server so the agent
+    // never keeps seeing CALL NOW after the five-minute response window.
+    queueLead(lead, now, {
+      resetPassCount: false,
+      previousAgentId: lead.assignedAgentId,
+    });
+    saveState();
+    renderAll();
+
+    expireLeadInSheet(lead)
+      .then(() => syncGoogleSheet({ silent: true, notifyNewLeads: true }))
+      .catch((error) => console.warn("Lead expiry sync failed", error))
+      .finally(() => expiringLeadIds.delete(lead.id));
   }
 }
 

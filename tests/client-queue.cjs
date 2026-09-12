@@ -492,6 +492,17 @@ test('appointment writes do not wait behind the lead distribution lock', () => {
   assert.doesNotMatch(createAppointment, /readLeads_/);
 });
 
+test('expired CALL NOW disappears locally before the server sync starts', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const start = source.indexOf('async function processExpiredLeads()');
+  const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
+  assert.match(body, /Number\(lead\.expiresAt\) > 0/);
+  assert.ok(body.indexOf('queueLead(lead, now') < body.indexOf('expireLeadInSheet(lead)'));
+  assert.ok(body.indexOf('renderAll()') < body.indexOf('expireLeadInSheet(lead)'));
+  assert.match(body, /expireLeadInSheet\(lead\)\s*\.then\(\(\) => syncGoogleSheet/);
+  assert.doesNotMatch(body, /await expireLeadInSheet/);
+});
+
 test('appointment reminders are server-side, deduplicated, and target the correct roles', () => {
   const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
   assert.match(source, /const APPOINTMENTS_SHEET_NAME = "Appointments"/);

@@ -2047,9 +2047,19 @@ function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
     const queueAgentHeaders = ensureRequiredHeadersBySpec_(queueAgentsSheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
     ensureAgentProjectEligibility_(queueAgentsSheet, queueAgentHeaders, projects);
     clearExpiredAgentCooldowns_(queueAgentsSheet, queueAgentHeaders);
-    const agents = getActiveAgentsForPush_(spreadsheet);
-
     const subscriptions = readPushSubscriptions_(spreadsheet, { agentOnly: true });
+    // GET LEAD must continue working after the browser is closed. Only assign
+    // to ready agents whose persistent Web Push subscription can receive the
+    // CALL NOW payload without relying on an open page or client heartbeat.
+    const readyAgents = getActiveAgentsForPush_(spreadsheet);
+    const agents = readyAgents.filter(
+      (agent) => filterSubscriptionsForAgent_(subscriptions, agent).length > 0,
+    );
+    console.log("Lead push queue", JSON.stringify({
+      ready_agents: readyAgents.length,
+      push_ready_agents: agents.length,
+      subscriptions: subscriptions.length,
+    }));
 
     const notifiedKeys = getLeadPushKeys_();
     const properties = PropertiesService.getScriptProperties();
@@ -2150,6 +2160,14 @@ function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
         url: `/?view=dashboard&lead=${encodeURIComponent(lead.id)}`,
         requireInteraction: true,
       });
+      console.log("Lead push result", JSON.stringify({
+        lead_id: lead.id,
+        agent_id: agent.id,
+        subscriptions: targetSubscriptions.length,
+        ok: result.ok !== false,
+        sent: Number(result.sent || 0),
+        failed: Number(result.failed || 0),
+      }));
       if (result.ok !== false) {
         notifiedKeys.add(notificationKey);
         changedKeys = true;
