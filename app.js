@@ -148,6 +148,7 @@ let pendingPotentialReminder = new URLSearchParams(window.location.search).get("
 let pendingNotificationLeadId = new URLSearchParams(window.location.search).get("lead") || "";
 let globalLoadingCount = 0;
 const expiryRequestStates = new Map();
+const locallyExpiredAssignments = new Set();
 
 const elements = {
   sidebar: document.querySelector("#sidebar"),
@@ -3245,6 +3246,46 @@ function expiryAssignmentKey(lead) {
   return lead ? `${lead.id}:${Number(lead.assignmentRevision) || 0}` : "";
 }
 
+function isLocallyExpiredAssignment(lead) {
+  return locallyExpiredAssignments.has(expiryAssignmentKey(lead));
+}
+
+function isVisuallyExpiredAssignment(lead) {
+  if (isLocallyExpiredAssignment(lead)) return true;
+  return Boolean(
+    lead &&
+    lead.status === "new" &&
+    lead.queueState === "active" &&
+    Number(lead.expiresAt) > 0 &&
+    Date.now() >= Number(lead.expiresAt) &&
+    !currentAgentOwnsLead(lead)
+  );
+}
+
+function cleanupLocallyExpiredAssignments() {
+  for (const key of locallyExpiredAssignments) {
+    if (!state.leads.some((lead) =>
+      expiryAssignmentKey(lead) === key && lead.status === "new" && lead.queueState === "active"
+    )) locallyExpiredAssignments.delete(key);
+  }
+  for (const [key, requestState] of expiryRequestStates) {
+    if (!requestState?.authoritativeNotExpired) continue;
+    const lead = state.leads.find((item) => expiryAssignmentKey(item) === key);
+    if (lead && Date.now() < Number(lead.expiresAt)) expiryRequestStates.delete(key);
+  }
+}
+
+function isAuthoritativeNotExpiredError(error) {
+  return String(error?.message || "").toLowerCase().includes("belum tamat");
+}
+
+function isAuthoritativeStaleExpiryError(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return Boolean(error?.response?.stale) || ["telah berubah", "bukan lagi aktif", "tidak dijumpai"].some(
+    (text) => message.includes(text),
+  );
+}
+
 function getCurrentExpiryAssignment() {
   const assignments = state.leads
     .filter((lead) =>
@@ -3301,18 +3342,40 @@ async function requestExpiredAssignment(expectedKey) {
 
   const requestState = expiryRequestStates.get(expectedKey);
   if (requestState?.inFlight || Number(requestState?.retryAfter) > Date.now() || requestState?.completed) return false;
-  expiryRequestStates.set(expectedKey, { inFlight: true, retryAfter: 0, completed: false });
+  const suppressLocalExpiry = Boolean(requestState?.authoritativeNotExpired);
+  if (!suppressLocalExpiry) {
+    locallyExpiredAssignments.add(expectedKey);
+    renderAll();
+  }
+  expiryRequestStates.set(expectedKey, {
+    inFlight: true,
+    retryAfter: 0,
+    completed: false,
+    authoritativeNotExpired: suppressLocalExpiry,
+  });
   try {
     await expireLeadInSheet({ ...lead });
+    if (suppressLocalExpiry) {
+      locallyExpiredAssignments.add(expectedKey);
+      renderAll();
+    }
     expiryRequestStates.set(expectedKey, { inFlight: false, retryAfter: 0, completed: true });
-    await syncGoogleSheet({ silent: true, notifyNewLeads: true });
+    await syncGoogleSheetFresh({ silent: true, notifyNewLeads: true });
     return true;
   } catch (error) {
+    const notExpiredYet = isAuthoritativeNotExpiredError(error);
     expiryRequestStates.set(expectedKey, {
       inFlight: false,
       retryAfter: Date.now() + EXPIRY_RETRY_DELAY_MS,
       completed: false,
+      authoritativeNotExpired: suppressLocalExpiry || notExpiredYet,
     });
+    if (notExpiredYet) {
+      if (locallyExpiredAssignments.delete(expectedKey)) renderAll();
+      await syncGoogleSheetFresh({ silent: true, notifyNewLeads: true });
+    } else if (isAuthoritativeStaleExpiryError(error)) {
+      await syncGoogleSheetFresh({ silent: true, notifyNewLeads: true });
+    }
     console.warn("Lead expiry sync failed", error);
     return false;
   } finally {
@@ -3473,7 +3536,7 @@ function getVisibleActiveLead() {
     .filter((lead) =>
       lead.status === "new" &&
       lead.queueState !== "queued" &&
-      (!Number(lead.expiresAt) || lead.expiresAt > Date.now()),
+      !isVisuallyExpiredAssignment(lead),
     )
     .sort((a, b) => a.expiresAt - b.expiresAt);
   if (isAdmin()) return newLeads[0] || null;
@@ -3492,8 +3555,8 @@ function displayLeadPhone(lead) {
 function renderActiveLead() {
   const lead = getVisibleActiveLead();
   const visibleLeads = isAdmin()
-    ? state.leads
-    : state.leads.filter((item) => item.assignedAgentId === state.currentUserId);
+    ? state.leads.filter((item) => !isVisuallyExpiredAssignment(item))
+    : state.leads.filter((item) => item.assignedAgentId === state.currentUserId && !isVisuallyExpiredAssignment(item));
   const newLeadCount = visibleLeads.filter(isPendingLead).length;
   elements.queueLabel.textContent = `${newLeadCount} lead menunggu`;
   elements.navLeadCount.textContent = visibleLeads.length;
@@ -3679,14 +3742,14 @@ function renderLeadsTable() {
   const focusedNote = document.activeElement;
   if (focusedNote?.matches("[data-lead-note]") && elements.leadsTableBody.contains(focusedNote)) {
     const lead = state.leads.find((item) => item.id === focusedNote.dataset.leadNote);
-    if (lead && canAccessLead(lead)) return;
+    if (lead && canAccessLead(lead) && !isVisuallyExpiredAssignment(lead)) return;
   }
   const search = elements.leadSearch.value.trim().toLowerCase();
   const selectedStatus = elements.leadFilter.value || "all";
   const selectedAgentId = elements.leadAgentFilter?.value || "all";
   const visibleLeads = isAdmin()
-    ? state.leads
-    : state.leads.filter((lead) => lead.assignedAgentId === state.currentUserId);
+    ? state.leads.filter((lead) => !isVisuallyExpiredAssignment(lead))
+    : state.leads.filter((lead) => lead.assignedAgentId === state.currentUserId && !isVisuallyExpiredAssignment(lead));
   const statusCounts = Object.fromEntries(LEAD_STATUS_OPTIONS.map((status) => [status.value, 0]));
   const agentCounts = new Map();
   let unassignedCount = 0;
@@ -3726,6 +3789,7 @@ function renderLeadsTable() {
   const agentFilter = elements.leadAgentFilter?.value || "all";
   const rows = state.leads
     .filter((lead) => {
+      if (isVisuallyExpiredAssignment(lead)) return false;
       if (!isAdmin() && lead.assignedAgentId !== state.currentUserId) return false;
       const matchesAgent =
         !isAdmin() ||
@@ -4970,6 +5034,8 @@ async function syncGoogleSheet(options = {}) {
     // counts and queue ownership are authoritative in Google Apps Script.
     const handledSync = { updated: 0, pushed: 0 };
 
+    cleanupLocallyExpiredAssignments();
+
     state.integration.endpoint = endpoint;
     state.integration.interval = DEFAULT_SYNC_INTERVAL_SECONDS;
     state.integration.connected = true;
@@ -5057,6 +5123,11 @@ function scheduleSync() {
 function waitForCurrentSync() {
   if (!syncInProgress) return Promise.resolve();
   return new Promise((resolve) => syncCompletionWaiters.push(resolve));
+}
+
+async function syncGoogleSheetFresh(options = {}) {
+  if (syncInProgress) await waitForCurrentSync();
+  return syncGoogleSheet(options);
 }
 
 function setIntegrationButtonLoading(button, loading, label) {

@@ -571,8 +571,298 @@ test('expired CALL NOW uses the authoritative server action without a local queu
   const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
   assert.match(body, /Date\.now\(\) < Number\(lead\.expiresAt\)/);
   assert.match(body, /await expireLeadInSheet\(\{ \.\.\.lead \}\)/);
-  assert.match(body, /await syncGoogleSheet\(\{ silent: true, notifyNewLeads: true \}\)/);
+  assert.match(body, /await syncGoogleSheetFresh\(\{ silent: true, notifyNewLeads: true \}\)/);
   assert.doesNotMatch(body, /queueLead|lead\.status\s*=|lead\.queueState\s*=/);
+});
+
+test('local expiry hides CALL NOW and Log Lead together before the server response', async () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const lead = {
+    id: 'lead-a', status: 'new', queueState: 'active', assignedAgentId: 'agent-a',
+    expiresAt: Date.now() - 1, assignmentRevision: 5,
+    assignmentHistory: [{ agentId: 'agent-a', outcome: 'pending' }],
+  };
+  const before = structuredClone(lead);
+  let releaseServer;
+  const serverResponse = new Promise(resolve => { releaseServer = resolve; });
+  const renderSnapshots = [];
+  const context = vm.createContext({
+    state: { leads: [lead] }, Date, Number, Map, Set, console,
+    window: { setTimeout, clearTimeout },
+    expiryAssignmentTimer: null, expiryAssignmentTimerKey: '',
+    expiryRequestStates: new Map(), locallyExpiredAssignments: new Set(),
+    EXPIRY_RETRY_DELAY_MS: 3000,
+    currentAgentOwnsLead: () => true,
+    expireLeadInSheet: () => serverResponse,
+    syncGoogleSheetFresh: async () => true,
+    renderAll: () => renderSnapshots.push(context.locallyExpiredAssignments.has('lead-a:5')),
+  });
+  const start = source.indexOf('function expiryAssignmentKey(');
+  const end = source.indexOf('\nfunction processExpiredLeads(', start);
+  vm.runInContext(source.slice(start, end), context);
+
+  const request = context.requestExpiredAssignment('lead-a:5');
+  assert.deepEqual(renderSnapshots, [true]);
+  assert.equal(context.isLocallyExpiredAssignment(lead), true);
+  assert.deepEqual(lead, before);
+  releaseServer({ ok: true });
+  assert.equal(await request, true);
+});
+
+test('CALL NOW and Log Lead consume the same revision-specific visual expiry view', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const activeStart = source.indexOf('function getVisibleActiveLead(');
+  const activeBody = source.slice(activeStart, source.indexOf('\nfunction ', activeStart + 1));
+  const logStart = source.indexOf('function renderLeadsTable(');
+  const logBody = source.slice(logStart, source.indexOf('\nfunction ', logStart + 1));
+  assert.match(activeBody, /!isVisuallyExpiredAssignment\(lead\)/);
+  assert.match(logBody, /if \(isVisuallyExpiredAssignment\(lead\)\) return false/);
+  assert.match(logBody, /canAccessLead\(lead\) && !isVisuallyExpiredAssignment\(lead\)/);
+  assert.match(source, /function expiryAssignmentKey\(lead\) \{\s*return lead \? `\$\{lead\.id\}:\$\{Number\(lead\.assignmentRevision\) \|\| 0\}`/);
+});
+
+test('transport failure keeps the UI-only expiry hidden and retryable without canonical mutation', async () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const lead = {
+    id: 'transport', status: 'new', queueState: 'active', assignedAgentId: 'agent-a',
+    expiresAt: Date.now() - 1, assignmentRevision: 2, assignmentHistory: [],
+  };
+  const before = structuredClone(lead);
+  const context = vm.createContext({
+    state: { leads: [lead] }, Date, Number, Map, Set,
+    console: { warn() {} }, window: { setTimeout, clearTimeout },
+    expiryAssignmentTimer: null, expiryAssignmentTimerKey: '',
+    expiryRequestStates: new Map(), locallyExpiredAssignments: new Set(),
+    EXPIRY_RETRY_DELAY_MS: 3000,
+    currentAgentOwnsLead: () => true,
+    expireLeadInSheet: async () => { throw new Error('Network unavailable'); },
+    syncGoogleSheetFresh: async () => true,
+    renderAll() {},
+  });
+  const start = source.indexOf('function expiryAssignmentKey(');
+  const end = source.indexOf('\nfunction processExpiredLeads(', start);
+  vm.runInContext(source.slice(start, end), context);
+
+  assert.equal(await context.requestExpiredAssignment('transport:2'), false);
+  assert.equal(context.locallyExpiredAssignments.has('transport:2'), true);
+  assert.equal(context.expiryRequestStates.get('transport:2').completed, false);
+  assert.ok(context.expiryRequestStates.get('transport:2').retryAfter > Date.now());
+  assert.deepEqual(lead, before);
+});
+
+test('a stale local expiry marker cannot hide a newer assignment revision', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const leadB = { id: 'same-lead', status: 'new', queueState: 'active', assignmentRevision: 6 };
+  const context = vm.createContext({
+    state: { leads: [leadB] }, Number, Set,
+    locallyExpiredAssignments: new Set(['same-lead:5']),
+    expiryRequestStates: new Map(),
+  });
+  const start = source.indexOf('function expiryAssignmentKey(');
+  const end = source.indexOf('\nfunction isAuthoritativeNotExpiredError(', start);
+  vm.runInContext(source.slice(start, end), context);
+  assert.equal(context.isLocallyExpiredAssignment(leadB), false);
+  context.cleanupLocallyExpiredAssignments();
+  assert.equal(context.locallyExpiredAssignments.size, 0);
+});
+
+test('clock-skew recovery commits future expiry before cleanup and locally hides the second expiry', async () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  let now = 10_000;
+  const lead = {
+    id: 'clock-skew', status: 'new', queueState: 'active', assignmentRevision: 4,
+    assignedAgentId: 'agent-a', expiresAt: 9_000, assignmentHistory: [],
+  };
+  const before = structuredClone(lead);
+  const renders = [];
+  let expiryCalls = 0;
+  let releaseSecondExpiry;
+  const context = vm.createContext({
+    state: { leads: [lead] }, Date: { now: () => now }, Number, Set, Map,
+    locallyExpiredAssignments: new Set(),
+    expiryRequestStates: new Map(), EXPIRY_RETRY_DELAY_MS: 3000,
+    expiryAssignmentTimer: null, expiryAssignmentTimerKey: '',
+    window: { setTimeout: () => 1, clearTimeout() {} },
+    currentAgentOwnsLead: () => true,
+    renderAll: () => renders.push(context.locallyExpiredAssignments.has('clock-skew:4')),
+    expireLeadInSheet: async () => {
+      expiryCalls += 1;
+      if (expiryCalls === 1) throw new Error('Masa assignment lead belum tamat.');
+      return new Promise(resolve => { releaseSecondExpiry = resolve; });
+    },
+    syncGoogleSheetFresh: async () => {
+      lead.expiresAt = 20_000;
+      context.cleanupLocallyExpiredAssignments();
+      return true;
+    },
+    console: { warn() {} },
+  });
+  const start = source.indexOf('function expiryAssignmentKey(');
+  const end = source.indexOf('\nfunction processExpiredLeads(', start);
+  vm.runInContext(source.slice(start, end), context);
+
+  assert.equal(await context.requestExpiredAssignment('clock-skew:4'), false);
+  assert.deepEqual(renders, [true, false]);
+  assert.equal(lead.expiresAt, 20_000);
+  assert.equal(context.expiryRequestStates.has('clock-skew:4'), false);
+  assert.deepEqual({ ...lead, expiresAt: before.expiresAt }, before);
+
+  now = 20_000;
+  const secondRequest = context.requestExpiredAssignment('clock-skew:4');
+  assert.equal(expiryCalls, 2);
+  assert.equal(context.locallyExpiredAssignments.has('clock-skew:4'), true);
+  assert.deepEqual(renders, [true, false, true]);
+  releaseSecondExpiry({ ok: true });
+  assert.equal(await secondRequest, true);
+});
+
+test('admin visually expires another agent lead without becoming its expiry worker', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const lead = {
+    id: 'agent-b-lead', status: 'new', queueState: 'active', assignedAgentId: 'agent-b',
+    expiresAt: 9_000, assignmentRevision: 3,
+  };
+  const context = vm.createContext({
+    state: { leads: [lead] }, Date: { now: () => 10_000 }, Number, Set,
+    locallyExpiredAssignments: new Set(), currentAgentOwnsLead: () => false,
+  });
+  const predicateStart = source.indexOf('function expiryAssignmentKey(');
+  const predicateEnd = source.indexOf('\nfunction cleanupLocallyExpiredAssignments(', predicateStart);
+  vm.runInContext(source.slice(predicateStart, predicateEnd), context);
+  assert.equal(context.isVisuallyExpiredAssignment(lead), true);
+
+  const workerStart = source.indexOf('function getCurrentExpiryAssignment(');
+  const workerEnd = source.indexOf('\nfunction ', workerStart + 1);
+  vm.runInContext(source.slice(workerStart, workerEnd), context);
+  assert.equal(context.getCurrentExpiryAssignment(), null);
+});
+
+test('post-mutation fresh sync waits for an older in-flight sync before reading again', async () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const start = source.indexOf('async function syncGoogleSheetFresh(');
+  const end = source.indexOf('\nfunction ', start + 1);
+  const calls = [];
+  let releaseOldSync;
+  const context = vm.createContext({
+    syncInProgress: true,
+    waitForCurrentSync: () => new Promise(resolve => { releaseOldSync = () => { calls.push('old-finished'); resolve(); }; }),
+    syncGoogleSheet: async () => { calls.push('fresh-read'); return true; },
+  });
+  vm.runInContext(source.slice(start, end), context);
+  const fresh = context.syncGoogleSheetFresh({ silent: true });
+  assert.deepEqual(calls, []);
+  releaseOldSync();
+  assert.equal(await fresh, true);
+  assert.deepEqual(calls, ['old-finished', 'fresh-read']);
+});
+
+test('post-mutation fresh sync starts immediately when no sync is active', async () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const start = source.indexOf('async function syncGoogleSheetFresh(');
+  const end = source.indexOf('\nfunction ', start + 1);
+  const calls = [];
+  const context = vm.createContext({
+    syncInProgress: false,
+    waitForCurrentSync: () => { calls.push('unexpected-wait'); return Promise.resolve(); },
+    syncGoogleSheet: async () => { calls.push('fresh-read'); return true; },
+  });
+  vm.runInContext(source.slice(start, end), context);
+  assert.equal(await context.syncGoogleSheetFresh({ silent: true }), true);
+  assert.deepEqual(calls, ['fresh-read']);
+});
+
+test('a failed current sync releases the waiter and permits exactly one fresh read', async () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const freshStart = source.indexOf('async function syncGoogleSheetFresh(');
+  const freshEnd = source.indexOf('\nfunction ', freshStart + 1);
+  const calls = [];
+  let releaseFailedSync;
+  const context = vm.createContext({
+    syncInProgress: true,
+    waitForCurrentSync: () => new Promise(resolve => {
+      releaseFailedSync = () => { calls.push('failed-old-sync-finished'); context.syncInProgress = false; resolve(); };
+    }),
+    syncGoogleSheet: async () => { calls.push('fresh-read'); return true; },
+  });
+  vm.runInContext(source.slice(freshStart, freshEnd), context);
+  const fresh = context.syncGoogleSheetFresh({ silent: true });
+  assert.deepEqual(calls, []);
+  releaseFailedSync();
+  assert.equal(await fresh, true);
+  assert.deepEqual(calls, ['failed-old-sync-finished', 'fresh-read']);
+});
+
+test('actual fresh-sync helpers serialize a post-mutation read after the pre-mutation sync', async () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const calls = [];
+  let releaseOldResponse;
+  const oldResponse = new Promise(resolve => { releaseOldResponse = resolve; });
+  let requestCount = 0;
+  const context = vm.createContext({
+    syncInProgress: false,
+    syncCompletionWaiters: [],
+    syncGoogleSheet: async () => {
+      assert.equal(context.syncInProgress, false);
+      context.syncInProgress = true;
+      requestCount += 1;
+      try {
+        if (requestCount === 1) {
+          calls.push('A-start');
+          await oldResponse;
+          calls.push('A-commit-old');
+        } else {
+          calls.push('B-start-after-mutation');
+          calls.push('B-commit-new');
+        }
+        return true;
+      } finally {
+        context.syncInProgress = false;
+        const waiters = context.syncCompletionWaiters;
+        context.syncCompletionWaiters = [];
+        waiters.forEach(resolve => resolve());
+      }
+    },
+  });
+  const waitStart = source.indexOf('function waitForCurrentSync(');
+  const freshEnd = source.indexOf('\nfunction ', source.indexOf('async function syncGoogleSheetFresh(', waitStart) + 1);
+  vm.runInContext(source.slice(waitStart, freshEnd), context);
+
+  const oldSync = context.syncGoogleSheet();
+  const freshSync = context.syncGoogleSheetFresh({ silent: true });
+  assert.deepEqual(calls, ['A-start']);
+  releaseOldResponse();
+  assert.equal(await oldSync, true);
+  assert.equal(await freshSync, true);
+  assert.deepEqual(calls, ['A-start', 'A-commit-old', 'B-start-after-mutation', 'B-commit-new']);
+  assert.equal(requestCount, 2);
+});
+
+test('authoritative lead processing and removals finish before marker cleanup and the single render', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const syncStart = source.indexOf('async function syncGoogleSheet(');
+  const syncEnd = source.indexOf('\nfunction scheduleSync(', syncStart);
+  const body = source.slice(syncStart, syncEnd);
+  const rowCommit = body.indexOf('await addLead(row');
+  const removalCommit = body.indexOf('await deleteLeads(');
+  const cleanup = body.indexOf('cleanupLocallyExpiredAssignments()');
+  const render = body.indexOf('renderAll()');
+  assert.ok(rowCommit >= 0 && rowCommit < cleanup);
+  assert.ok(removalCommit >= 0 && removalCommit < cleanup);
+  assert.ok(cleanup < render);
+  assert.equal((body.match(/cleanupLocallyExpiredAssignments\(\)/g) || []).length, 1);
+  assert.equal((body.match(/renderAll\(\)/g) || []).length, 1);
+});
+
+test('fresh authoritative assignment renders CALL NOW and Log Lead in one render cycle', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const syncStart = source.indexOf('async function syncGoogleSheet(');
+  const syncBody = source.slice(syncStart, source.indexOf('\nfunction scheduleSync(', syncStart));
+  const renderStart = source.indexOf('function renderAll(');
+  const renderBody = source.slice(renderStart, source.indexOf('\nconst viewTitles', renderStart));
+  assert.equal((syncBody.match(/renderAll\(\)/g) || []).length, 1);
+  assert.ok(renderBody.indexOf('renderActiveLead()') < renderBody.indexOf('renderLeadsTable()'));
+  assert.match(syncBody, /cleanupLocallyExpiredAssignments\(\)/);
+  assert.match(source, /await syncGoogleSheetFresh\(\{ silent: true, notifyNewLeads: true \}\)/);
 });
 
 test('foreground expiry has one assignment timer and a 2.5 second local watchdog', () => {
@@ -589,7 +879,7 @@ test('expiry requests are deduplicated by lead id and assignment revision', () =
   assert.doesNotMatch(source, /function expiryAssignmentKey\(lead\) \{[^}]*dedupeKey/);
   assert.match(source, /requestState\?\.inFlight/);
   assert.match(source, /requestState\?\.completed/);
-  assert.match(source, /expiryRequestStates\.set\(expectedKey, \{ inFlight: true/);
+  assert.match(source, /expiryRequestStates\.set\(expectedKey, \{\s*inFlight: true/);
 });
 
 test('leads sharing a dedupe key retain distinct expiry request identities', () => {
@@ -659,7 +949,7 @@ test('actual response handling keeps a clock-skew server rejection retryable and
     window: { setTimeout, clearTimeout },
     Date, Number, Map, console,
     expiryAssignmentTimer: null, expiryAssignmentTimerKey: '',
-    expiryRequestStates: new Map(), EXPIRY_RETRY_DELAY_MS: 3000,
+    expiryRequestStates: new Map(), locallyExpiredAssignments: new Set(), EXPIRY_RETRY_DELAY_MS: 3000,
     currentAgentOwnsLead: () => true,
     getSheetEndpoint: () => 'https://example.test/exec',
     fetch: async () => ({
@@ -669,7 +959,8 @@ test('actual response handling keeps a clock-skew server rejection retryable and
         return { ok: false, error: 'Masa assignment lead belum tamat.' };
       },
     }),
-    syncGoogleSheet: async () => true,
+    syncGoogleSheetFresh: async () => true,
+    renderAll: () => {},
     saveState: () => {},
   });
   const responseStart = source.indexOf('async function postGoogleSheetActionWithResponse(');
@@ -689,10 +980,14 @@ test('actual response handling keeps a clock-skew server rejection retryable and
   assert.equal(responseReads, 1);
   assert.equal(context.expiryRequestStates.get(key).completed, false);
   assert.ok(context.expiryRequestStates.get(key).retryAfter > Date.now());
+  assert.equal(context.expiryRequestStates.get(key).authoritativeNotExpired, true);
+  assert.equal(context.locallyExpiredAssignments.has(key), false);
 
   context.expiryRequestStates.get(key).retryAfter = 0;
   assert.equal(await context.requestExpiredAssignment(key), false);
   assert.equal(responseReads, 2);
+  assert.equal(context.expiryRequestStates.get(key).authoritativeNotExpired, true);
+  assert.equal(context.locallyExpiredAssignments.has(key), false);
   assert.deepEqual(lead, before);
 });
 
