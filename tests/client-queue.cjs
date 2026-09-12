@@ -137,6 +137,19 @@ test('contacted status sends the acting agent identity to the server', () => {
   assert.match(source, /acting_agent_email: actingAgent\?\.email \|\| ""/);
 });
 
+test('CALL NOW starts a protected keepalive status write before opening the phone app', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const requestStart = source.indexOf('async function postGoogleSheetActionWithResponse');
+  const requestBody = source.slice(requestStart, source.indexOf('\nasync function ', requestStart + 1));
+  const callStart = source.indexOf('async function handleCall(');
+  const callBody = source.slice(callStart, source.indexOf('\nfunction ', callStart + 1));
+  assert.match(requestBody, /keepalive: true/);
+  assert.match(callBody, /pendingLeadStatusUpdates\.set\(leadId, \{ status: "contacted", token: updateToken \}\)/);
+  assert.ok(callBody.indexOf('renderAll()') < callBody.indexOf('dialLeadPhone(callablePhone)'));
+  assert.ok(callBody.indexOf('const statusUpdatePromise = updateLeadStatusInSheet') < callBody.indexOf('dialLeadPhone(callablePhone)'));
+  assert.ok(callBody.indexOf('dialLeadPhone(callablePhone)') < callBody.indexOf('await statusUpdatePromise'));
+});
+
 test('lead display falls back to the server agent name', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   assert.match(source, /getAgent\(lead\.assignedAgentId\)\?\.name \|\| lead\.assignedAgentName/);

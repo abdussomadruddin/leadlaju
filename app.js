@@ -2377,6 +2377,7 @@ async function postGoogleSheetActionWithResponse(payload, errorLabel) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
+      keepalive: true,
     });
     const result = await response.json().catch(() => null);
     if (!response.ok) throw new Error(result?.error || `Server membalas ralat ${response.status}.`);
@@ -3278,6 +3279,9 @@ async function handleCall(leadId) {
   if (claimingLeadId) return;
 
   claimingLeadId = leadId;
+  const updateToken = Symbol("call-now-status-update");
+  pendingLeadStatusUpdates.set(leadId, { status: "contacted", token: updateToken });
+  leadStatusWriteTimes.set(leadId, Date.now());
   setCallButtonLoading(leadId, true);
 
   try {
@@ -3310,6 +3314,11 @@ async function handleCall(leadId) {
     const agent = getAgent((claimedLead || lead).assignedAgentId);
     if (agent) agent.cooldownUntil = Date.now() + AGENT_COOLDOWN_MS;
     saveState();
+    renderAll();
+
+    // Start the durable Sheet write while the page is still foregrounded. The
+    // keepalive request continues when tel: moves the browser to the Phone app.
+    const statusUpdatePromise = updateLeadStatusInSheet(claimedLead || lead, "Contacted");
     const callablePhone = String(phoneToCall || "").replace(/[^\d+]/g, "");
     if (callablePhone) {
       const callLink = document.querySelector("#dial-phone-link");
@@ -3325,7 +3334,7 @@ async function handleCall(leadId) {
     } else {
       showToast("Nombor telefon tiada", "Lead ini belum ada nombor telefon yang boleh dipanggil.", "error");
     }
-    await updateLeadStatusInSheet(claimedLead || lead, "Contacted");
+    await statusUpdatePromise;
     if (agent) await upsertAgentToSheet(agent);
     saveState();
     showToast(
@@ -3342,6 +3351,10 @@ async function handleCall(leadId) {
       renderAll();
     }
   } finally {
+    leadStatusWriteTimes.set(leadId, Date.now());
+    if (pendingLeadStatusUpdates.get(leadId)?.token === updateToken) {
+      pendingLeadStatusUpdates.delete(leadId);
+    }
     claimingLeadId = null;
     setCallButtonLoading(leadId, false);
   }
