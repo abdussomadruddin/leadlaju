@@ -100,7 +100,8 @@ test('existing assignments reserve slots even below queued rows', () => {
 });
 
 test('legacy duplicate assignments are held and timers cleared', () => {
-  const f = fixture(['one', 'two'].map(id => lead(id, { assigned_agent_id: 'a', queue_state: 'active', expires_at: 'old' })), [{ id: 'a' }]);
+  const futureExpiry = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+  const f = fixture(['one', 'two'].map(id => lead(id, { assigned_agent_id: 'a', queue_state: 'active', expires_at: futureExpiry })), [{ id: 'a' }]);
   f.run();
   assert.equal(f.rows()[1].queue_state, 'queued');
   assert.equal(f.rows()[1].expires_at, '');

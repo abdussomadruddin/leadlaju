@@ -240,6 +240,16 @@ const elements = {
   leadFilter: document.querySelector("#lead-filter"),
   leadAgentFilter: document.querySelector("#lead-agent-filter"),
   leadLogCount: document.querySelector("#lead-log-count"),
+  navMonitorCount: document.querySelector("#nav-monitor-count"),
+  monitorHealth: document.querySelector("#monitor-health"),
+  monitorCriticalCount: document.querySelector("#monitor-critical-count"),
+  monitorWarningCount: document.querySelector("#monitor-warning-count"),
+  monitorCheckedAt: document.querySelector("#monitor-checked-at"),
+  monitorSeverityFilter: document.querySelector("#monitor-severity-filter"),
+  monitorAgentFilter: document.querySelector("#monitor-agent-filter"),
+  monitorResultCount: document.querySelector("#monitor-result-count"),
+  monitorList: document.querySelector("#monitor-list"),
+  monitorRefreshButton: document.querySelector("#monitor-refresh-button"),
   appointmentList: document.querySelector("#appointment-list"),
   appointmentCount: document.querySelector("#appointment-count"),
   appointmentStatusFilter: document.querySelector("#appointment-status-filter"),
@@ -465,6 +475,7 @@ function mapLead(row) {
     passCount: row.pass_count || 0,
     assignmentRevision: Number(row.assignment_revision) || 0,
     assignmentHistory: Array.isArray(row.assignment_history) ? row.assignment_history : [],
+    queueState: String(row.queue_state || "").toLowerCase(),
     responseMs: row.response_ms,
     contactedAt: row.contacted_at ? new Date(row.contacted_at).getTime() : null,
     notes: row.notes || "",
@@ -1719,6 +1730,7 @@ function selectNextAvailableAgent(options = {}) {
 
 function queueLead(lead, now = Date.now(), options = {}) {
   lead.status = "queued";
+  lead.queueState = "queued";
   lead.assignedAgentId = null;
   lead.expiresAt = null;
   lead.receivedAt = null;
@@ -1737,6 +1749,7 @@ function activateLead(lead, options = {}) {
   if (!agent) return null;
 
   lead.status = "new";
+  lead.queueState = "active";
   lead.assignedAgentId = agent.id;
   lead.receivedAt = now;
   lead.expiresAt = now + RESPONSE_WINDOW_MS;
@@ -1955,6 +1968,7 @@ function applyLeadRuntimeFromSheet(lead, runtime, now = Date.now()) {
     queuedAt: lead.queuedAt,
     passCount: lead.passCount,
     assignmentRevision: lead.assignmentRevision,
+    queueState: lead.queueState,
   });
 
   if (!isActiveLeadStatus(lead.status)) {
@@ -1964,6 +1978,7 @@ function applyLeadRuntimeFromSheet(lead, runtime, now = Date.now()) {
     if (runtime.receivedAt) lead.receivedAt = runtime.receivedAt;
     lead.expiresAt = null;
     lead.queuedAt = null;
+    lead.queueState = runtime.queueState || "";
     if (runtime.passCount !== null) lead.passCount = runtime.passCount;
   } else if (runtime.queueState === "queued") {
     queueLead(lead, runtime.receivedAt || lead.queuedAt || now, {
@@ -1971,6 +1986,7 @@ function applyLeadRuntimeFromSheet(lead, runtime, now = Date.now()) {
       previousAgentId: lead.lastAgentId || lead.assignedAgentId || null,
     });
     if (runtime.passCount !== null) lead.passCount = runtime.passCount;
+    lead.queueState = "queued";
   } else if (runtime.assignedAgentId) {
     lead.status = "new";
     lead.assignedAgentId = runtime.assignedAgentId;
@@ -1980,6 +1996,7 @@ function applyLeadRuntimeFromSheet(lead, runtime, now = Date.now()) {
     lead.expiresAt = runtime.expiresAt || lead.expiresAt || lead.receivedAt + RESPONSE_WINDOW_MS;
     lead.queuedAt = null;
     lead.lastAgentId = null;
+    lead.queueState = "active";
     if (runtime.passCount !== null) lead.passCount = runtime.passCount;
   }
   lead.assignmentRevision = runtime.assignmentRevision || 0;
@@ -1996,6 +2013,7 @@ function applyLeadRuntimeFromSheet(lead, runtime, now = Date.now()) {
     passCount: lead.passCount,
     assignmentRevision: lead.assignmentRevision,
     assignmentHistory: lead.assignmentHistory,
+    queueState: lead.queueState,
   });
   return before !== after;
 }
@@ -2140,6 +2158,7 @@ async function addLead(input, options = {}) {
     passCount: initialPassCount,
     assignmentRevision: sheetRuntime.assignmentRevision || 0,
     assignmentHistory: sheetRuntime.assignmentHistory || [],
+    queueState: sheetRuntime.queueState || (shouldQueue ? "queued" : "active"),
     responseMs: initialStatus === "contacted" ? 0 : null,
     contactedAt: initialStatus === "contacted" ? now : null,
     queuedAt: shouldQueue ? now : null,
@@ -4033,9 +4052,135 @@ function renderUser() {
   document.querySelectorAll(".admin-only-sync-card").forEach((item) => {
     item.hidden = !isAdmin();
   });
-  if (!isAdmin() && (activeView === "agents" || activeView === "projects" || activeView === "integration")) {
+  if (!isAdmin() && ["agents", "projects", "lead-monitor", "integration"].includes(activeView)) {
     switchView("dashboard");
   }
+}
+
+function inspectLeadMovement(now = Date.now()) {
+  const issues = [];
+  const agentsById = new Map(state.agents.map((agent) => [String(agent.id), agent]));
+  const activeByAgent = new Map();
+  const addIssue = (lead, severity, code, title, detail, expected) => issues.push({
+    id: `${lead.id}-${code}`,
+    lead,
+    severity,
+    code,
+    title,
+    detail,
+    expected,
+    agentId: String(lead.assignedAgentId || ""),
+  });
+
+  state.leads.forEach((lead) => {
+    const status = getLeadVisualStatus(lead);
+    const assignedAgent = lead.assignedAgentId ? agentsById.get(String(lead.assignedAgentId)) : null;
+    const history = Array.isArray(lead.assignmentHistory) ? lead.assignmentHistory : [];
+    const latestAssignment = history.at(-1);
+    const isNew = status === "new" || lead.status === "queued";
+    const isAssignedNew = status === "new" && Boolean(lead.assignedAgentId);
+
+    if (lead.assignedAgentId && !assignedAgent) {
+      addIssue(lead, "critical", "unknown-agent", "Rujukan ejen tidak sah",
+        "Lead masih merujuk kepada ejen yang tiada dalam senarai ejen.",
+        "Padankan semula ejen atau kosongkan assignment ini.");
+    }
+    if (isAssignedNew) {
+      const active = activeByAgent.get(lead.assignedAgentId) || [];
+      active.push(lead);
+      activeByAgent.set(lead.assignedAgentId, active);
+      if (!Number.isFinite(lead.receivedAt) || !Number.isFinite(lead.expiresAt)) {
+        addIssue(lead, "critical", "missing-runtime", "Masa assignment tidak lengkap",
+          "Lead New mempunyai ejen tetapi tiada masa diterima atau masa tamat yang sah.",
+          "Server perlu membina semula runtime assignment 5 minit.");
+      } else if (lead.expiresAt <= now) {
+        addIssue(lead, "critical", "expired-active", "Assignment sudah tamat tetapi masih aktif",
+          `Masa CALL NOW tamat ${relativeTime(lead.expiresAt)}, tetapi lead masih berada pada ejen.`,
+          "Lead perlu ditanda missed, dikeluarkan daripada ejen ini dan masuk semula ke queue.");
+      }
+      if (String(lead.queueState || "").toLowerCase() === "queued") {
+        addIssue(lead, "critical", "queued-assigned", "Queue dan assignment bercanggah",
+          "Lead ditanda queued tetapi masih mempunyai ejen aktif.",
+          "Gunakan satu state sahaja: queued tanpa ejen atau active dengan ejen.");
+      }
+      if (latestAssignment?.outcome === "contacted") {
+        addIssue(lead, "critical", "called-still-new", "Sudah CALL tetapi status masih New",
+          "Sejarah assignment terakhir sudah Contacted tetapi status utama belum berubah.",
+          "Status perlu diselaraskan kepada Contacted pada dashboard dan Sheet.");
+      }
+    }
+    if (!isNew && latestAssignment?.outcome === "pending") {
+      addIssue(lead, "warning", "resolved-pending", "Sejarah assignment belum ditutup",
+        `Status lead sudah ${formatSheetStatus(status)}, tetapi outcome terakhir masih pending.`,
+        "Tutup outcome assignment mengikut status terkini.");
+    }
+    if (!isNew && Number.isFinite(lead.expiresAt) && lead.expiresAt > 0) {
+      addIssue(lead, "warning", "terminal-runtime", "Timer masih melekat pada lead selesai",
+        `Lead ${formatSheetStatus(status)} masih menyimpan masa tamat CALL NOW.`,
+        "Kosongkan runtime timer selepas lead dihubungi atau diselesaikan.");
+    }
+  });
+
+  activeByAgent.forEach((leads, agentId) => {
+    if (leads.length < 2) return;
+    leads.forEach((lead) => addIssue(lead, "critical", "multiple-active", "Ejen memegang lebih satu lead aktif",
+      `${agentsById.get(String(agentId))?.name || "Ejen"} sedang memegang ${leads.length} lead New serentak.`,
+      "Kekalkan satu lead aktif sahaja dan pulangkan selebihnya ke queue."));
+  });
+  return issues.sort((left, right) =>
+    (left.severity === "critical" ? 0 : 1) - (right.severity === "critical" ? 0 : 1) ||
+    (right.lead.receivedAt || right.lead.createdAt || 0) - (left.lead.receivedAt || left.lead.createdAt || 0));
+}
+
+function renderLeadMonitor() {
+  if (!elements.monitorList) return;
+  const issues = inspectLeadMovement();
+  const critical = issues.filter((issue) => issue.severity === "critical").length;
+  const warning = issues.length - critical;
+  elements.monitorCriticalCount.textContent = critical;
+  elements.monitorWarningCount.textContent = warning;
+  elements.monitorHealth.textContent = critical ? "Bermasalah" : warning ? "Perlu semak" : "Sihat";
+  elements.monitorHealth.closest(".monitor-stat")?.classList.toggle("has-issue", Boolean(issues.length));
+  elements.monitorCheckedAt.textContent = new Intl.DateTimeFormat("ms-MY", {
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  }).format(new Date());
+  elements.navMonitorCount.textContent = issues.length;
+  elements.navMonitorCount.hidden = issues.length === 0;
+
+  const selectedAgent = elements.monitorAgentFilter.value || "all";
+  elements.monitorAgentFilter.innerHTML = [
+    '<option value="all">Semua ejen</option>',
+    ...state.agents.filter((agent) => agent.role === "agent")
+      .map((agent) => `<option value="${escapeHtml(agent.id)}">${escapeHtml(agent.name)}</option>`),
+    '<option value="unassigned">Tiada ejen</option>',
+  ].join("");
+  elements.monitorAgentFilter.value = [...elements.monitorAgentFilter.options]
+    .some((option) => option.value === selectedAgent) ? selectedAgent : "all";
+  const severity = elements.monitorSeverityFilter.value || "all";
+  const agentFilter = elements.monitorAgentFilter.value || "all";
+  const filtered = issues.filter((issue) =>
+    (severity === "all" || issue.severity === severity) &&
+    (agentFilter === "all" || (agentFilter === "unassigned" ? !issue.agentId : issue.agentId === agentFilter)));
+  elements.monitorResultCount.textContent = `${filtered.length} isu`;
+  elements.monitorList.innerHTML = filtered.length ? filtered.map((issue) => {
+    const agent = issue.agentId ? getAgent(issue.agentId) : null;
+    return `<article class="monitor-issue ${issue.severity}">
+      <span class="monitor-severity">${issue.severity === "critical" ? "Kritikal" : "Perlu semak"}</span>
+      <div class="monitor-issue-main">
+        <strong>${escapeHtml(issue.title)}</strong>
+        <small>${escapeHtml(issue.detail)}</small>
+      </div>
+      <div class="monitor-lead-meta">
+        <strong>${escapeHtml(issue.lead.name)}</strong>
+        <small>${escapeHtml(issue.lead.project)} · ${escapeHtml(agent?.name || issue.lead.assignedAgentName || "Tiada ejen")}</small>
+      </div>
+      <div class="monitor-expected"><small>Sepatutnya</small><span>${escapeHtml(issue.expected)}</span></div>
+      <button class="text-button" type="button" data-monitor-lead="${escapeHtml(issue.lead.id)}">Buka lead</button>
+    </article>`;
+  }).join("") : `<div class="monitor-empty">
+    <strong>${issues.length ? "Tiada isu untuk filter ini" : "Tiada masalah dikesan"}</strong>
+    <small>${issues.length ? "Tukar filter untuk melihat isu lain." : "Queue, assignment dan status lead semasa berada dalam keadaan konsisten."}</small>
+  </div>`;
 }
 
 function renderIntegration() {
@@ -4086,6 +4231,7 @@ function renderAll() {
   renderAppointments();
   renderAgents();
   renderProjects();
+  renderLeadMonitor();
   renderIntegration();
 }
 
@@ -4094,11 +4240,12 @@ const viewTitles = {
   appointments: "Appointment Tracker",
   agents: "Pengurusan Ejen",
   projects: "Projek",
+  "lead-monitor": "Monitor Pergerakan Lead",
   integration: "Google Sheets Sync",
 };
 
 function switchView(viewName) {
-  if ((viewName === "agents" || viewName === "projects" || viewName === "integration") && !isAdmin()) return;
+  if (["agents", "projects", "lead-monitor", "integration"].includes(viewName) && !isAdmin()) return;
   activeView = viewName;
   document.querySelectorAll(".view").forEach((view) => view.classList.remove("active"));
   document.querySelector(`#${viewName}-view`)?.classList.add("active");
@@ -4943,6 +5090,30 @@ elements.leadFilter.addEventListener("change", renderLeadsTable);
 elements.leadAgentFilter?.addEventListener("change", renderLeadsTable);
 elements.appointmentStatusFilter?.addEventListener("change", renderAppointments);
 elements.appointmentProjectFilter?.addEventListener("change", renderAppointments);
+elements.monitorSeverityFilter?.addEventListener("change", renderLeadMonitor);
+elements.monitorAgentFilter?.addEventListener("change", renderLeadMonitor);
+elements.monitorRefreshButton?.addEventListener("click", async () => {
+  elements.monitorRefreshButton.disabled = true;
+  setGlobalLoading(true, "Memeriksa pergerakan lead...");
+  try {
+    await waitForCurrentSync();
+    await syncGoogleSheet({ silent: true });
+    renderLeadMonitor();
+    showToast("Pemeriksaan selesai", "Status queue, assignment dan ejen telah diperiksa.");
+  } finally {
+    elements.monitorRefreshButton.disabled = false;
+    setGlobalLoading(false);
+  }
+});
+elements.monitorList?.addEventListener("click", (event) => {
+  const target = event.target.closest("[data-monitor-lead]");
+  if (!target) return;
+  elements.leadSearch.value = target.dataset.monitorLead;
+  const lead = state.leads.find((item) => item.id === target.dataset.monitorLead);
+  if (lead) elements.leadSearch.value = lead.name;
+  switchView("leads");
+  renderLeadsTable();
+});
 elements.leadsTableBody.addEventListener("click", (event) => {
   const edit = event.target.closest("[data-lead-edit]");
   const remove = event.target.closest("[data-lead-delete]");

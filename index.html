@@ -25,8 +25,8 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260912-sync-feedback-v71" />
-    <script src="app.js?v=20260912-sync-feedback-v71" defer></script>
+    <link rel="stylesheet" href="styles.css?v=20260912-lead-monitor-v72" />
+    <script src="app.js?v=20260912-lead-monitor-v72" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -254,6 +254,14 @@
               <path d="M8 15h3m2 0h3" />
             </svg>
             Projek
+          </button>
+          <button class="nav-item admin-only" data-view="lead-monitor" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 19V9m5 10V5m5 14v-7m5 7V3" />
+              <path d="M3 21h18" />
+            </svg>
+            Monitor Lead
+            <span class="nav-count nav-count-alert" id="nav-monitor-count" hidden>0</span>
           </button>
           <button class="nav-item admin-only" data-view="integration" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -589,6 +597,37 @@
             </form>
           </div>
           <div class="projects-list" id="projects-list"></div>
+        </section>
+
+        <section class="view admin-only-view" id="lead-monitor-view">
+          <div class="content-heading">
+            <div>
+              <span class="section-kicker">Diagnostik agihan</span>
+              <h2>Monitor Pergerakan Lead</h2>
+              <p>Kesan lead tersekat, assignment tamat, status tidak selaras dan rujukan ejen yang rosak.</p>
+            </div>
+            <button class="secondary-button" id="monitor-refresh-button" type="button">Semak semula</button>
+          </div>
+          <div class="monitor-summary" aria-live="polite">
+            <article class="monitor-stat healthy"><small>Sistem</small><strong id="monitor-health">Sihat</strong></article>
+            <article class="monitor-stat critical"><small>Kritikal</small><strong id="monitor-critical-count">0</strong></article>
+            <article class="monitor-stat warning"><small>Perlu semak</small><strong id="monitor-warning-count">0</strong></article>
+            <article class="monitor-stat"><small>Disemak</small><strong id="monitor-checked-at">-</strong></article>
+          </div>
+          <div class="table-card monitor-card">
+            <div class="table-toolbar monitor-toolbar">
+              <select id="monitor-severity-filter" aria-label="Tapis tahap isu">
+                <option value="all">Semua tahap</option>
+                <option value="critical">Kritikal</option>
+                <option value="warning">Perlu semak</option>
+              </select>
+              <select id="monitor-agent-filter" aria-label="Tapis ejen monitor">
+                <option value="all">Semua ejen</option>
+              </select>
+              <span class="queue-label" id="monitor-result-count">0 isu</span>
+            </div>
+            <div class="monitor-list" id="monitor-list"></div>
+          </div>
         </section>
 
         <section class="view admin-only-view" id="integration-view">

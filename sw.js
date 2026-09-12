@@ -1,9 +1,9 @@
-const CACHE_NAME = "leadlaju-pwa-v20260912-sync-feedback-v71";
+const CACHE_NAME = "leadlaju-pwa-v20260912-lead-monitor-v72";
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20260912-sync-feedback-v71",
-  "/app.js?v=20260912-sync-feedback-v71",
+  "/styles.css?v=20260912-lead-monitor-v72",
+  "/app.js?v=20260912-lead-monitor-v72",
   "/manifest.webmanifest?v=20260625-pwa-notifications",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",

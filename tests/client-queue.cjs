@@ -552,3 +552,20 @@ test('an older server response cannot reset an agent GET LEAD choice', () => {
   assert.match(body, /const leadReady = hasLeadReady \? Boolean\(input\.lead_ready \?\? input\.leadReady\) : undefined/);
   assert.match(source, /if \(sheetAgent\.leadReady !== undefined\) updates\.leadReady = sheetAgent\.leadReady/);
 });
+
+test('admin lead monitor exposes live assignment diagnostics and agent filters', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const html = fs.readFileSync('index.html', 'utf8');
+  assert.match(html, /class="nav-item admin-only" data-view="lead-monitor"/);
+  assert.match(html, /id="lead-monitor-view"/);
+  assert.match(html, /id="monitor-agent-filter"/);
+  assert.match(source, /function inspectLeadMovement\(now = Date\.now\(\)\)/);
+  assert.match(source, /"expired-active"/);
+  assert.match(source, /"called-still-new"/);
+  assert.match(source, /"multiple-active"/);
+  assert.match(source, /"unknown-agent"/);
+  assert.match(source, /"missing-runtime"/);
+  assert.match(source, /"queued-assigned"/);
+  assert.match(source, /elements\.navMonitorCount\.textContent = issues\.length/);
+  assert.match(source, /renderLeadMonitor\(\);\s*renderIntegration\(\)/);
+});
