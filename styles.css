@@ -2562,6 +2562,28 @@ td small {
   margin-top: 19px;
 }
 
+.form-actions button.is-loading {
+  cursor: wait;
+  opacity: 0.82;
+}
+
+.form-actions button.is-loading::before {
+  width: 15px;
+  height: 15px;
+  margin-right: 8px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  content: "";
+  display: inline-block;
+  vertical-align: -3px;
+  animation: integration-button-spin 0.7s linear infinite;
+}
+
+@keyframes integration-button-spin {
+  to { transform: rotate(360deg); }
+}
+
 .connection-result {
   display: flex;
   gap: 9px;

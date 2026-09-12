@@ -368,6 +368,21 @@ test('dashboard polling uses a two-second interval and shows global action loadi
   assert.match(css, /\.netflix-loader/);
 });
 
+test('Sheet controls are fixed at two seconds and always show manual sync feedback', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('styles.css', 'utf8');
+  assert.match(html, /<option value="2">2 saat<\/option>/);
+  assert.doesNotMatch(html, /<option value="5">5 saat<\/option>/);
+  assert.match(html, /id="save-integration-button"/);
+  assert.match(source, /function waitForCurrentSync\(\)/);
+  assert.match(source, /await waitForCurrentSync\(\)/);
+  assert.match(source, /runIntegrationSync\(elements\.saveIntegrationButton/);
+  assert.match(source, /elements\.syncNowButton\.addEventListener\("click", syncNow\)/);
+  assert.match(source, /Disambungkan\. Sync baru sahaja\./);
+  assert.match(css, /\.form-actions button\.is-loading::before/);
+});
+
 test('notification click fetches the assigned lead directly for an instant dashboard card', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const worker = fs.readFileSync('sw.js', 'utf8');

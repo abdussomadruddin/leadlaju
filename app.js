@@ -107,6 +107,7 @@ let activeView = "dashboard";
 let tickTimer;
 let syncTimer;
 let syncInProgress = false;
+let syncCompletionWaiters = [];
 let initialAgentSyncPromise = null;
 let signupProjectSyncTimer;
 let followUpReminderTimer;
@@ -286,6 +287,7 @@ const elements = {
   agentConfirmPassword: document.querySelector("#agent-confirm-password"),
   agentPasswordError: document.querySelector("#agent-password-error"),
   integrationForm: document.querySelector("#integration-form"),
+  saveIntegrationButton: document.querySelector("#save-integration-button"),
   sheetEndpoint: document.querySelector("#sheet-endpoint"),
   pollInterval: document.querySelector("#poll-interval"),
   syncNowButton: document.querySelector("#sync-now-button"),
@@ -4691,6 +4693,8 @@ async function syncGoogleSheet(options = {}) {
       state.integration.connected = true;
       state.integration.lastSyncAt = Date.now();
       saveState();
+      elements.connectionResult.classList.remove("error");
+      elements.connectionResult.innerHTML = '<span class="status-dot"></span><span>Disambungkan. Sync baru sahaja.</span>';
       return true;
     }
 
@@ -4747,6 +4751,8 @@ async function syncGoogleSheet(options = {}) {
     }
     scheduleSync();
     renderAll();
+    elements.connectionResult.classList.remove("error");
+    elements.connectionResult.innerHTML = '<span class="status-dot"></span><span>Disambungkan. Sync baru sahaja.</span>';
     enforceAgentNotificationAccess();
     const agentChanges =
       (agentSync.added || 0) +
@@ -4798,6 +4804,9 @@ async function syncGoogleSheet(options = {}) {
     return false;
   } finally {
     syncInProgress = false;
+    const waiters = syncCompletionWaiters;
+    syncCompletionWaiters = [];
+    waiters.forEach((resolve) => resolve());
   }
 }
 
@@ -4810,13 +4819,51 @@ function scheduleSync() {
   );
 }
 
+function waitForCurrentSync() {
+  if (!syncInProgress) return Promise.resolve();
+  return new Promise((resolve) => syncCompletionWaiters.push(resolve));
+}
+
+function setIntegrationButtonLoading(button, loading, label) {
+  if (!button) return;
+  if (!button.dataset.defaultLabel) button.dataset.defaultLabel = button.textContent.trim();
+  button.disabled = loading;
+  button.classList.toggle("is-loading", loading);
+  button.textContent = loading ? label : button.dataset.defaultLabel;
+}
+
+async function runIntegrationSync(button, loadingLabel, successTitle) {
+  setIntegrationButtonLoading(button, true, loadingLabel);
+  setGlobalLoading(true, loadingLabel);
+  try {
+    if (syncInProgress) {
+      elements.connectionResult.innerHTML = '<span class="status-dot"></span><span>Menunggu sync semasa selesai...</span>';
+      await waitForCurrentSync();
+    }
+    const success = await syncGoogleSheet({ silent: true });
+    if (!success) throw new Error("Google Sheet tidak dapat diselaraskan.");
+    showToast(successTitle, "Dashboard telah diselaraskan dengan Google Sheet.", "success");
+    return true;
+  } catch (error) {
+    showToast("Sync gagal", error?.message || "Semak URL dan cuba semula.", "error");
+    return false;
+  } finally {
+    setIntegrationButtonLoading(button, false, loadingLabel);
+    setGlobalLoading(false);
+  }
+}
+
 async function saveIntegration(event) {
   event.preventDefault();
   state.integration.endpoint = elements.sheetEndpoint.value.trim() || DEFAULT_GOOGLE_SHEET_ENDPOINT;
   state.integration.interval = DEFAULT_SYNC_INTERVAL_SECONDS;
   state.integration.connected = true;
   saveState();
-  syncGoogleSheet();
+  await runIntegrationSync(elements.saveIntegrationButton, "Menyimpan & menyambung...", "Sambungan disimpan");
+}
+
+async function syncNow() {
+  await runIntegrationSync(elements.syncNowButton, "Sedang sync...", "Sync selesai");
 }
 
 document.querySelectorAll("[data-view]").forEach((button) => {
@@ -4939,7 +4986,7 @@ elements.projectForm?.addEventListener("submit", addProject);
 elements.agentPasswordForm.addEventListener("submit", updateAgentPassword);
 elements.contactForm.addEventListener("submit", updateContact);
 elements.integrationForm.addEventListener("submit", saveIntegration);
-elements.syncNowButton.addEventListener("click", () => syncGoogleSheet());
+elements.syncNowButton.addEventListener("click", syncNow);
 elements.closePotentialReminder?.addEventListener("click", () => closeModal(elements.potentialReminderModal));
 elements.closeLeadAvailability?.addEventListener("click", () => closeModal(elements.leadAvailabilityModal));
 elements.refreshButton?.addEventListener("click", () => {
