@@ -63,6 +63,17 @@ test('server clears expired cooldown values before assignment', () => {
   assert.match(source, /clearExpiredAgentCooldowns_\(queueAgentsSheet, queueAgentHeaders\)/);
 });
 
+test('minute queue processing expires assignments even when the agent app is closed', () => {
+  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const start = source.indexOf('function notifyUnsentLeadPushes_(');
+  const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
+  assert.match(source, /function expireOverdueLeadAssignments_\(sheet, headers, now\)/);
+  assert.match(body, /expireOverdueLeadAssignments_\(sheet, headers, new Date\(\)\)/);
+  assert.ok(body.indexOf('expireOverdueLeadAssignments_') < body.indexOf('reconcileSingleActiveLead_'));
+  assert.match(source, /markLatestAssignmentOutcome_\(headers, row, "missed"/);
+  assert.match(source, /holdLeadRuntimeRow_\(sheet, headers, index \+ 1, row/);
+});
+
 test('burst assigns one per agent and holds excess without a timer', () => {
   const f = fixture(Array.from({ length: 6 }, (_, i) => lead(String(i))));
   f.run();

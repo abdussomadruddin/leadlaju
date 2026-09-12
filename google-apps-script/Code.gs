@@ -1123,6 +1123,36 @@ function reconcileSingleActiveLead_(sheet, headers) {
   return { queued };
 }
 
+function expireOverdueLeadAssignments_(sheet, headers, now) {
+  const values = sheet.getDataRange().getDisplayValues();
+  if (values.length < 2) return { expired: 0 };
+
+  const expiredAt = now || new Date();
+  const currentQueueCycle = Number(
+    PropertiesService.getScriptProperties().getProperty("leadlaju_queue_cycle") || 0,
+  );
+  let expired = 0;
+  for (let index = 1; index < values.length; index += 1) {
+    const lead = mapRow_(headers, values[index], index + 1);
+    const expiryTime = lead.expires_at ? parseLeadTimestamp_(lead.expires_at).getTime() : 0;
+    if (
+      normalizeLeadStage_(lead.status) !== "new" ||
+      lead.queue_state === "queued" ||
+      !lead.assigned_agent_id ||
+      !expiryTime ||
+      expiryTime > expiredAt.getTime()
+    ) continue;
+
+    const row = values[index].slice(0, headers.length);
+    markLatestAssignmentOutcome_(headers, row, "missed", expiredAt, currentQueueCycle);
+    setRowValue_(headers, row, "passCount", String((Number(lead.pass_count) || 0) + 1));
+    setRowValue_(headers, row, "retryAfterCycle", String(currentQueueCycle + 1));
+    holdLeadRuntimeRow_(sheet, headers, index + 1, row, { queuedAt: expiredAt });
+    expired += 1;
+  }
+  return { expired };
+}
+
 function replaceAgents_(agentsInput) {
   if (!Array.isArray(agentsInput)) {
     return { ok: false, error: "Senarai ejen tidak sah." };
@@ -2036,6 +2066,7 @@ function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
   if (!lock.tryLock(8000)) return { ok: false, error: "Push sync sedang berjalan." };
 
   try {
+    const expiryResult = expireOverdueLeadAssignments_(sheet, headers, new Date());
     reconcileSingleActiveLead_(sheet, headers);
     const values = sheet.getDataRange().getDisplayValues();
     if (values.length < 2) return { ok: true, sent: 0 };
@@ -2178,7 +2209,7 @@ function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
     properties.setProperty("leadlaju_project_round_robin_indexes", JSON.stringify(roundRobinIndexes));
     properties.setProperty("leadlaju_queue_cycle", String(queueCycle));
     if (changedKeys) saveLeadPushKeys_(notifiedKeys);
-    return { ok: true, sent };
+    return { ok: true, sent, expired: expiryResult.expired };
   } finally {
     lock.releaseLock();
   }
