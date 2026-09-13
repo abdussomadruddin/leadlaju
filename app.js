@@ -12,7 +12,8 @@ const DEFAULT_AGENT_PASSWORD = "Agent123!";
 const NOTIFICATION_ICON = "/assets/icon-192.png";
 const NOTIFICATION_BADGE = "/assets/badge-96.png";
 const MALAYSIA_TIME_ZONE = "Asia/Kuala_Lumpur";
-const DEFAULT_SYNC_INTERVAL_SECONDS = 2;
+const DEFAULT_SYNC_INTERVAL_SECONDS = 1;
+const SIGNUP_PROJECT_SYNC_INTERVAL_SECONDS = 2;
 const EXPIRY_WATCHDOG_INTERVAL_MS = 2500;
 const EXPIRY_RETRY_DELAY_MS = 3000;
 const FOLLOW_UP_REMINDER_SLOTS = [
@@ -149,6 +150,8 @@ let pendingNotificationLeadId = new URLSearchParams(window.location.search).get(
 let globalLoadingCount = 0;
 const expiryRequestStates = new Map();
 const leadTimingDeliveries = new Map();
+const authoritativeLeadGenerations = new Map();
+let authoritativeStateGeneration = 0;
 const locallyExpiredAssignments = new Set();
 
 const elements = {
@@ -799,7 +802,7 @@ function showSignupForm(show) {
     elements.signupForm.reset();
     renderSignupProjectOptions();
     syncSignupProjects();
-    signupProjectSyncTimer = window.setInterval(syncSignupProjects, DEFAULT_SYNC_INTERVAL_SECONDS * 1000);
+    signupProjectSyncTimer = window.setInterval(syncSignupProjects, SIGNUP_PROJECT_SYNC_INTERVAL_SECONDS * 1000);
     window.setTimeout(() => elements.signupName.focus(), 80);
   } else {
     window.setTimeout(() => elements.loginEmail.focus(), 80);
@@ -1527,6 +1530,7 @@ async function showNotificationLeadImmediately(leadSnapshot, timing = {}) {
     leadSnapshot.assigned_agent_name || leadSnapshot.assignedAgentName,
   )) return false;
   logLeadTiming("APP_SNAPSHOT_START", leadSnapshot, timing);
+  markAuthoritativeLeadCommit({ id: leadSnapshot.id });
   const savePromise = addLead(leadSnapshot, {
     silent: true,
     updateExisting: true,
@@ -2123,6 +2127,35 @@ function sheetDedupeKey(input) {
   return `${normalizePhone(phone)}-${String(project).trim()}-${input.created_at || input.createdAt || ""}`;
 }
 
+function authoritativeLeadKey(lead = {}) {
+  return String(lead.dedupeKey || lead.id || "").trim();
+}
+
+function markAuthoritativeLeadCommit(lead) {
+  const key = authoritativeLeadKey(lead);
+  if (!key) return;
+  authoritativeStateGeneration += 1;
+  authoritativeLeadGenerations.set(key, authoritativeStateGeneration);
+}
+
+function wasLeadCommittedAfterSyncStarted(lead, syncStateGeneration) {
+  if (!Number.isFinite(syncStateGeneration)) return false;
+  return (authoritativeLeadGenerations.get(authoritativeLeadKey(lead)) || 0) > syncStateGeneration;
+}
+
+function shouldIgnoreStaleSyncRow(existingLead, input, syncStateGeneration) {
+  if (!wasLeadCommittedAfterSyncStarted(existingLead, syncStateGeneration)) return false;
+  const incomingAssignmentRevision = Number(input.assignment_revision ?? input.assignmentRevision) || 0;
+  const incomingStatusRevision = Number(input.status_revision ?? input.statusRevision) || 0;
+  return incomingAssignmentRevision <= (Number(existingLead.assignmentRevision) || 0) &&
+    incomingStatusRevision <= (Number(existingLead.statusRevision) || 0);
+}
+
+function getLeadsRemovedBySync(sheetKeys, syncStateGeneration) {
+  return state.leads.filter((lead) =>
+    !sheetKeys.has(lead.dedupeKey) && !wasLeadCommittedAfterSyncStarted(lead, syncStateGeneration));
+}
+
 async function addLead(input, options = {}) {
   const name = String(input.name || input.full_name || input.fullName || "").trim();
   const phone = String(input.phone || input.phone_number || input.mobile || "").trim();
@@ -2146,6 +2179,9 @@ async function addLead(input, options = {}) {
 
   if (existingLead) {
     if (!options.updateExisting) return false;
+    if (shouldIgnoreStaleSyncRow(existingLead, input, options.syncStateGeneration)) return false;
+    if (sheetRuntime.hasRuntime &&
+      sheetRuntime.assignmentRevision < (Number(existingLead.assignmentRevision) || 0)) return false;
     if (pendingLeadStatusUpdates.has(existingLead.id)) return false;
     if ((Number(input.status_revision) || 0) < (existingLead.statusRevision || 0)) return false;
     if (options.syncStartedAt && options.syncStartedAt <= (leadStatusWriteTimes.get(existingLead.id) || 0)) return false;
@@ -5020,6 +5056,7 @@ async function syncGoogleSheet(options = {}) {
   }
   if (syncInProgress) return false;
   syncInProgress = true;
+  const syncStateGeneration = authoritativeStateGeneration;
 
   elements.connectionResult.classList.remove("error");
   elements.connectionResult.innerHTML = '<span class="status-dot"></span><span>Sedang menyemak Google Sheet...</span>';
@@ -5060,6 +5097,7 @@ async function syncGoogleSheet(options = {}) {
     for (const row of rows) {
       const result = await addLead(row, {
         syncStartedAt,
+        syncStateGeneration,
         silent: true,
         updateExisting: true,
         notify: shouldNotifyNewLeads,
@@ -5068,7 +5106,7 @@ async function syncGoogleSheet(options = {}) {
       if (result === "added") added += 1;
       if (result === "updated") updated += 1;
     }
-    const removedLeads = state.leads.filter((lead) => !sheetKeys.has(lead.dedupeKey));
+    const removedLeads = getLeadsRemovedBySync(sheetKeys, syncStateGeneration);
     let removed = removedLeads.length;
     if (remoteDatabaseMode && isAdmin()) {
       const { data, error } = await remoteDatabaseClient.rpc("delete_leads_not_in_dedupe_keys", {
@@ -5078,13 +5116,14 @@ async function syncGoogleSheet(options = {}) {
       removed = Number(data) || 0;
       if (removedLeads.length) {
         const removedIds = removedLeads.map((lead) => lead.id);
-        state.leads = state.leads.filter((lead) => sheetKeys.has(lead.dedupeKey));
+        state.leads = state.leads.filter((lead) => !removedIds.includes(lead.id));
         state.activities = state.activities.filter((activity) => !removedIds.includes(activity.leadId));
         saveState();
       }
     } else if (removedLeads.length) {
       await deleteLeads(removedLeads.map((lead) => lead.id));
     }
+    removedLeads.forEach((lead) => authoritativeLeadGenerations.delete(authoritativeLeadKey(lead)));
     const activatedQueuedLeads = [];
     // A scheduled read must never write agent totals back to the server. Runtime
     // counts and queue ownership are authoritative in Google Apps Script.

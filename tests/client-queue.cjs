@@ -14,6 +14,7 @@ test('delayed sync cannot overwrite a completed or pending status edit', async (
     leadStatusWriteTimes: new Map([['local', 200]]),
     sheetDedupeKey: () => 'sheet-id', normalizeLeadSource: () => 'Manual Lead',
     parseLeadTimestamp: () => 1, readLeadRuntimeFromSheet: () => ({}),
+    shouldIgnoreStaleSyncRow: () => false,
   });
   vm.runInContext(source.slice(start, end), context);
   const row = { name: 'Test', phone: '601234', status: 'Contacted' };
@@ -336,6 +337,106 @@ test('dashboard sync skips overlapping requests while a prior sync is running', 
   assert.match(body, /finally \{\s*syncInProgress = false/);
 });
 
+test('a pre-push sync cannot remove a newer service-worker assignment', async () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const helperStart = source.indexOf('function authoritativeLeadKey(');
+  const helperEnd = source.indexOf('\nasync function addLead(', helperStart);
+  const syncStart = source.indexOf('async function syncGoogleSheet(');
+  const syncEnd = source.indexOf('\nfunction scheduleSync(', syncStart);
+  let resolveOldResponse;
+  let fetchMode = 'old';
+  const renders = [];
+  const errors = [];
+  const context = vm.createContext({
+    state: {
+      leads: [], activities: [], agents: [], projects: [], appointments: [],
+      integration: { endpoint: 'https://sheet.test', interval: 1, connected: true, lastSyncAt: 1 },
+    },
+    authoritativeStateGeneration: 0,
+    authoritativeLeadGenerations: new Map(),
+    syncInProgress: false,
+    syncCompletionWaiters: [],
+    DEFAULT_SYNC_INTERVAL_SECONDS: 1,
+    remoteDatabaseMode: false,
+    Date, Number, Set, URL,
+    getSheetEndpoint: () => 'https://sheet.test',
+    fetch: () => fetchMode === 'old'
+      ? new Promise((resolve) => { resolveOldResponse = resolve; })
+      : Promise.resolve({
+        ok: true,
+        json: async () => fetchMode === 'confirmed' ? [{ id: 'lead-x' }] : [],
+      }),
+    elements: { connectionResult: { classList: { add() {}, remove() {} }, innerHTML: '' } },
+    syncAgentsFromSheet: async () => ({ added: 0, updated: 0, removed: 0 }),
+    sheetDedupeKey: (row) => row.id,
+    addLead: async () => false,
+    deleteLeads: async (ids) => {
+      context.state.leads = context.state.leads.filter((lead) => !ids.includes(lead.id));
+      return ids.length;
+    },
+    cleanupLocallyExpiredAssignments() {}, saveState() {}, scheduleSync() {},
+    renderAll: () => renders.push(context.state.leads.map((lead) => lead.id)),
+    enforceAgentNotificationAccess() {}, processAdminReminderFromSheet: async () => {},
+    getCurrentUser: () => null, isAdmin: () => false, showToast() {},
+    console: { error: (...args) => errors.push(args.map(String).join(' ')) },
+  });
+  vm.runInContext(source.slice(helperStart, helperEnd), context);
+  vm.runInContext(source.slice(syncStart, syncEnd), context);
+
+  const oldSync = context.syncGoogleSheet({ silent: true });
+  await Promise.resolve();
+  const pushedLead = {
+    id: 'local-17', dedupeKey: 'lead-x', status: 'new', queueState: 'active',
+    assignmentRevision: 17, statusRevision: 0,
+  };
+  context.state.leads.push(pushedLead);
+  context.markAuthoritativeLeadCommit(pushedLead);
+  context.renderAll();
+  assert.deepEqual(context.state.leads.map((lead) => lead.assignmentRevision), [17]);
+
+  resolveOldResponse({ ok: true, json: async () => [] });
+  assert.equal(await oldSync, true, errors.join('\n'));
+  assert.deepEqual(context.state.leads.map((lead) => lead.assignmentRevision), [17]);
+  assert.deepEqual(renders, [['local-17'], ['local-17']]);
+
+  fetchMode = 'confirmed';
+  assert.equal(await context.syncGoogleSheet({ silent: true }), true);
+  assert.equal(context.state.leads.length, 1);
+  assert.equal(context.state.leads[0].assignmentRevision, 17);
+
+  fetchMode = 'ended';
+  assert.equal(await context.syncGoogleSheet({ silent: true }), true);
+  assert.deepEqual(context.state.leads, []);
+  assert.deepEqual(renders.at(-1), []);
+});
+
+test('newer assignment and status revisions reject stale rows but accept newer authority', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const helperStart = source.indexOf('function authoritativeLeadKey(');
+  const helperEnd = source.indexOf('\nasync function addLead(', helperStart);
+  const lead = {
+    id: 'local-18', dedupeKey: 'lead-x', assignmentRevision: 18, statusRevision: 4,
+  };
+  const context = vm.createContext({
+    state: { leads: [lead] },
+    authoritativeStateGeneration: 0,
+    authoritativeLeadGenerations: new Map(),
+    Number, String,
+  });
+  vm.runInContext(source.slice(helperStart, helperEnd), context);
+  const syncGeneration = context.authoritativeStateGeneration;
+  context.markAuthoritativeLeadCommit(lead);
+
+  assert.equal(context.shouldIgnoreStaleSyncRow(
+    lead, { assignment_revision: 17, status_revision: 4 }, syncGeneration), true);
+  assert.equal(context.shouldIgnoreStaleSyncRow(
+    lead, { assignment_revision: 18, status_revision: 3 }, syncGeneration), true);
+  assert.equal(context.shouldIgnoreStaleSyncRow(
+    lead, { assignment_revision: 19, status_revision: 0 }, syncGeneration), false);
+  assert.equal(context.shouldIgnoreStaleSyncRow(
+    lead, { assignment_revision: 18, status_revision: 5 }, syncGeneration), false);
+});
+
 test('every device blocks agent access until its own notification permission is granted', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const html = fs.readFileSync('index.html', 'utf8');
@@ -403,21 +504,26 @@ test('agents explicitly start and stop lead availability from the dashboard', ()
   assert.match(html, /id="lead-availability-modal"/);
 });
 
-test('dashboard polling uses a two-second interval and shows global action loading', () => {
+test('dashboard polling uses a one-second interval while unrelated timers remain unchanged', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const html = fs.readFileSync('index.html', 'utf8');
   const css = fs.readFileSync('styles.css', 'utf8');
-  assert.match(source, /const DEFAULT_SYNC_INTERVAL_SECONDS = 2/);
+  assert.match(source, /const DEFAULT_SYNC_INTERVAL_SECONDS = 1/);
+  assert.match(source, /const SIGNUP_PROJECT_SYNC_INTERVAL_SECONDS = 2/);
+  assert.match(source, /const EXPIRY_WATCHDOG_INTERVAL_MS = 2500/);
+  assert.match(source, /window\.setInterval\(syncSignupProjects, SIGNUP_PROJECT_SYNC_INTERVAL_SECONDS \* 1000\)/);
+  assert.match(source, /DEFAULT_SYNC_INTERVAL_SECONDS \* 1000/);
   assert.match(source, /function setGlobalLoading\(active/);
   assert.match(html, /id="global-loading-overlay"/);
   assert.match(css, /\.netflix-loader/);
 });
 
-test('Sheet controls are fixed at two seconds and always show manual sync feedback', () => {
+test('Sheet controls are fixed at one second and always show manual sync feedback', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const html = fs.readFileSync('index.html', 'utf8');
   const css = fs.readFileSync('styles.css', 'utf8');
-  assert.match(html, /<option value="2">2 saat<\/option>/);
+  assert.match(html, /<option value="1">1 saat<\/option>/);
+  assert.doesNotMatch(html, /<option value="2">2 saat<\/option>/);
   assert.doesNotMatch(html, /<option value="5">5 saat<\/option>/);
   assert.match(html, /id="save-integration-button"/);
   assert.match(source, /function waitForCurrentSync\(\)/);
@@ -477,6 +583,7 @@ test('notification timing instrumentation leaves the immediate snapshot render p
     document: { visibilityState: 'visible', hasFocus: () => true },
     navigator: { serviceWorker: { controller: {} } },
     getCurrentUser: () => ({ role: 'agent' }),
+    markAuthoritativeLeadCommit() {},
     currentAgentMatches: () => true,
     switchView() {},
     canAccessLead: () => true,
