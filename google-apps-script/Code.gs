@@ -1023,6 +1023,11 @@ function expireLead_(input) {
         result = { ok: false, stale: true, error: "Lead bukan lagi aktif." };
         break;
       }
+      const expiryTime = lead.expires_at ? parseLeadTimestamp_(lead.expires_at).getTime() : 0;
+      if (!expiryTime || Date.now() < expiryTime) {
+        result = { ok: false, error: "Masa assignment lead belum tamat." };
+        break;
+      }
       const row = values[index].slice(0, headers.length);
       const currentQueueCycle = Number(
         PropertiesService.getScriptProperties().getProperty("leadlaju_queue_cycle") || 0,
@@ -2126,6 +2131,18 @@ function nextAvailableAgentForLead_(lead, agents, occupied, roundRobinIndex, que
   return ordered[0];
 }
 
+function alternateQueueEdges_(candidates, startWithLatest) {
+  const ordered = [];
+  let left = 0;
+  let right = candidates.length - 1;
+  let takeLatest = Boolean(startWithLatest);
+  while (left <= right) {
+    ordered.push(takeLatest ? candidates[right--] : candidates[left++]);
+    takeLatest = !takeLatest;
+  }
+  return ordered;
+}
+
 function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(8000)) return { ok: false, error: "Push sync sedang berjalan." };
@@ -2162,6 +2179,7 @@ function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
     let roundRobinIndexes;
     try { roundRobinIndexes = JSON.parse(properties.getProperty("leadlaju_project_round_robin_indexes") || "{}"); } catch (error) { roundRobinIndexes = {}; }
     let queueCycle = Number(properties.getProperty("leadlaju_queue_cycle") || 0);
+    let pickLatestNext = properties.getProperty("leadlaju_queue_pick_latest_next") === "true";
     let sent = 0;
     let changedKeys = false;
 
@@ -2176,7 +2194,7 @@ function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
       }
     }
 
-    const candidates = values.slice(1)
+    const sortedCandidates = values.slice(1)
       .map((row, index) => ({ rowNumber: index + 2, row: row.slice(0, headers.length), lead: mapRow_(headers, row, index + 2) }))
       .filter(({ lead }) => lead.name && lead.phone && normalizeLeadStage_(lead.status) === "new")
       .sort((a, b) => {
@@ -2189,6 +2207,17 @@ function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
         const bTime = bPriority === 2 ? parseLeadTimestamp_(b.lead.queued_at).getTime() : parseLeadTimestamp_(b.lead.created_at).getTime();
         return aTime - bTime || a.rowNumber - b.rowNumber;
       });
+    const assignedCandidates = sortedCandidates.filter(({ lead }) =>
+      lead.queue_state !== "queued" && Boolean(lead.assigned_agent_id));
+    const freshCandidates = sortedCandidates.filter(({ lead }) =>
+      !(lead.queue_state !== "queued" && Boolean(lead.assigned_agent_id)) &&
+      (Number(lead.pass_count) || 0) === 0);
+    const retryCandidates = sortedCandidates.filter(({ lead }) =>
+      !(lead.queue_state !== "queued" && Boolean(lead.assigned_agent_id)) &&
+      (Number(lead.pass_count) || 0) > 0);
+    const candidates = assignedCandidates
+      .concat(alternateQueueEdges_(freshCandidates, pickLatestNext))
+      .concat(alternateQueueEdges_(retryCandidates, pickLatestNext));
 
     for (const candidate of candidates) {
       const { rowNumber, row, lead } = candidate;
@@ -2217,6 +2246,7 @@ function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
         if ((Number(lead.pass_count) || 0) === 0) queueCycle += 1;
         runtime = assignLeadRuntimeRow_(sheet, headers, rowNumber, row, agent, new Date(), queueCycle);
         occupied.set(agent.id, rowNumber - 1);
+        pickLatestNext = !pickLatestNext;
       }
 
       const notificationKey = `${lead.id}:${agent.id}:${runtime.received_at || ""}`;
@@ -2273,6 +2303,7 @@ function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
 
     properties.setProperty("leadlaju_project_round_robin_indexes", JSON.stringify(roundRobinIndexes));
     properties.setProperty("leadlaju_queue_cycle", String(queueCycle));
+    properties.setProperty("leadlaju_queue_pick_latest_next", String(pickLatestNext));
     if (changedKeys) saveLeadPushKeys_(notifiedKeys);
     return { ok: true, sent, expired: expiryResult.expired };
   } finally {

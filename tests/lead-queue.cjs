@@ -126,18 +126,58 @@ test('stale expiry rejection does not invoke a new dispatch', () => {
   assert.equal(rows.filter(row => row.queue_state === 'active').length, 1);
 });
 
+test('server rejects frontend expiry before authoritative expires_at without dispatching', () => {
+  const now = Date.now();
+  const futureExpiry = new Date(now + 60_000).toISOString();
+  const f = fixture([
+    lead('not-expired', {
+      assigned_agent_id: 'a', queue_state: 'active', assignment_revision: '2',
+      expires_at: futureExpiry, assignment_history: JSON.stringify([{ agentId: 'a', outcome: 'pending' }]),
+    }),
+    lead('waiting'),
+  ], [{ id: 'a', eligible_project_ids: ['project-armani'] }], { nowMs: now });
+
+  const result = f.expire({ id: 'not-expired', assignment_revision: 2 });
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'Masa assignment lead belum tamat.');
+  const rows = f.rows();
+  assert.equal(rows.find(row => row.id === 'not-expired').queue_state, 'active');
+  assert.equal(rows.find(row => row.id === 'not-expired').assignment_revision, '2');
+  assert.equal(rows.find(row => row.id === 'not-expired').assignment_history.at(-1).outcome, 'pending');
+  assert.equal(rows.find(row => row.id === 'waiting').assigned_agent_id, '');
+});
+
 test('burst assigns one per agent and holds excess without a timer', () => {
-  const f = fixture(Array.from({ length: 6 }, (_, i) => lead(String(i))));
+  const f = fixture(Array.from({ length: 6 }, (_, i) => lead(String(i), {
+    created_at: new Date(Date.UTC(2026, 8, 10, 0, i)).toISOString(),
+  })));
   f.run();
   const rows = f.rows();
-  assert.deepEqual(rows.slice(0, 2).map(row => row.assigned_agent_id), ['a', 'b']);
-  rows.slice(2).forEach(row => {
+  assert.equal(rows[0].assigned_agent_id, 'a');
+  assert.equal(rows[5].assigned_agent_id, 'b');
+  rows.slice(1, 5).forEach(row => {
     assert.equal(row.queue_state, 'queued');
     assert.equal(row.assigned_agent_id, '');
     assert.equal(row.expires_at, '');
   });
   f.run();
   assert.equal(f.rows().filter(row => row.queue_state === 'active').length, 2);
+});
+
+test('queue alternates oldest and latest leads across online-agent rotations', () => {
+  const f = fixture(['oldest', 'middle', 'latest'].map((id, index) => lead(id, {
+    created_at: new Date(Date.UTC(2026, 8, 10, 0, index)).toISOString(),
+  })), [{ id: 'a', eligible_project_ids: ['project-armani'] }]);
+
+  f.run();
+  assert.equal(f.rows()[0].assigned_agent_id, 'a');
+  assert.equal(f.properties.get('leadlaju_queue_pick_latest_next'), 'true');
+
+  f.handled(0);
+  f.run();
+  assert.equal(f.rows()[2].assigned_agent_id, 'a');
+  assert.equal(f.rows()[1].queue_state, 'queued');
+  assert.equal(f.properties.get('leadlaju_queue_pick_latest_next'), 'false');
 });
 
 test('existing assignments reserve slots even below queued rows', () => {

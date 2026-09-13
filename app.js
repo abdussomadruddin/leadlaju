@@ -133,6 +133,8 @@ let claimingLeadId = null;
 const pendingLeadStatusUpdates = new Map();
 const leadStatusWriteTimes = new Map();
 const pendingLeadNoteUpdates = new Map();
+const pendingAgentApprovals = new Set();
+const missingSheetAgentCounts = new Map();
 let serviceWorkerRegistrationPromise = null;
 let notificationAudioContext = null;
 let lastAgentPresenceHeartbeatAt = 0;
@@ -2838,6 +2840,7 @@ async function syncAgentsFromSheet(sheetAgentRows) {
   }
 
   const sheetEmails = new Set(sheetAgents.map((agent) => agent.email));
+  sheetEmails.forEach((email) => missingSheetAgentCounts.delete(email));
   let reloadRemote = false;
 
   for (const sheetAgent of sheetAgents) {
@@ -2848,7 +2851,11 @@ async function syncAgentsFromSheet(sheetAgentRows) {
 
     if (existingAgent) {
       const nextActive =
-        existingAgent.id === state.currentUserId && existingAgent.role === "admin" ? true : sheetAgent.active;
+        existingAgent.id === state.currentUserId && existingAgent.role === "admin"
+          ? true
+          : pendingAgentApprovals.has(existingAgent.id)
+            ? existingAgent.active
+            : sheetAgent.active;
       const updates = {
         name: sheetAgent.name,
         phone: sheetAgent.phone,
@@ -2905,10 +2912,18 @@ async function syncAgentsFromSheet(sheetAgentRows) {
     (agent) =>
       agent.role === "agent" &&
       agent.id !== state.currentUserId &&
-      !sheetEmails.has(String(agent.email || "").toLowerCase()),
+      !pendingAgentApprovals.has(agent.id) &&
+      !sheetEmails.has(String(agent.email || "").toLowerCase()) &&
+      (() => {
+        const email = String(agent.email || "").toLowerCase();
+        const misses = (missingSheetAgentCounts.get(email) || 0) + 1;
+        missingSheetAgentCounts.set(email, misses);
+        return misses >= 3;
+      })(),
   );
 
   for (const agent of removedAgents) {
+    missingSheetAgentCounts.delete(String(agent.email || "").toLowerCase());
     state.agents = state.agents.filter((item) => item.id !== agent.id);
     result.removed += 1;
   }
@@ -4688,15 +4703,23 @@ async function addAgent(event) {
 
 async function approveAgent(agentId) {
   const agent = getAgent(agentId);
-  if (!agent || agent.active) return;
+  if (!agent || agent.active || pendingAgentApprovals.has(agentId)) return;
   if (!normalizeProjectIds(agent.eligibleProjectIds).length) {
     showToast("Pilih projek dahulu", `Edit ${agent.name} dan tick sekurang-kurangnya satu projek sebelum approve.`, "error");
     openAgentModal(agentId);
     return;
   }
-  agent.active = true;
-  saveState();
+  const approveButton = [...elements.agentsGrid.querySelectorAll("[data-agent-approve]")]
+    .find((button) => button.dataset.agentApprove === agentId);
+  pendingAgentApprovals.add(agentId);
+  if (approveButton) {
+    approveButton.disabled = true;
+    approveButton.classList.add("is-loading");
+    approveButton.setAttribute("aria-busy", "true");
+  }
+  setGlobalLoading(true, `Sedang approve ${agent.name}...`);
   try {
+    await waitForCurrentSync();
     if (remoteDatabaseMode) {
       const { data, error } = await remoteDatabaseClient.functions.invoke("admin-manage-agent", {
         body: { action: "approve", userId: agentId },
@@ -4706,26 +4729,36 @@ async function approveAgent(agentId) {
       }
       await loadRemoteState(state.currentUserId);
     } else {
-      await persistProfile(agent);
+      const result = await submitAgentSignupToSheet({ ...agent, active: true });
+      if (!result?.ok) throw new Error(result?.error || "Akaun ejen tidak dapat diapprove.");
     }
+    const approvedAgent = getAgent(agentId) || agent;
+    approvedAgent.active = true;
+    saveState();
+    await syncGoogleSheetFresh({ silent: true, agentsOnly: true });
+    const confirmedAgent = getAgent(agentId) || approvedAgent;
+    confirmedAgent.active = true;
+    saveState();
+    renderAll();
+    showToast("Ejen approved", `${confirmedAgent.name} kini aktif dan dipaparkan dalam dashboard.`, "success");
   } catch (error) {
-    agent.active = false;
+    const currentAgent = getAgent(agentId);
+    if (currentAgent) currentAgent.active = false;
     saveState();
     console.error(error);
     showToast("Approval gagal", error.message || "Semak sambungan Google Sheet.", "error");
     renderAll();
-    return;
+  } finally {
+    pendingAgentApprovals.delete(agentId);
+    setGlobalLoading(false);
+    const currentButton = [...elements.agentsGrid.querySelectorAll("[data-agent-approve]")]
+      .find((button) => button.dataset.agentApprove === agentId);
+    if (currentButton) {
+      currentButton.disabled = false;
+      currentButton.classList.remove("is-loading");
+      currentButton.removeAttribute("aria-busy");
+    }
   }
-  const approvedAgent = getAgent(agentId) || agent;
-  const agentsPushed = await upsertAgentToSheet(approvedAgent);
-  showToast(
-    agentsPushed ? "Ejen approved" : "Ejen approved",
-    agentsPushed
-      ? `${approvedAgent.name} kini aktif dan telah dimasukkan ke Google Sheet.`
-      : `${approvedAgent.name} kini aktif. Google Sheet belum dapat dikemas kini.`,
-    agentsPushed ? "success" : "error",
-  );
-  renderAll();
 }
 
 async function saveProject(project) {

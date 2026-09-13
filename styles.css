@@ -2594,6 +2594,25 @@ td small {
   border-color: #b9eed4;
 }
 
+.agent-card-actions .approve-agent.is-loading {
+  color: transparent;
+  cursor: wait;
+  position: relative;
+}
+
+.agent-card-actions .approve-agent.is-loading::after {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  inset: 50% auto auto 50%;
+  border: 2px solid rgba(15, 122, 77, 0.25);
+  border-top-color: #0f7a4d;
+  border-radius: 50%;
+  content: "";
+  animation: loading-spin 650ms linear infinite;
+  transform: translate(-50%, -50%);
+}
+
 .agent-card-actions .reject-agent {
   color: var(--red-dark);
   background: #fff0f0;

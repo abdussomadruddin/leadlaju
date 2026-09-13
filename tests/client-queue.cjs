@@ -208,6 +208,24 @@ test('agent signup requires and syncs active project choices', () => {
   assert.match(server, /adminOnly: true/);
 });
 
+test('agent approval waits for authoritative confirmation and protects the pending card from stale sync', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const start = source.indexOf('async function approveAgent(');
+  const body = source.slice(start, source.indexOf('\nasync function ', start + 1));
+  assert.match(source, /const pendingAgentApprovals = new Set\(\)/);
+  assert.match(source, /const missingSheetAgentCounts = new Map\(\)/);
+  assert.match(source, /pendingAgentApprovals\.has\(existingAgent\.id\)[\s\S]*existingAgent\.active/);
+  assert.match(source, /!pendingAgentApprovals\.has\(agent\.id\)/);
+  assert.match(source, /return misses >= 3/);
+  assert.match(body, /pendingAgentApprovals\.add\(agentId\)/);
+  assert.match(body, /setGlobalLoading\(true, `Sedang approve/);
+  assert.match(body, /await waitForCurrentSync\(\)/);
+  assert.match(body, /await submitAgentSignupToSheet\(\{ \.\.\.agent, active: true \}\)/);
+  assert.match(body, /await syncGoogleSheetFresh\(\{ silent: true, agentsOnly: true \}\)/);
+  assert.ok(body.indexOf('renderAll();') < body.indexOf('showToast("Ejen approved"'));
+  assert.match(body, /finally[\s\S]*pendingAgentApprovals\.delete\(agentId\)[\s\S]*setGlobalLoading\(false\)/);
+});
+
 test('lead and agent deletion require two confirmations', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const helperStart = source.indexOf('function confirmPermanentDelete(');
