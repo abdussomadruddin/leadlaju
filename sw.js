@@ -20,13 +20,18 @@ function leadTimingKey(payload = {}) {
   return `${leadId}:${revision}`;
 }
 
-function logLeadTiming(eventName, payload = {}) {
-  const timing = {
-    key: leadTimingKey(payload),
-    epoch: Date.now(),
-    performance: typeof self.performance?.now === "function" ? self.performance.now() : null,
-  };
-  console.log(`[LeadLajuTiming] ${eventName}`, timing);
+function createLeadTiming(payload = {}) {
+  return { key: leadTimingKey(payload) };
+}
+
+function logLeadTiming(eventName, timing = {}) {
+  console.log(`[LeadLajuTiming] ${JSON.stringify({
+    event: eventName,
+    key: timing.key || "",
+    swPushEpoch: Number(timing.swPushEpoch) || null,
+    swBroadcastStartEpoch: Number(timing.swBroadcastStartEpoch) || null,
+    swBroadcastCompleteEpoch: Number(timing.swBroadcastCompleteEpoch) || null,
+  })}`);
 }
 
 self.addEventListener("install", (event) => {
@@ -93,8 +98,8 @@ async function cacheLeadSnapshot(payload = {}) {
   );
 }
 
-async function showLeadNotification(payload = {}) {
-  logLeadTiming("SW_NOTIFICATION_START", payload);
+async function showLeadNotification(payload = {}, timing = createLeadTiming(payload)) {
+  logLeadTiming("SW_NOTIFICATION_START", timing);
   await cacheLeadSnapshot(payload);
   const title = payload.title || "Lead baru masuk";
   const options = {
@@ -125,16 +130,33 @@ async function showLeadNotification(payload = {}) {
   await self.registration.showNotification(title, options);
 }
 
-async function broadcastLeadSnapshot(payload = {}) {
+async function broadcastLeadSnapshot(payload = {}, timing = createLeadTiming(payload)) {
   if (!payload.leadId || !payload.leadSnapshot) return;
-  logLeadTiming("SW_BROADCAST_START", payload);
+  timing.swBroadcastStartEpoch = Date.now();
+  logLeadTiming("SW_BROADCAST_START", timing);
   const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
   clients.forEach((client) => client.postMessage({
     type: "LEAD_SNAPSHOT",
     leadId: payload.leadId,
     leadSnapshot: payload.leadSnapshot,
+    timing: {
+      key: timing.key,
+      swPushEpoch: Number(timing.swPushEpoch) || null,
+      swBroadcastStartEpoch: timing.swBroadcastStartEpoch,
+      swBroadcastCompleteEpoch: null,
+    },
   }));
-  logLeadTiming("SW_BROADCAST_COMPLETE", payload);
+  timing.swBroadcastCompleteEpoch = Date.now();
+  logLeadTiming("SW_BROADCAST_COMPLETE", timing);
+  clients.forEach((client) => client.postMessage({
+    type: "LEAD_SNAPSHOT_TIMING",
+    timing: {
+      key: timing.key,
+      swPushEpoch: Number(timing.swPushEpoch) || null,
+      swBroadcastStartEpoch: timing.swBroadcastStartEpoch,
+      swBroadcastCompleteEpoch: timing.swBroadcastCompleteEpoch,
+    },
+  }));
 }
 
 self.addEventListener("message", (event) => {
@@ -143,9 +165,10 @@ self.addEventListener("message", (event) => {
     return;
   }
   if (event.data?.type === "LEAD_NOTIFICATION") {
+    const timing = createLeadTiming(event.data.payload);
     event.waitUntil(Promise.all([
-      showLeadNotification(event.data.payload),
-      broadcastLeadSnapshot(event.data.payload),
+      showLeadNotification(event.data.payload, timing),
+      broadcastLeadSnapshot(event.data.payload, timing),
     ]));
   }
 });
@@ -157,10 +180,12 @@ self.addEventListener("push", (event) => {
   } catch {
     payload = { body: event.data?.text() };
   }
-  logLeadTiming("SW_PUSH", payload);
+  const timing = createLeadTiming(payload);
+  timing.swPushEpoch = Date.now();
+  logLeadTiming("SW_PUSH", timing);
   event.waitUntil(Promise.all([
-    showLeadNotification(payload),
-    broadcastLeadSnapshot(payload),
+    showLeadNotification(payload, timing),
+    broadcastLeadSnapshot(payload, timing),
   ]));
 });
 

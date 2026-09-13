@@ -500,7 +500,7 @@ test('notification timing instrumentation leaves the immediate snapshot render p
   assert.deepEqual(context.state.leads[0], { id: 'local-id', dedupeKey: 'lead-timing', assignmentRevision: 9 });
   assert.ok(logs.some(([event]) => event === 'render'));
   assert.ok(logs.some(([event]) => String(event).includes('APP_STATE_COMMIT')));
-  assert.ok(logs.every(([event, details]) => event === 'render' || (!JSON.stringify(details).includes('phone') && !JSON.stringify(details).includes('email') && !JSON.stringify(details).includes('notes'))));
+  assert.ok(logs.every(([event]) => event === 'render' || (!String(event).includes('phone') && !String(event).includes('email') && !String(event).includes('notes'))));
   releaseSave();
   assert.equal(await pending, true);
 });
@@ -510,14 +510,78 @@ test('service worker timing logs only correlation and timing metadata', () => {
   const timingStart = worker.indexOf('function logLeadTiming(');
   const timingEnd = worker.indexOf('\nself.addEventListener("install"', timingStart);
   const timingBody = worker.slice(timingStart, timingEnd);
-  assert.match(worker, /logLeadTiming\("SW_PUSH", payload\)/);
-  assert.match(worker, /logLeadTiming\("SW_NOTIFICATION_START", payload\)/);
-  assert.match(worker, /logLeadTiming\("SW_BROADCAST_START", payload\)/);
-  assert.match(worker, /logLeadTiming\("SW_BROADCAST_COMPLETE", payload\)/);
-  assert.match(timingBody, /key: leadTimingKey\(payload\)/);
-  assert.match(timingBody, /epoch: Date\.now\(\)/);
-  assert.match(timingBody, /performance:/);
+  assert.match(worker, /logLeadTiming\("SW_PUSH", timing\)/);
+  assert.match(worker, /logLeadTiming\("SW_NOTIFICATION_START", timing\)/);
+  assert.match(worker, /logLeadTiming\("SW_BROADCAST_START", timing\)/);
+  assert.match(worker, /logLeadTiming\("SW_BROADCAST_COMPLETE", timing\)/);
+  assert.match(timingBody, /JSON\.stringify/);
+  assert.match(timingBody, /swPushEpoch/);
+  assert.match(timingBody, /swBroadcastStartEpoch/);
+  assert.match(timingBody, /swBroadcastCompleteEpoch/);
   assert.doesNotMatch(timingBody, /payload\.(leadSnapshot|phone|email|name|notes)/);
+});
+
+test('service worker sends timing metadata separately from the canonical lead snapshot', () => {
+  const worker = fs.readFileSync('sw.js', 'utf8');
+  const start = worker.indexOf('async function broadcastLeadSnapshot');
+  const end = worker.indexOf('\nself.addEventListener("message"', start);
+  const body = worker.slice(start, end);
+  assert.match(body, /leadSnapshot: payload\.leadSnapshot/);
+  assert.match(body, /timing: \{/);
+  assert.match(body, /swPushEpoch:/);
+  assert.match(body, /swBroadcastStartEpoch:/);
+  assert.match(body, /swBroadcastCompleteEpoch:/);
+  assert.match(body, /type: "LEAD_SNAPSHOT_TIMING"/);
+  assert.doesNotMatch(body, /payload\.leadSnapshot\.(timing|swPushEpoch|swBroadcastStartEpoch|swBroadcastCompleteEpoch)/);
+});
+
+test('app writes a readable single-line delivery trace without lead business data', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const start = source.indexOf('function logLeadTiming(');
+  const end = source.indexOf('\nfunction timingSnapshotLead', start);
+  const body = source.slice(start, end);
+  assert.match(body, /eventName === "DELIVERY_TRACE"/);
+  assert.match(body, /pushToBroadcastStartMs/);
+  assert.match(body, /broadcastDurationMs/);
+  assert.match(body, /broadcastCompleteToAppMs/);
+  assert.match(body, /pushToAppMs/);
+  assert.match(body, /JSON\.stringify\(entry\)/);
+  assert.doesNotMatch(body, /(phone|email|name|notes|project|source):/);
+  const logs = [];
+  const context = vm.createContext({
+    Date: { now: () => 160 }, Number, String,
+    console: { log: (line) => logs.push(line) },
+    document: { visibilityState: 'visible', hasFocus: () => true },
+    navigator: { serviceWorker: { controller: {} } },
+    getCurrentUser: () => ({ role: 'agent' }),
+  });
+  vm.runInContext(source.slice(source.indexOf('function leadTimingKey('), end), context);
+  context.logLeadTiming('DELIVERY_TRACE', { id: 'lead-123', assignment_revision: 7, phone: 'not-logged' }, {
+    key: 'lead-123:7', swPushEpoch: 100, swBroadcastStartEpoch: 110,
+    swBroadcastCompleteEpoch: 120, appMessageReceivedEpoch: 150,
+  }, 160);
+  const entry = JSON.parse(logs[0].replace('[LeadLajuTiming] ', ''));
+  assert.equal(entry.key, 'lead-123:7');
+  assert.equal(entry.pushToBroadcastStartMs, 10);
+  assert.equal(entry.broadcastDurationMs, 10);
+  assert.equal(entry.broadcastCompleteToAppMs, 30);
+  assert.equal(entry.pushToAppMs, 50);
+  assert.equal(Object.hasOwn(entry, 'phone'), false);
+});
+
+test('snapshot timing is passed only to diagnostics and not to canonical lead state', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const messageStart = source.indexOf('navigator.serviceWorker.addEventListener("message"');
+  const messageBody = source.slice(messageStart, source.indexOf('\nwindow.addEventListener("beforeinstallprompt"', messageStart));
+  assert.match(messageBody, /const timing = \{ \.\.\.\(event\.data\.timing \|\| \{\}\), appMessageReceivedEpoch \}/);
+  assert.match(messageBody, /showNotificationLeadImmediately\(event\.data\.leadSnapshot, timing\)/);
+  assert.match(messageBody, /leadTimingDeliveries\.set/);
+  assert.match(messageBody, /event\.data\?\.type === "LEAD_SNAPSHOT_TIMING"/);
+  assert.match(messageBody, /logLeadTiming\("DELIVERY_TRACE"/);
+  assert.doesNotMatch(messageBody, /leadSnapshot\.timing/);
+  const addLeadStart = source.indexOf('async function addLead(');
+  const addLeadBody = source.slice(addLeadStart, source.indexOf('\nfunction openManualLeadModal', addLeadStart));
+  assert.doesNotMatch(addLeadBody, /timing/);
 });
 
 test('login UI is not blocked by the initial Google Sheet agent sync', () => {

@@ -148,6 +148,7 @@ let pendingPotentialReminder = new URLSearchParams(window.location.search).get("
 let pendingNotificationLeadId = new URLSearchParams(window.location.search).get("lead") || "";
 let globalLoadingCount = 0;
 const expiryRequestStates = new Map();
+const leadTimingDeliveries = new Map();
 const locallyExpiredAssignments = new Set();
 
 const elements = {
@@ -1434,16 +1435,34 @@ function leadTimingKey(lead = {}) {
   return `${leadId}:${revision}`;
 }
 
-function logLeadTiming(eventName, lead = {}) {
-  console.log(`[LeadLajuTiming] ${eventName}`, {
-    key: leadTimingKey(lead),
-    epoch: Date.now(),
-    performance: typeof performance?.now === "function" ? performance.now() : null,
+function logLeadTiming(eventName, lead = {}, timing = {}, appEpoch = Date.now()) {
+  const swPushEpoch = Number(timing.swPushEpoch) || null;
+  const swBroadcastStartEpoch = Number(timing.swBroadcastStartEpoch) || null;
+  const swBroadcastCompleteEpoch = Number(timing.swBroadcastCompleteEpoch) || null;
+  const entry = {
+    event: eventName,
+    key: String(timing.key || leadTimingKey(lead)),
+    swPushEpoch,
+    swBroadcastStartEpoch,
+    swBroadcastCompleteEpoch,
+    appMessageReceivedEpoch: Number(timing.appMessageReceivedEpoch) || null,
+    appEpoch,
     visibility: document.visibilityState,
     focused: document.hasFocus(),
-    role: getCurrentUser()?.role || "none",
     controlled: Boolean(navigator.serviceWorker?.controller),
-  });
+    role: getCurrentUser()?.role || "none",
+  };
+  if (eventName === "DELIVERY_TRACE") {
+    entry.pushToBroadcastStartMs = swPushEpoch && swBroadcastStartEpoch
+      ? swBroadcastStartEpoch - swPushEpoch : null;
+    entry.broadcastDurationMs = swBroadcastStartEpoch && swBroadcastCompleteEpoch
+      ? swBroadcastCompleteEpoch - swBroadcastStartEpoch : null;
+    entry.broadcastCompleteToAppMs = swBroadcastCompleteEpoch && entry.appMessageReceivedEpoch
+      ? entry.appMessageReceivedEpoch - swBroadcastCompleteEpoch : null;
+    entry.pushToAppMs = swPushEpoch && entry.appMessageReceivedEpoch
+      ? entry.appMessageReceivedEpoch - swPushEpoch : null;
+  }
+  console.log(`[LeadLajuTiming] ${JSON.stringify(entry)}`);
 }
 
 function timingSnapshotLead(leadSnapshot) {
@@ -1501,31 +1520,31 @@ async function syncNotificationLead(leadId) {
   }
 }
 
-async function showNotificationLeadImmediately(leadSnapshot) {
+async function showNotificationLeadImmediately(leadSnapshot, timing = {}) {
   if (!leadSnapshot?.id || !currentAgentMatches(
     leadSnapshot.assigned_agent_id || leadSnapshot.assignedAgentId,
     leadSnapshot.assigned_agent_email || leadSnapshot.assignedAgentEmail,
     leadSnapshot.assigned_agent_name || leadSnapshot.assignedAgentName,
   )) return false;
-  logLeadTiming("APP_SNAPSHOT_START", leadSnapshot);
+  logLeadTiming("APP_SNAPSHOT_START", leadSnapshot, timing);
   const savePromise = addLead(leadSnapshot, {
     silent: true,
     updateExisting: true,
     notify: false,
     queueIfBlocked: true,
-    onStateCommit: () => logLeadTiming("APP_STATE_COMMIT", leadSnapshot),
+    onStateCommit: () => logLeadTiming("APP_STATE_COMMIT", leadSnapshot, timing),
   });
   switchView("dashboard");
-  logLeadTiming("APP_RENDER_START", leadSnapshot);
+  logLeadTiming("APP_RENDER_START", leadSnapshot, timing);
   renderAll();
-  logLeadTiming("APP_RENDER_END", leadSnapshot);
+  logLeadTiming("APP_RENDER_END", leadSnapshot, timing);
   const committedLead = timingSnapshotLead(leadSnapshot);
   const activeLead = getVisibleActiveLead();
   if (activeLead && leadTimingKey(activeLead) === leadTimingKey(leadSnapshot)) {
-    logLeadTiming("APP_CALL_NOW_VISIBLE", leadSnapshot);
+    logLeadTiming("APP_CALL_NOW_VISIBLE", leadSnapshot, timing);
   }
   if (committedLead && canAccessLead(committedLead) && !isVisuallyExpiredAssignment(committedLead)) {
-    logLeadTiming("APP_LOG_LEAD_VISIBLE", leadSnapshot);
+    logLeadTiming("APP_LOG_LEAD_VISIBLE", leadSnapshot, timing);
   }
   const saved = await savePromise;
   if (saved) {
@@ -5365,8 +5384,20 @@ elements.refreshButton?.addEventListener("click", () => {
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.addEventListener("message", (event) => {
     if (event.data?.type === "LEAD_SNAPSHOT") {
-      logLeadTiming("APP_MESSAGE_RECEIVED", event.data.leadSnapshot || {});
-      showNotificationLeadImmediately(event.data.leadSnapshot);
+      const appMessageReceivedEpoch = Date.now();
+      const timing = { ...(event.data.timing || {}), appMessageReceivedEpoch };
+      logLeadTiming("APP_MESSAGE_RECEIVED", event.data.leadSnapshot || {}, timing, appMessageReceivedEpoch);
+      if (timing.key) leadTimingDeliveries.set(timing.key, { leadSnapshot: event.data.leadSnapshot || {}, timing });
+      showNotificationLeadImmediately(event.data.leadSnapshot, timing);
+    }
+    if (event.data?.type === "LEAD_SNAPSHOT_TIMING") {
+      const timing = event.data.timing || {};
+      const pending = timing.key ? leadTimingDeliveries.get(timing.key) : null;
+      if (pending) {
+        const completedTiming = { ...pending.timing, ...timing };
+        logLeadTiming("DELIVERY_TRACE", pending.leadSnapshot, completedTiming, pending.timing.appMessageReceivedEpoch);
+        leadTimingDeliveries.delete(timing.key);
+      }
     }
     if (event.data?.type === "OPEN_DASHBOARD") {
       switchView("dashboard");
