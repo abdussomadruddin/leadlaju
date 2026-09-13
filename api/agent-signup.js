@@ -21,7 +21,16 @@ module.exports = async function handler(request, response) {
     }
   }
 
-  if (payload.action !== "add_agent" || !payload.agent?.name || !payload.agent?.email) {
+  const agent = payload.agent || {};
+  const hasCompleteAgent =
+    agent.id &&
+    agent.name &&
+    agent.phone &&
+    agent.email &&
+    agent.password &&
+    Array.isArray(agent.eligible_project_ids) &&
+    agent.eligible_project_ids.length > 0;
+  if (payload.action !== "add_agent" || !hasCompleteAgent) {
     return response.status(400).json({ ok: false, error: "Invalid agent signup request" });
   }
 

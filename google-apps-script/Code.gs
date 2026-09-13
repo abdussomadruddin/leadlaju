@@ -1261,6 +1261,9 @@ function replaceAgents_(agentsInput) {
 }
 
 function upsertAgent_(input) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: "Pendaftaran sedang diproses. Cuba lagi." };
+  try {
   const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheet = getOrCreateSheet_(spreadsheet, AGENTS_SHEET_NAME);
   const headers = ensureRequiredHeadersBySpec_(sheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
@@ -1281,8 +1284,8 @@ function upsertAgent_(input) {
     leadReady: input.lead_ready ?? input.leadReady,
   };
 
-  if (!agent.name || !agent.email) {
-    return { ok: false, error: "Nama dan emel ejen diperlukan." };
+  if (!agent.id || !agent.name || !agent.phone || !agent.email || !agent.password) {
+    return { ok: false, error: "ID, nama, telefon, emel dan kata laluan ejen diperlukan." };
   }
   if (agent.role !== "admin" && !agent.eligibleProjectIds.length) {
     return { ok: false, error: "Pilih sekurang-kurangnya satu projek untuk ejen." };
@@ -1311,17 +1314,31 @@ function upsertAgent_(input) {
     }
   }
 
-  const row = buildAgentRow_(headers, agent, rowNumber ? values[rowNumber - 1] : null);
-  if (rowNumber) {
+  const existingRow = rowNumber ? values[rowNumber - 1].slice(0, headers.length) : null;
+  const wasUpdate = Boolean(rowNumber);
+  const row = buildAgentRow_(headers, agent, existingRow);
+  if (wasUpdate) {
     sheet.getRange(rowNumber, 1, 1, row.length).setValues([row]);
-    return { ok: true, updated: true, agent };
+  } else {
+    rowNumber = sheet.getLastRow() + 1;
+    sheet.getRange(rowNumber, 1, 1, row.length).setValues([row]);
   }
-
-  sheet.appendRow(row);
+  SpreadsheetApp.flush();
+  const persistedAgent = readAgents_(sheet, headers).find((item) => item.id === agent.id);
+  const complete = persistedAgent && persistedAgent.name && persistedAgent.phone && persistedAgent.email &&
+    persistedAgent.password && persistedAgent.eligible_project_ids.length;
+  if (!complete) {
+    if (existingRow) sheet.getRange(rowNumber, 1, 1, existingRow.length).setValues([existingRow]);
+    else sheet.getRange(rowNumber, 1, 1, headers.length).clearContent();
+    return { ok: false, error: "Rekod ejen tidak dapat disahkan lengkap di Google Sheet." };
+  }
   if (agent.role !== "admin" && agent.active === "inactive") {
     sendNewAgentSignupPush_(spreadsheet, agent);
   }
-  return { ok: true, agent };
+  return { ok: true, updated: wasUpdate, agent: persistedAgent };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function deleteAgent_(input) {
@@ -1485,6 +1502,33 @@ function countHandledLeadsByAgent_(leads) {
   return counts;
 }
 
+function agentRowHasIdentity_(headers, row) {
+  return Boolean(
+    getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "id") ||
+    getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "name") ||
+    getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "phone") ||
+    getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "email")
+  );
+}
+
+function clearIdentitylessAgentDerivedValues_(sheet, headers) {
+  if (!sheet || sheet.getLastRow() < 2) return 0;
+  const values = sheet.getDataRange().getDisplayValues();
+  let cleared = 0;
+  values.slice(1).forEach((value, index) => {
+    if (agentRowHasIdentity_(headers, value)) return;
+    const row = value.slice(0, headers.length);
+    const handled = getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "leadsHandled");
+    const eligible = getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "eligibleProjectIds");
+    if (!handled && !eligible) return;
+    setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "leadsHandled", "");
+    setRowValueBySpec_(headers, row, AGENT_FIELD_ALIASES, "eligibleProjectIds", "");
+    sheet.getRange(index + 2, 1, 1, row.length).setValues([row]);
+    cleared += 1;
+  });
+  return cleared;
+}
+
 function syncAgentHandledCounts_(leads, sheet, headers) {
   if (!sheet || sheet.getLastRow() < 2) return 0;
   const handledIndex = headers.findIndex((header) => AGENT_FIELD_ALIASES.leadsHandled.includes(header));
@@ -1494,6 +1538,7 @@ function syncAgentHandledCounts_(leads, sheet, headers) {
   const counts = countHandledLeadsByAgent_(leads);
   let changed = 0;
   const nextValues = values.slice(1).map((row) => {
+    if (!agentRowHasIdentity_(headers, row)) return [row[handledIndex]];
     const role = getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "role") || "agent";
     const agentId = getCellBySpec_(headers, row, AGENT_FIELD_ALIASES, "id");
     const current = Number(row[handledIndex]) || 0;
@@ -1611,6 +1656,7 @@ function ensureAgentProjectEligibility_(sheet, headers, projects) {
   if (!projectIds.length || sheet.getLastRow() < 2) return;
   const values = sheet.getDataRange().getDisplayValues();
   values.slice(1).forEach((value, index) => {
+    if (!agentRowHasIdentity_(headers, value)) return;
     const role = getCellBySpec_(headers, value, AGENT_FIELD_ALIASES, "role");
     const active = normalizeAgentActive_(getCellBySpec_(headers, value, AGENT_FIELD_ALIASES, "active"));
     if (roleIsAdmin_(role) || active !== "active") return;
@@ -2514,6 +2560,7 @@ function refreshSheetTemplate_() {
   ensureLeadValidations_(sheet, headers);
   let leads = readLeads_(sheet);
   const projects = ensureProjectsFromLeads_(projectsSheet, projectHeaders, leads);
+  clearIdentitylessAgentDerivedValues_(agentsSheet, agentHeaders);
   ensureAgentProjectEligibility_(agentsSheet, agentHeaders, projects);
   clearExpiredAgentCooldowns_(agentsSheet, agentHeaders);
   const agents = readAgents_(agentsSheet, agentHeaders);

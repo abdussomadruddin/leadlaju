@@ -208,6 +208,36 @@ test('agent signup requires and syncs active project choices', () => {
   assert.match(server, /adminOnly: true/);
 });
 
+test('agent signup stays loading until a complete persisted agent is confirmed', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const html = fs.readFileSync('index.html', 'utf8');
+  const start = source.indexOf('async function handleAgentSignup(');
+  const body = source.slice(start, source.indexOf('\nfunction sendAgentLogoutState', start));
+  assert.match(body, /setGlobalLoading\(true, "Menyimpan pendaftaran ejen\.\.\."\)/);
+  assert.match(body, /await submitAgentSignupToSheet\(signupAgent\)/);
+  assert.match(body, /persistedAgent\?\.id[\s\S]*persistedAgent\?\.name[\s\S]*persistedAgent\?\.phone[\s\S]*persistedAgent\?\.email/);
+  assert.ok(body.indexOf('setGlobalLoading(false)') < body.indexOf('signupSuccessModal.classList.add("open")'));
+  assert.match(html, /id="signup-success-modal"/);
+  assert.match(html, /id="signup-call-admin"/);
+  assert.match(html, /id="signup-whatsapp-admin"/);
+  assert.match(html, /id="close-signup-success"/);
+});
+
+test('agent signup proxy and Apps Script reject or roll back partial agent rows', () => {
+  const proxy = fs.readFileSync('api/agent-signup.js', 'utf8');
+  const server = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  assert.match(proxy, /agent\.id &&[\s\S]*agent\.name &&[\s\S]*agent\.phone &&[\s\S]*agent\.email &&[\s\S]*agent\.password/);
+  assert.match(proxy, /Array\.isArray\(agent\.eligible_project_ids\)/);
+  assert.match(server, /if \(!agent\.id \|\| !agent\.name \|\| !agent\.phone \|\| !agent\.email \|\| !agent\.password\)/);
+  assert.match(server, /SpreadsheetApp\.flush\(\)/);
+  assert.match(server, /const persistedAgent = readAgents_\(sheet, headers\)\.find/);
+  assert.match(server, /if \(!complete\)[\s\S]*clearContent\(\)/);
+  assert.match(server, /function agentRowHasIdentity_\(headers, row\)/);
+  assert.match(server, /if \(!agentRowHasIdentity_\(headers, row\)\) return \[row\[handledIndex\]\]/);
+  assert.match(server, /if \(!agentRowHasIdentity_\(headers, value\)\) return/);
+  assert.match(server, /clearIdentitylessAgentDerivedValues_\(agentsSheet, agentHeaders\)/);
+});
+
 test('agent approval waits for authoritative confirmation and protects the pending card from stale sync', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const start = source.indexOf('async function approveAgent(');

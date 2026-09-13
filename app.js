@@ -175,6 +175,10 @@ const elements = {
   signupPassword: document.querySelector("#signup-password"),
   signupConfirmPassword: document.querySelector("#signup-confirm-password"),
   signupError: document.querySelector("#signup-error"),
+  signupSuccessModal: document.querySelector("#signup-success-modal"),
+  signupCallAdmin: document.querySelector("#signup-call-admin"),
+  signupWhatsappAdmin: document.querySelector("#signup-whatsapp-admin"),
+  closeSignupSuccess: document.querySelector("#close-signup-success"),
   resetPasswordModal: document.querySelector("#reset-password-modal"),
   resetRequestForm: document.querySelector("#reset-request-form"),
   resetVerifyForm: document.querySelector("#reset-verify-form"),
@@ -875,6 +879,7 @@ async function handleLogin(event) {
 
 async function handleAgentSignup(event) {
   event.preventDefault();
+  const submitButton = elements.signupForm.querySelector('button[type="submit"]');
   const name = elements.signupName.value.trim();
   const phone = elements.signupPhone.value.trim();
   const email = elements.signupEmail.value.trim().toLowerCase();
@@ -904,67 +909,82 @@ async function handleAgentSignup(event) {
     return;
   }
 
+  submitButton.disabled = true;
+  submitButton.classList.add("is-loading");
+  submitButton.setAttribute("aria-busy", "true");
+  setGlobalLoading(true, "Menyimpan pendaftaran ejen...");
   let signupAgent = null;
-  if (remoteDatabaseClient) {
-    const { data, error } = await remoteDatabaseClient.functions.invoke("admin-manage-agent", {
-      body: {
-        action: "signup_request",
+  try {
+    let result;
+    if (remoteDatabaseClient) {
+      const { data, error } = await remoteDatabaseClient.functions.invoke("admin-manage-agent", {
+        body: {
+          action: "signup_request",
+          name,
+          phone,
+          email,
+          password,
+          eligible_project_ids: eligibleProjectIds,
+        },
+      });
+      if (error || !data?.ok) throw new Error(data?.error || error?.message || "Permohonan tidak dapat dihantar.");
+      signupAgent = {
+        id: data.userId,
         name,
         phone,
         email,
         password,
-        eligible_project_ids: eligibleProjectIds,
-      },
-    });
-    if (error || !data?.ok) {
-      setSignupError(data?.error || error?.message || "Permohonan tidak dapat dihantar.");
-      return;
+        role: "agent",
+        active: false,
+        leadsHandled: 0,
+        createdAt: Date.now(),
+        eligibleProjectIds,
+      };
+      result = { ok: true, agent: signupAgent };
+    } else {
+      signupAgent = {
+        id: makeId("agent"),
+        name,
+        phone,
+        email,
+        password,
+        role: "agent",
+        active: false,
+        leadsHandled: 0,
+        createdAt: Date.now(),
+        eligibleProjectIds,
+      };
+      result = await submitAgentSignupToSheet(signupAgent);
     }
-    signupAgent = {
-      id: data.userId,
-      name,
-      phone,
-      email,
-      role: "agent",
-      active: false,
-      leadsHandled: 0,
-      createdAt: Date.now(),
-      eligibleProjectIds,
-    };
+    const persistedAgent = result.agent || result.persisted_agent;
+    if (!persistedAgent?.id || !persistedAgent?.name || !persistedAgent?.phone || !persistedAgent?.email) {
+      throw new Error("Pendaftaran belum disahkan lengkap oleh server.");
+    }
     state.agents = [
-      ...state.agents.filter((agent) => agent.email.toLowerCase() !== email),
+      ...state.agents.filter((agent) => agent.id !== signupAgent.id && agent.email.toLowerCase() !== email),
       signupAgent,
     ];
     saveState();
-  } else {
-    signupAgent = {
-      id: makeId("agent"),
-      name,
-      phone,
-      email,
-      password,
-      role: "agent",
-      active: false,
-      leadsHandled: 0,
-      createdAt: Date.now(),
-      eligibleProjectIds,
-    };
-    state.agents.push(signupAgent);
-    saveState();
-  }
-
-  try {
-    await submitAgentSignupToSheet(signupAgent);
   } catch (error) {
-    state.agents = state.agents.filter((agent) => agent.id !== signupAgent.id);
+    if (signupAgent) state.agents = state.agents.filter((agent) => agent.id !== signupAgent.id);
     saveState();
     setSignupError(error.message || "Permohonan tidak dapat disimpan. Semak pilihan projek dan cuba lagi.");
     await syncSignupProjects();
     return;
+  } finally {
+    submitButton.disabled = false;
+    submitButton.classList.remove("is-loading");
+    submitButton.removeAttribute("aria-busy");
+    setGlobalLoading(false);
   }
   elements.signupForm.reset();
   showSignupForm(false);
-  setLoginError("Permohonan dihantar. Tunggu admin approve, kemudian log masuk guna emel dan kata laluan ini.");
+  setLoginError("");
+  const adminPhone = String(state.agents.find((agent) => agent.role === "admin")?.phone || "+60173559147").replace(/\D/g, "");
+  elements.signupCallAdmin.href = `tel:+${adminPhone}`;
+  elements.signupWhatsappAdmin.href = `https://wa.me/${adminPhone}`;
+  elements.signupSuccessModal.classList.add("open");
+  elements.signupSuccessModal.setAttribute("aria-hidden", "false");
 }
 
 function sendAgentLogoutState(user) {
@@ -2773,7 +2793,11 @@ async function submitAgentSignupToSheet(agent) {
   if (!response.ok || !result?.ok) {
     throw new Error(result?.error || "Permohonan tidak dapat disimpan di Google Sheet.");
   }
-  return result;
+  const persistedAgent = result.agent || result.persisted_agent;
+  if (!persistedAgent?.id || !persistedAgent?.name || !persistedAgent?.phone || !persistedAgent?.email) {
+    throw new Error("Google Sheet tidak mengesahkan maklumat ejen dengan lengkap.");
+  }
+  return { ...result, agent: persistedAgent };
 }
 
 async function deleteAgentFromSheet(agent) {
@@ -5437,6 +5461,7 @@ elements.loginEmail.addEventListener("input", () => setLoginError(""));
 elements.loginPassword.addEventListener("input", () => setLoginError(""));
 elements.signupForm.addEventListener("submit", handleAgentSignup);
 elements.signupToggle.addEventListener("click", () => showSignupForm(elements.signupForm.hidden));
+elements.closeSignupSuccess.addEventListener("click", () => closeModal(elements.signupSuccessModal));
 [
   elements.signupName,
   elements.signupPhone,
