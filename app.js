@@ -134,6 +134,7 @@ const pendingLeadStatusUpdates = new Map();
 const leadStatusWriteTimes = new Map();
 const pendingLeadNoteUpdates = new Map();
 const pendingAgentApprovals = new Set();
+const pendingAgentDeletions = new Set();
 const missingSheetAgentCounts = new Map();
 let serviceWorkerRegistrationPromise = null;
 let notificationAudioContext = null;
@@ -1983,10 +1984,12 @@ function applySheetStatusToLead(lead, sheetStatus, now = Date.now()) {
 function normalizeAgentActive(value) {
   if (typeof value === "boolean") return value;
   const normalized = String(value || "").trim().toLowerCase();
-  if (["inactive", "tidak aktif", "false", "0", "off", "disabled", "no", "tidak"].includes(normalized)) {
-    return false;
-  }
-  return true;
+  return ["active", "aktif", "true", "1", "on", "enabled", "yes", "ya"].includes(normalized);
+}
+
+function isAgentExplicitlyActive(value) {
+  return value === true || ["active", "aktif", "true", "1", "on", "enabled", "yes", "ya"]
+    .includes(String(value || "").trim().toLowerCase());
 }
 
 function normalizeAgentRole(value) {
@@ -2780,12 +2783,12 @@ async function upsertAgentToSheet(agent) {
   );
 }
 
-async function submitAgentSignupToSheet(agent) {
+async function submitAgentSignupToSheet(agent, options = {}) {
   const response = await fetch("/api/agent-signup", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      action: "add_agent",
+      action: options.approve ? "approve_agent" : "signup_agent",
       agent: agentSheetPayload(agent),
     }),
   });
@@ -2801,17 +2804,23 @@ async function submitAgentSignupToSheet(agent) {
 }
 
 async function deleteAgentFromSheet(agent) {
-  if (!agent?.id && !agent?.email) return false;
-  return postGoogleSheetAction(
-    {
+  if (!agent?.id && !agent?.email) throw new Error("Identiti ejen tidak lengkap.");
+  const response = await fetch("/api/agent-signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
       action: "delete_agent",
       agent: {
         id: agent.id,
         email: agent.email,
       },
-    },
-    "Agent sheet delete failed",
-  );
+    }),
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok || !result?.ok) {
+    throw new Error(result?.error || "Ejen tidak dapat dipadam daripada Google Sheet.");
+  }
+  return result;
 }
 
 async function forceAgentOfflineInSheet(agent) {
@@ -2872,6 +2881,8 @@ async function syncAgentsFromSheet(sheetAgentRows) {
       const emailMatches = agent.email?.toLowerCase() === sheetAgent.email;
       return (sheetAgent.id && agent.id === sheetAgent.id) || emailMatches;
     });
+
+    if (pendingAgentDeletions.has(existingAgent?.id || sheetAgent.id)) continue;
 
     if (existingAgent) {
       const nextActive =
@@ -2937,6 +2948,7 @@ async function syncAgentsFromSheet(sheetAgentRows) {
       agent.role === "agent" &&
       agent.id !== state.currentUserId &&
       !pendingAgentApprovals.has(agent.id) &&
+      !pendingAgentDeletions.has(agent.id) &&
       !sheetEmails.has(String(agent.email || "").toLowerCase()) &&
       (() => {
         const email = String(agent.email || "").toLowerCase();
@@ -4753,8 +4765,10 @@ async function approveAgent(agentId) {
       }
       await loadRemoteState(state.currentUserId);
     } else {
-      const result = await submitAgentSignupToSheet({ ...agent, active: true });
-      if (!result?.ok) throw new Error(result?.error || "Akaun ejen tidak dapat diapprove.");
+      const result = await submitAgentSignupToSheet({ ...agent, active: true }, { approve: true });
+      if (!result?.ok || !isAgentExplicitlyActive(result.agent?.active)) {
+        throw new Error(result?.error || "Status aktif ejen belum disahkan oleh server.");
+      }
     }
     const approvedAgent = getAgent(agentId) || agent;
     approvedAgent.active = true;
@@ -4832,8 +4846,54 @@ async function toggleProject(projectId) {
 
 async function rejectAgent(agentId) {
   const agent = getAgent(agentId);
-  if (!agent) return;
-  await removeAgent(agentId);
+  if (!agent || agent.active) return;
+  await deleteAgentWithLoading(agent, { rejection: true });
+}
+
+async function deleteAgentWithLoading(agent, options = {}) {
+  if (!agent || pendingAgentDeletions.has(agent.id)) return false;
+  const rejectButton = [...elements.agentsGrid.querySelectorAll("[data-agent-reject]")]
+    .find((button) => button.dataset.agentReject === agent.id);
+  const removeButton = [...elements.agentsGrid.querySelectorAll("[data-agent-remove]")]
+    .find((button) => button.dataset.agentRemove === agent.id);
+  const actionButton = rejectButton || removeButton;
+  pendingAgentDeletions.add(agent.id);
+  if (actionButton) {
+    actionButton.disabled = true;
+    actionButton.classList.add("is-loading");
+    actionButton.setAttribute("aria-busy", "true");
+  }
+  setGlobalLoading(true, options.rejection ? `Sedang reject ${agent.name}...` : `Sedang memadam ${agent.name}...`);
+  try {
+    await waitForCurrentSync();
+    if (remoteDatabaseMode) {
+      const { data, error } = await remoteDatabaseClient.functions.invoke("admin-manage-agent", {
+        body: { action: "delete", userId: agent.id, email: agent.email },
+      });
+      if (error || !data?.ok) throw new Error(data?.error || error?.message || "Ejen tidak dapat dibuang.");
+    }
+    const result = await deleteAgentFromSheet(agent);
+    if (!result?.ok || Number(result.deleted) < 1) {
+      throw new Error(result?.error || "Google Sheet belum mengesahkan ejen telah dipadam.");
+    }
+    state.agents = state.agents.filter((item) => item.id !== agent.id);
+    saveState();
+    renderAll();
+    await syncGoogleSheetFresh({ silent: true, agentsOnly: true });
+    showToast(
+      options.rejection ? "Permohonan ditolak" : "Ejen dibuang",
+      `${agent.name} telah dipadam daripada dashboard dan Google Sheet.`,
+      "success",
+    );
+    return true;
+  } catch (error) {
+    console.error(error);
+    showToast(options.rejection ? "Reject gagal" : "Ejen tidak dapat dibuang", error.message || "Semak sambungan Google Sheet.", "error");
+    return false;
+  } finally {
+    pendingAgentDeletions.delete(agent.id);
+    setGlobalLoading(false);
+  }
 }
 
 async function toggleAgent(agentId) {
@@ -4866,38 +4926,7 @@ async function removeAgent(agentId) {
   const agent = getAgent(agentId);
   if (!agent) return;
   if (!confirmPermanentDelete("ejen", agent.name)) return;
-  if (remoteDatabaseMode) {
-    const agentsPushed = await deleteAgentFromSheet(agent);
-    const { data, error } = await remoteDatabaseClient.functions.invoke("admin-manage-agent", {
-      body: { action: "delete", userId: agentId, email: agent.email },
-    });
-    if (error || !data?.ok) {
-      showToast("Ejen tidak dapat dibuang", data?.error || "Semak sambungan Google Sheet.", "error");
-      return;
-    }
-    await loadRemoteState(state.currentUserId);
-    showToast(
-      agentsPushed ? "Ejen dibuang" : "Ejen dibuang dari dashboard",
-      agentsPushed
-        ? `${agent.name} telah dikeluarkan daripada dashboard dan Google Sheet.`
-        : "Google Sheet belum dapat dikemas kini. Semak Web App URL.",
-      agentsPushed ? "success" : "error",
-    );
-    renderAll();
-    return;
-  }
-  state.agents = state.agents.filter((item) => item.id !== agentId);
-  saveState();
-  const agentsPushed = await deleteAgentFromSheet(agent);
-  if (agentsPushed) await syncGoogleSheet({ silent: true, notifyNewLeads: true });
-  showToast(
-    agentsPushed ? "Ejen dibuang" : "Ejen dibuang dari dashboard",
-    agentsPushed
-      ? `${agent.name} telah dikeluarkan daripada dashboard dan Google Sheet.`
-      : "Google Sheet belum dapat dikemas kini. Semak Web App URL.",
-    agentsPushed ? "success" : "error",
-  );
-  renderAll();
+  await deleteAgentWithLoading(agent);
 }
 
 function confirmPermanentDelete(itemType, itemName) {

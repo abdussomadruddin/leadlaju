@@ -22,6 +22,8 @@ module.exports = async function handler(request, response) {
   }
 
   const agent = payload.agent || {};
+  const deletingAgent = payload.action === "delete_agent";
+  const hasAgentIdentity = Boolean(agent.id || agent.email);
   const hasCompleteAgent =
     agent.id &&
     agent.name &&
@@ -30,15 +32,27 @@ module.exports = async function handler(request, response) {
     agent.password &&
     Array.isArray(agent.eligible_project_ids) &&
     agent.eligible_project_ids.length > 0;
-  if (payload.action !== "add_agent" || !hasCompleteAgent) {
+  if (deletingAgent ? !hasAgentIdentity : !["signup_agent", "approve_agent"].includes(payload.action) || !hasCompleteAgent) {
     return response.status(400).json({ ok: false, error: "Invalid agent signup request" });
   }
+
+  const upstreamPayload = deletingAgent
+    ? payload
+    : {
+        ...payload,
+        agent: {
+          ...agent,
+          role: "agent",
+          active: payload.action === "approve_agent" ? "active" : "inactive",
+          lead_ready: false,
+        },
+      };
 
   try {
     const upstream = await fetch(GOOGLE_SHEET_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=UTF-8" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(upstreamPayload),
     });
     const result = await upstream.json();
     return response.status(result?.ok ? 200 : 409).json(result);

@@ -370,6 +370,16 @@ function doPost(event) {
       if (result.ok) rebalanceLeadQueue_();
       return jsonResponse(result);
     }
+    if (payload.action === "signup_agent") {
+      const input = Object.assign({}, payload.agent || payload, { role: "agent", active: "inactive", lead_ready: false });
+      return jsonResponse(upsertAgent_(input));
+    }
+    if (payload.action === "approve_agent") {
+      const input = Object.assign({}, payload.agent || payload, { role: "agent", active: "active", lead_ready: false });
+      const result = upsertAgent_(input);
+      if (result.ok) rebalanceLeadQueue_();
+      return jsonResponse(result);
+    }
     if (payload.action === "add_project") {
       const result = upsertProject_(payload.project || payload);
       if (result.ok) rebalanceLeadQueue_();
@@ -2374,10 +2384,9 @@ function notifyUnsentLeadPushes_(spreadsheet, sheet, headers) {
 
 function normalizeAgentActive_(value) {
   const normalized = String(value || "").trim().toLowerCase();
-  if (["inactive", "tidak aktif", "false", "0", "off", "disabled"].includes(normalized)) {
-    return "inactive";
-  }
-  return "active";
+  return ["active", "aktif", "true", "1", "on", "enabled", "yes", "ya"].includes(normalized)
+    ? "active"
+    : "inactive";
 }
 
 function normalizeLeadStage_(value) {

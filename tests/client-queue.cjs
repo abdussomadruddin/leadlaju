@@ -201,7 +201,7 @@ test('agent signup requires and syncs active project choices', () => {
   assert.match(source, /eligible_project_ids: eligibleProjectIds/);
   assert.match(source, /await submitAgentSignupToSheet\(signupAgent\)/);
   assert.match(source, /fetch\("\/api\/agent-signup"/);
-  assert.match(fs.readFileSync('api/agent-signup.js', 'utf8'), /payload\.action !== "add_agent"/);
+  assert.match(fs.readFileSync('api/agent-signup.js', 'utf8'), /\["signup_agent", "approve_agent"\]\.includes\(payload\.action\)/);
   assert.match(server, /agent\.role !== "admin" && !agent\.eligibleProjectIds\.length/);
   assert.match(server, /Pilihan projek tidak sah atau projek sudah dinyahaktifkan/);
   assert.match(server, /function sendNewAgentSignupPush_\(spreadsheet, agent\)/);
@@ -250,10 +250,47 @@ test('agent approval waits for authoritative confirmation and protects the pendi
   assert.match(body, /pendingAgentApprovals\.add\(agentId\)/);
   assert.match(body, /setGlobalLoading\(true, `Sedang approve/);
   assert.match(body, /await waitForCurrentSync\(\)/);
-  assert.match(body, /await submitAgentSignupToSheet\(\{ \.\.\.agent, active: true \}\)/);
+  assert.match(body, /await submitAgentSignupToSheet\(\{ \.\.\.agent, active: true \}, \{ approve: true \}\)/);
+  assert.match(body, /isAgentExplicitlyActive\(result\.agent\?\.active\)/);
   assert.match(body, /await syncGoogleSheetFresh\(\{ silent: true, agentsOnly: true \}\)/);
   assert.ok(body.indexOf('renderAll();') < body.indexOf('showToast("Ejen approved"'));
   assert.match(body, /finally[\s\S]*pendingAgentApprovals\.delete\(agentId\)[\s\S]*setGlobalLoading\(false\)/);
+});
+
+test('new agent status is pending unless the server explicitly confirms active', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const server = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const proxy = fs.readFileSync('api/agent-signup.js', 'utf8');
+  const start = source.indexOf('function normalizeAgentActive(');
+  const end = source.indexOf('\nfunction normalizeAgentRole', start);
+  const context = vm.createContext({});
+  vm.runInContext(source.slice(start, end), context);
+  assert.equal(context.normalizeAgentActive(undefined), false);
+  assert.equal(context.normalizeAgentActive(''), false);
+  assert.equal(context.normalizeAgentActive('pending'), false);
+  assert.equal(context.normalizeAgentActive('inactive'), false);
+  assert.equal(context.normalizeAgentActive('active'), true);
+  assert.match(proxy, /active: payload\.action === "approve_agent" \? "active" : "inactive"/);
+  assert.match(server, /payload\.action === "signup_agent"[\s\S]*active: "inactive"/);
+  assert.match(server, /payload\.action === "approve_agent"[\s\S]*active: "active"/);
+});
+
+test('reject and delete wait for authoritative removal before hiding the agent card', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const proxy = fs.readFileSync('api/agent-signup.js', 'utf8');
+  const start = source.indexOf('async function deleteAgentWithLoading(');
+  const end = source.indexOf('\nasync function toggleAgent', start);
+  const body = source.slice(start, end);
+  assert.match(source, /const pendingAgentDeletions = new Set\(\)/);
+  assert.match(source, /pendingAgentDeletions\.has\(existingAgent\?\.id \|\| sheetAgent\.id\)/);
+  assert.match(body, /setGlobalLoading\(true,/);
+  assert.match(body, /await waitForCurrentSync\(\)/);
+  assert.match(body, /const result = await deleteAgentFromSheet\(agent\)/);
+  assert.ok(body.indexOf('const result = await deleteAgentFromSheet(agent)') < body.indexOf('state.agents = state.agents.filter'));
+  assert.match(body, /Number\(result\.deleted\) < 1/);
+  assert.match(body, /await syncGoogleSheetFresh\(\{ silent: true, agentsOnly: true \}\)/);
+  assert.match(body, /finally[\s\S]*pendingAgentDeletions\.delete\(agent\.id\)[\s\S]*setGlobalLoading\(false\)/);
+  assert.match(proxy, /const deletingAgent = payload\.action === "delete_agent"/);
 });
 
 test('lead and agent deletion require two confirmations', () => {
