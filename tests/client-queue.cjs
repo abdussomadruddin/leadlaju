@@ -489,6 +489,7 @@ test('daily pickup stats exclude pending assignments from the completed lead tot
 test('agents explicitly start and stop lead availability from the dashboard', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('styles.css', 'utf8');
   assert.match(html, /id="get-lead-button"/);
   assert.match(html, /id="stop-lead-button"/);
   assert.match(html, /id="agent-lead-status"/);
@@ -501,6 +502,15 @@ test('agents explicitly start and stop lead availability from the dashboard', ()
   assert.match(source, /elements\.getLeadButton\.disabled = ready/);
   assert.match(source, /elements\.stopLeadButton\.disabled = !ready/);
   assert.match(source, /openLeadAvailabilityConfirmation\(user\.leadReady\)/);
+  const availabilityStart = source.indexOf('async function setAgentLeadAvailability(');
+  const availabilityBody = source.slice(availabilityStart, source.indexOf('\nfunction enforceAgentNotificationAccess', availabilityStart));
+  assert.ok(availabilityBody.indexOf('await postGoogleSheetActionWithResponse') < availabilityBody.indexOf('user.leadReady ='));
+  assert.ok(availabilityBody.indexOf('user.leadReady =') < availabilityBody.indexOf('renderAll();'));
+  assert.ok(availabilityBody.indexOf('renderAll();') < availabilityBody.indexOf('finishLoading();'));
+  assert.ok(availabilityBody.indexOf('finishLoading();') < availabilityBody.indexOf('openLeadAvailabilityConfirmation'));
+  assert.match(availabilityBody, /button\.classList\.add\("is-loading"\)/);
+  assert.match(availabilityBody, /button\.setAttribute\("aria-busy", "true"\)/);
+  assert.match(css, /\.agent-lead-control-buttons button\.is-loading::after/);
   assert.match(html, /id="lead-availability-modal"/);
 });
 

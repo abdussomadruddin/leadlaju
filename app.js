@@ -2658,8 +2658,19 @@ async function setAgentLeadAvailability(ready) {
 
   const button = ready ? elements.getLeadButton : elements.stopLeadButton;
   button.disabled = true;
+  button.classList.add("is-loading");
+  button.setAttribute("aria-busy", "true");
   setGlobalLoading(true, ready ? "Memasuki giliran lead..." : "Menghentikan agihan lead...");
   let result;
+  let statusRendered = false;
+  let loadingActive = true;
+  const finishLoading = () => {
+    if (!loadingActive) return;
+    loadingActive = false;
+    button.classList.remove("is-loading");
+    button.removeAttribute("aria-busy");
+    setGlobalLoading(false);
+  };
   try {
     if (ready) {
       const subscribed = await syncPushSubscription(true).catch(() => false);
@@ -2673,21 +2684,23 @@ async function setAgentLeadAvailability(ready) {
       action: "set_agent_lead_availability",
       agent: { id: user.id, email: user.email, ready },
     }, "Lead availability update failed");
+
+    user.leadReady = Boolean(result?.lead_ready ?? ready);
+    user.online = user.leadReady && Notification.permission === "granted";
+    saveState();
+    renderAll();
+    statusRendered = true;
+    finishLoading();
+    openLeadAvailabilityConfirmation(user.leadReady);
+    syncGoogleSheet({ silent: true, notifyNewLeads: true });
+    return true;
   } catch (error) {
     showToast("Status tidak dikemas kini", error.message || "Semak sambungan dan cuba lagi.", "error");
     return false;
   } finally {
-    button.disabled = false;
-    setGlobalLoading(false);
+    finishLoading();
+    if (!statusRendered) button.disabled = false;
   }
-
-  user.leadReady = Boolean(result?.lead_ready ?? ready);
-  user.online = user.leadReady && Notification.permission === "granted";
-  saveState();
-  renderAll();
-  syncGoogleSheet({ silent: true, notifyNewLeads: true });
-  openLeadAvailabilityConfirmation(user.leadReady);
-  return true;
 }
 
 function enforceAgentNotificationAccess() {
