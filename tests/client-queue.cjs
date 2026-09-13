@@ -861,6 +861,24 @@ test('CALL NOW and Log Lead consume the same revision-specific visual expiry vie
   assert.match(source, /function expiryAssignmentKey\(lead\) \{\s*return lead \? `\$\{lead\.id\}:\$\{Number\(lead\.assignmentRevision\) \|\| 0\}`/);
 });
 
+test('admin dashboard renders every active assigned lead as a compact name agent timer list', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const styles = fs.readFileSync('styles.css', 'utf8');
+  const activeStart = source.indexOf('function renderActiveLead(');
+  const activeBody = source.slice(activeStart, source.indexOf('\nfunction renderAgentLeadControls(', activeStart));
+
+  assert.match(activeBody, /if \(isAdmin\(\)\) \{\s*renderAdminActiveLeads\(\);\s*return;/);
+  assert.match(activeBody, /function getAdminActiveLeads\(\)/);
+  assert.match(activeBody, /Boolean\(lead\.assignedAgentId\)/);
+  assert.match(activeBody, /Number\(lead\.expiresAt\) > Date\.now\(\)/);
+  assert.match(activeBody, /leads\.map\(\(lead\) =>/);
+  assert.match(activeBody, /admin-active-lead-name/);
+  assert.match(activeBody, /admin-active-lead-agent/);
+  assert.match(activeBody, /admin-active-lead-timer/);
+  assert.match(styles, /\.admin-active-lead-list/);
+  assert.match(styles, /@media \(max-width: 850px\)[\s\S]*\.admin-active-lead/);
+});
+
 test('transport failure keeps the UI-only expiry hidden and retryable without canonical mutation', async () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const lead = {

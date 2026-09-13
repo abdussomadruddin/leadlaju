@@ -3669,6 +3669,11 @@ function renderActiveLead() {
   elements.notificationCount.style.display = newLeadCount ? "grid" : "none";
   renderAgentLeadControls();
 
+  if (isAdmin()) {
+    renderAdminActiveLeads();
+    return;
+  }
+
   if (!lead) {
     lastRenderedActiveLeadKey = null;
     elements.activeLeadContainer.innerHTML = `
@@ -3713,6 +3718,63 @@ function renderActiveLead() {
   updateCountdown();
 }
 
+function getAdminActiveLeads() {
+  return state.leads
+    .filter((lead) =>
+      lead.status === "new" &&
+      lead.queueState !== "queued" &&
+      Boolean(lead.assignedAgentId) &&
+      Number(lead.expiresAt) > Date.now() &&
+      !isVisuallyExpiredAssignment(lead),
+    )
+    .sort((a, b) => a.expiresAt - b.expiresAt);
+}
+
+function renderAdminActiveLeads() {
+  const leads = getAdminActiveLeads();
+  lastRenderedActiveLeadKey = null;
+
+  if (!leads.length) {
+    elements.activeLeadContainer.innerHTML = `
+      <div class="empty-lead">
+        <div>
+          <span class="empty-lead-icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m5 12 4 4L19 6"></path>
+            </svg>
+          </span>
+          <h3>Tiada lead sedang aktif</h3>
+          <p>Semua lead aktif ejen akan dipaparkan di sini.</p>
+        </div>
+      </div>`;
+    return;
+  }
+
+  elements.activeLeadContainer.innerHTML = `
+    <div class="admin-active-lead-list" aria-label="Lead aktif">
+      ${leads.map((lead) => `
+        <article class="admin-active-lead" data-lead-id="${escapeHtml(lead.id)}">
+          <span class="admin-active-lead-name">${escapeHtml(lead.name || "Tanpa nama")}</span>
+          <span class="admin-active-lead-agent">${escapeHtml(getAgent(lead.assignedAgentId)?.name || "Tiada ejen")}</span>
+          <strong class="admin-active-lead-timer">00:00</strong>
+        </article>`).join("")}
+    </div>`;
+  updateAdminActiveLeadCountdowns(leads);
+}
+
+function updateAdminActiveLeadCountdowns(leads = getAdminActiveLeads()) {
+  const leadById = new Map(leads.map((lead) => [String(lead.id), lead]));
+  elements.activeLeadContainer.querySelectorAll(".admin-active-lead").forEach((article) => {
+    const lead = leadById.get(String(article.dataset.leadId));
+    if (!lead) return;
+    const remaining = Math.max(0, Number(lead.expiresAt) - Date.now());
+    const minutes = Math.floor(remaining / 60000);
+    const seconds = Math.floor((remaining % 60000) / 1000);
+    article.querySelector(".admin-active-lead-timer").textContent =
+      `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  });
+}
+
 function renderAgentLeadControls() {
   const user = getCurrentUser();
   const isAgent = user?.role === "agent";
@@ -3732,6 +3794,10 @@ function renderAgentLeadControls() {
 }
 
 function updateCountdown() {
+  if (isAdmin()) {
+    updateAdminActiveLeadCountdowns();
+    return;
+  }
   const lead = getVisibleActiveLead();
   const article = elements.activeLeadContainer.querySelector(".lead-alert");
   if (!lead || !article || article.dataset.leadId !== lead.id) return;
