@@ -15,6 +15,7 @@ const AGENT_PRESENCE_TIMEOUT_MINUTES = 60;
 const POTENTIAL_REMINDER_HOUR = 8;
 const POTENTIAL_REMINDER_WINDOW_MINUTES = 15;
 const POTENTIAL_REMINDER_PROPERTY = "leadlaju_potential_reminder_keys";
+const AGENT_SIGNUP_NOTIFICATION_PROPERTY = "leadlaju_agent_signup_notification_keys";
 const LEAD_STATUS_VALUES = [
   "New",
   "Contacted",
@@ -1357,9 +1358,6 @@ function upsertAgent_(input) {
     else sheet.getRange(rowNumber, 1, 1, headers.length).clearContent();
     return { ok: false, error: "Rekod ejen tidak dapat disahkan lengkap di Google Sheet." };
   }
-  if (agent.role !== "admin" && agent.active === "inactive") {
-    sendNewAgentSignupPush_(spreadsheet, agent);
-  }
   return { ok: true, updated: wasUpdate, agent: persistedAgent };
   } finally {
     lock.releaseLock();
@@ -1846,6 +1844,31 @@ function sendNewAgentSignupPush_(spreadsheet, agent) {
     url: "/?view=agents",
     requireInteraction: true,
   });
+}
+
+function processPendingAgentSignupNotifications_(spreadsheet, agents) {
+  const properties = PropertiesService.getScriptProperties();
+  let sentKeys;
+  try {
+    const parsed = JSON.parse(properties.getProperty(AGENT_SIGNUP_NOTIFICATION_PROPERTY) || "[]");
+    sentKeys = new Set(Array.isArray(parsed) ? parsed : []);
+  } catch (error) {
+    sentKeys = new Set();
+  }
+
+  let sent = 0;
+  (agents || []).forEach((agent) => {
+    if (agent.role === "admin" || agent.active !== "inactive" || sentKeys.has(agent.id)) return;
+    const result = sendNewAgentSignupPush_(spreadsheet, agent);
+    if (result.ok === false || Number(result.sent || 0) < 1) return;
+    sentKeys.add(agent.id);
+    sent += Number(result.sent || 0);
+  });
+  properties.setProperty(
+    AGENT_SIGNUP_NOTIFICATION_PROPERTY,
+    JSON.stringify([...sentKeys].slice(-500)),
+  );
+  return { sent };
 }
 
 function malaysiaReminderDateKey_(value) {
@@ -2635,12 +2658,14 @@ function refreshSheetTemplate_() {
     agentHeaders,
   });
   const pushResult = notifyUnsentLeadPushes_(spreadsheet, sheet, headers);
+  const agentSignupNotifications = processPendingAgentSignupNotifications_(spreadsheet, agents);
   const appointmentReminders = processAppointmentReminders_(spreadsheet, leads, agents);
   const potentialReminders = processPotentialLeadReminders_(spreadsheet, leads, agents);
   return {
     ok: true,
     refreshed_at: new Date().toISOString(),
     push: pushResult,
+    agent_signup_notifications: agentSignupNotifications,
     assignment_outcomes: assignmentOutcomeRepair,
     appointment_reminders: appointmentReminders,
     potential_reminders: potentialReminders,

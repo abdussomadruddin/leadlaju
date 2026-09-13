@@ -2784,16 +2784,26 @@ async function upsertAgentToSheet(agent) {
 }
 
 async function submitAgentSignupToSheet(agent, options = {}) {
-  const response = await fetch("/api/agent-signup", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      action: options.approve ? "approve_agent" : "signup_agent",
-      agent: agentSheetPayload(agent),
-    }),
-  });
-  const result = await response.json().catch(() => null);
-  if (!response.ok || !result?.ok) {
+  let response;
+  let result;
+  try {
+    response = await fetch("/api/agent-signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: options.approve ? "approve_agent" : "signup_agent",
+        agent: agentSheetPayload(agent),
+      }),
+    });
+    result = await response.json().catch(() => null);
+  } catch (error) {
+    if (options.approve) throw error;
+  }
+  if (!response?.ok || !result?.ok) {
+    if (!options.approve) {
+      const recoveredAgent = await confirmPersistedSignupAgent(agent);
+      if (recoveredAgent) return { ok: true, recovered: true, agent: recoveredAgent };
+    }
     throw new Error(result?.error || "Permohonan tidak dapat disimpan di Google Sheet.");
   }
   const persistedAgent = result.agent || result.persisted_agent;
@@ -2801,6 +2811,29 @@ async function submitAgentSignupToSheet(agent, options = {}) {
     throw new Error("Google Sheet tidak mengesahkan maklumat ejen dengan lengkap.");
   }
   return { ...result, agent: persistedAgent };
+}
+
+async function confirmPersistedSignupAgent(agent) {
+  if (!agent?.id || !getSheetEndpoint()) return null;
+  try {
+    const url = new URL(getSheetEndpoint());
+    url.searchParams.set("_", Date.now().toString());
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    const persistedAgent = (payload.agents || []).find((item) => String(item.id || "") === String(agent.id));
+    if (
+      !persistedAgent?.id ||
+      !persistedAgent?.name ||
+      !persistedAgent?.phone ||
+      !persistedAgent?.email ||
+      normalizeAgentActive(persistedAgent.active ?? persistedAgent.status)
+    ) return null;
+    return persistedAgent;
+  } catch (error) {
+    console.warn("Signup confirmation read failed", error);
+    return null;
+  }
 }
 
 async function deleteAgentFromSheet(agent) {

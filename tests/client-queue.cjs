@@ -223,6 +223,29 @@ test('agent signup stays loading until a complete persisted agent is confirmed',
   assert.match(html, /id="close-signup-success"/);
 });
 
+test('completed signup is recovered when its response is lost after the Sheet write', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const submitStart = source.indexOf('async function submitAgentSignupToSheet(');
+  const submitEnd = source.indexOf('\nasync function deleteAgentFromSheet', submitStart);
+  const body = source.slice(submitStart, submitEnd);
+  assert.match(body, /const recoveredAgent = await confirmPersistedSignupAgent\(agent\)/);
+  assert.match(body, /return \{ ok: true, recovered: true, agent: recoveredAgent \}/);
+  assert.match(body, /String\(item\.id \|\| ""\) === String\(agent\.id\)/);
+  assert.match(body, /normalizeAgentActive\(persistedAgent\.active \?\? persistedAgent\.status\)/);
+  assert.ok(body.indexOf('if (options.approve) throw error') < body.indexOf('confirmPersistedSignupAgent(agent)'));
+});
+
+test('signup response does not wait for the admin push notification', () => {
+  const server = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const upsertStart = server.indexOf('function upsertAgent_(');
+  const upsertEnd = server.indexOf('\nfunction deleteAgent_', upsertStart);
+  const upsert = server.slice(upsertStart, upsertEnd);
+  assert.doesNotMatch(upsert, /sendNewAgentSignupPush_/);
+  assert.match(server, /function processPendingAgentSignupNotifications_\(spreadsheet, agents\)/);
+  assert.match(server, /const agentSignupNotifications = processPendingAgentSignupNotifications_\(spreadsheet, agents\)/);
+  assert.match(server, /agent_signup_notifications: agentSignupNotifications/);
+});
+
 test('agent signup proxy and Apps Script reject or roll back partial agent rows', () => {
   const proxy = fs.readFileSync('api/agent-signup.js', 'utf8');
   const server = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
