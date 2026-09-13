@@ -173,6 +173,21 @@ const REMINDER_HEADERS = [
 ];
 
 const APPOINTMENT_STATUS_VALUES = ["scheduled", "show_up", "no_show", "reschedule"];
+const DROPDOWN_COLORS = {
+  new: ["#dbeafe", "#1d4ed8"], contacted: ["#cffafe", "#0e7490"],
+  passed: ["#e5e7eb", "#374151"], "all offer presented": ["#ede9fe", "#6d28d9"],
+  all_offer_presented: ["#ede9fe", "#6d28d9"], "need follow up": ["#ffedd5", "#c2410c"],
+  need_follow_up: ["#ffedd5", "#c2410c"], potential: ["#fef3c7", "#a16207"],
+  rejected: ["#fee2e2", "#b91c1c"], cancelled: ["#e5e7eb", "#4b5563"],
+  client: ["#dcfce7", "#15803d"], active: ["#dcfce7", "#15803d"],
+  inactive: ["#fee2e2", "#b91c1c"], queued: ["#fef3c7", "#a16207"],
+  "manual lead": ["#d1fae5", "#047857"], "meta ads": ["#dbeafe", "#1d4ed8"],
+  "tiktok ads": ["#fce7f3", "#be185d"], "site visit": ["#dbeafe", "#1d4ed8"],
+  meeting: ["#ede9fe", "#6d28d9"], scheduled: ["#dbeafe", "#1d4ed8"],
+  show_up: ["#dcfce7", "#15803d"], no_show: ["#fee2e2", "#b91c1c"],
+  reschedule: ["#ffedd5", "#c2410c"], admin: ["#ede9fe", "#6d28d9"],
+  agent: ["#dbeafe", "#1d4ed8"], yes: ["#dcfce7", "#15803d"], no: ["#fee2e2", "#b91c1c"],
+};
 const APPOINTMENT_FIELD_ALIASES = {
   id: ["id", "appointment id", "appointment_id"],
   leadId: ["lead id", "lead_id"],
@@ -2468,6 +2483,40 @@ function ensureLeadValidations_(sheet, headers) {
   return true;
 }
 
+function colorDropdownColumn_(sheet, headers, aliasesByField, field, fallbackColors) {
+  if (!sheet || sheet.getLastRow() < 2) return false;
+  const aliases = aliasesByField[field] || [];
+  const columnIndex = headers.findIndex((header) => aliases.includes(header));
+  if (columnIndex < 0) return false;
+  const range = sheet.getRange(2, columnIndex + 1, sheet.getLastRow() - 1, 1);
+  const backgrounds = [];
+  const fontColors = [];
+  range.getDisplayValues().forEach(([value]) => {
+    const key = String(value || "").trim().toLowerCase();
+    const colors = key ? (DROPDOWN_COLORS[key] || fallbackColors) : ["#ffffff", "#111827"];
+    backgrounds.push([colors[0]]);
+    fontColors.push([colors[1]]);
+  });
+  range.setBackgrounds(backgrounds).setFontColors(fontColors);
+  return true;
+}
+
+function colorAllDropdownColumns_(context) {
+  const projectColors = ["#dcebcf", "#365314"];
+  colorDropdownColumn_(context.leadsSheet, context.leadHeaders, FIELD_ALIASES, "project", projectColors);
+  colorDropdownColumn_(context.leadsSheet, context.leadHeaders, FIELD_ALIASES, "status", ["#f3f4f6", "#374151"]);
+  colorDropdownColumn_(context.leadsSheet, context.leadHeaders, FIELD_ALIASES, "source", ["#e0f2fe", "#0369a1"]);
+  colorDropdownColumn_(context.leadsSheet, context.leadHeaders, FIELD_ALIASES, "queueState", ["#f3f4f6", "#374151"]);
+  colorDropdownColumn_(context.appointmentsSheet, context.appointmentHeaders, APPOINTMENT_FIELD_ALIASES, "project", projectColors);
+  colorDropdownColumn_(context.appointmentsSheet, context.appointmentHeaders, APPOINTMENT_FIELD_ALIASES, "type", ["#e0f2fe", "#0369a1"]);
+  colorDropdownColumn_(context.appointmentsSheet, context.appointmentHeaders, APPOINTMENT_FIELD_ALIASES, "status", ["#f3f4f6", "#374151"]);
+  colorDropdownColumn_(context.projectsSheet, context.projectHeaders, PROJECT_FIELD_ALIASES, "active", ["#f3f4f6", "#374151"]);
+  colorDropdownColumn_(context.agentsSheet, context.agentHeaders, AGENT_FIELD_ALIASES, "role", ["#f3f4f6", "#374151"]);
+  colorDropdownColumn_(context.agentsSheet, context.agentHeaders, AGENT_FIELD_ALIASES, "active", ["#f3f4f6", "#374151"]);
+  colorDropdownColumn_(context.agentsSheet, context.agentHeaders, AGENT_FIELD_ALIASES, "notificationEnabled", ["#f3f4f6", "#374151"]);
+  colorDropdownColumn_(context.agentsSheet, context.agentHeaders, AGENT_FIELD_ALIASES, "leadReady", ["#f3f4f6", "#374151"]);
+}
+
 function canonicalLeadSource_(value) {
   const source = String(value || DEFAULT_SOURCE).trim();
   const lower = source.toLowerCase();
@@ -2550,7 +2599,7 @@ function refreshSheetTemplate_() {
   const agentHeaders = ensureRequiredHeadersBySpec_(agentsSheet, AGENT_HEADERS, AGENT_FIELD_ALIASES);
   const projectHeaders = ensureRequiredHeadersBySpec_(projectsSheet, PROJECT_HEADERS, PROJECT_FIELD_ALIASES);
   ensureRequiredHeadersBySpec_(remindersSheet, REMINDER_HEADERS, REMINDER_FIELD_ALIASES);
-  ensureRequiredHeadersBySpec_(appointmentsSheet, APPOINTMENT_HEADERS, APPOINTMENT_FIELD_ALIASES);
+  const appointmentHeaders = ensureRequiredHeadersBySpec_(appointmentsSheet, APPOINTMENT_HEADERS, APPOINTMENT_FIELD_ALIASES);
   ensureRequiredHeadersBySpec_(pushSheet, PUSH_HEADERS, PUSH_FIELD_ALIASES);
   ensureLeadIds_(sheet, headers);
   ensureLeadTimestamps_(sheet, headers);
@@ -2566,6 +2615,16 @@ function refreshSheetTemplate_() {
   const agents = readAgents_(agentsSheet, agentHeaders);
   if (reconcileLeadAgentReferences_(sheet, headers, agents)) leads = readLeads_(sheet);
   syncAgentHandledCounts_(leads, agentsSheet, agentHeaders);
+  colorAllDropdownColumns_({
+    leadsSheet: sheet,
+    leadHeaders: headers,
+    appointmentsSheet,
+    appointmentHeaders,
+    projectsSheet,
+    projectHeaders,
+    agentsSheet,
+    agentHeaders,
+  });
   const pushResult = notifyUnsentLeadPushes_(spreadsheet, sheet, headers);
   const appointmentReminders = processAppointmentReminders_(spreadsheet, leads, agents);
   const potentialReminders = processPotentialLeadReminders_(spreadsheet, leads, agents);

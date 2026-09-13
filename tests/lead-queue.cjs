@@ -552,6 +552,16 @@ test('dashboard GET is read-only while maintenance runs through the trigger refr
   assert.match(source, /syncAgentHandledCounts_\(leads, agentsSheet, agentHeaders\)/);
 });
 
+test('sheet maintenance colors every dropdown-backed operational column', () => {
+  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  assert.match(source, /const DROPDOWN_COLORS = \{/);
+  assert.match(source, /function colorDropdownColumn_\(/);
+  assert.match(source, /colorAllDropdownColumns_\(\{/);
+  for (const field of ['"project"', '"status"', '"source"', '"queueState"', '"type"', '"role"', '"notificationEnabled"', '"leadReady"']) {
+    assert.match(source, new RegExp(`colorDropdownColumn_\\([^\\n]+${field}`));
+  }
+});
+
 test('server rejects protected agent statuses when the shared note is empty', () => {
   const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
   const start = source.indexOf('function updateLeadStatusLocked_(');
