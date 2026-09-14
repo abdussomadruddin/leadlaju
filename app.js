@@ -4897,7 +4897,7 @@ async function deleteAgentWithLoading(agent, options = {}) {
       if (error || !data?.ok) throw new Error(data?.error || error?.message || "Ejen tidak dapat dibuang.");
     }
     const result = await deleteAgentFromSheet(agent);
-    if (!result?.ok || Number(result.deleted) < 1) {
+    if (!result?.ok) {
       throw new Error(result?.error || "Google Sheet belum mengesahkan ejen telah dipadam.");
     }
     authoritativelyDeletedAgentIds.add(agent.id);

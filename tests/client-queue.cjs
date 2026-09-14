@@ -313,11 +313,21 @@ test('reject and delete wait for authoritative removal before hiding the agent c
   assert.doesNotMatch(body, /await waitForCurrentSync\(\)/);
   assert.match(body, /const result = await deleteAgentFromSheet\(agent\)/);
   assert.ok(body.indexOf('const result = await deleteAgentFromSheet(agent)') < body.indexOf('state.agents = state.agents.filter'));
-  assert.match(body, /Number\(result\.deleted\) < 1/);
+  assert.doesNotMatch(body, /Number\(result\.deleted\) < 1/);
   assert.match(body, /authoritativelyDeletedAgentIds\.add\(agent\.id\)/);
   assert.doesNotMatch(body, /syncGoogleSheetFresh/);
   assert.match(body, /finally[\s\S]*pendingAgentDeletions\.delete\(agent\.id\)[\s\S]*setGlobalLoading\(false\)/);
   assert.match(proxy, /const deletingAgent = payload\.action === "delete_agent"/);
+});
+
+test('agent deletion is idempotent and avoids slow structural Sheet row deletion', () => {
+  const server = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const start = server.indexOf('function deleteAgent_(');
+  const end = server.indexOf('\nfunction buildAgentRow_', start);
+  const body = server.slice(start, end);
+  assert.doesNotMatch(body, /deleteRow\(/);
+  assert.match(body, /matchedRows\.forEach\(\(rowNumber\) => sheet\.getRange\(rowNumber, 1, 1, headers\.length\)\.clearContent\(\)\)/);
+  assert.match(body, /already_absent: matchedRows\.length === 0/);
 });
 
 test('rejected email can register again while existing server email remains protected', () => {

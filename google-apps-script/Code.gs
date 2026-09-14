@@ -1384,19 +1384,19 @@ function deleteAgent_(input) {
   const email = String(input.email || input.emel || "").trim().toLowerCase();
   const idIndex = headers.findIndex((header) => AGENT_FIELD_ALIASES.id.includes(header));
   const emailIndex = headers.findIndex((header) => AGENT_FIELD_ALIASES.email.includes(header));
-  let deleted = 0;
+  const matchedRows = [];
 
-  for (let rowNumber = values.length; rowNumber >= 2; rowNumber -= 1) {
+  for (let rowNumber = 2; rowNumber <= values.length; rowNumber += 1) {
     const row = values[rowNumber - 1];
     const rowId = idIndex >= 0 ? String(row[idIndex] || "").trim() : "";
     const rowEmail = emailIndex >= 0 ? String(row[emailIndex] || "").trim().toLowerCase() : "";
     if ((id && rowId === id) || (email && rowEmail === email)) {
-      sheet.deleteRow(rowNumber);
-      deleted += 1;
+      matchedRows.push(rowNumber);
     }
   }
 
-  return { ok: true, deleted };
+  matchedRows.forEach((rowNumber) => sheet.getRange(rowNumber, 1, 1, headers.length).clearContent());
+  return { ok: true, deleted: matchedRows.length, already_absent: matchedRows.length === 0 };
 }
 
 function buildAgentRow_(headers, agent, existingRow) {
