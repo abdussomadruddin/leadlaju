@@ -136,7 +136,6 @@ const pendingLeadNoteUpdates = new Map();
 const pendingAgentApprovals = new Set();
 const pendingAgentDeletions = new Set();
 const authoritativelyDeletedAgentIds = new Set();
-const missingSheetAgentCounts = new Map();
 let serviceWorkerRegistrationPromise = null;
 let notificationAudioContext = null;
 let lastAgentPresenceHeartbeatAt = 0;
@@ -2891,13 +2890,7 @@ async function syncAgentsFromSheet(sheetAgentRows) {
   if (!Array.isArray(sheetAgentRows)) return result;
 
   const sheetAgents = sheetAgentRows.map(normalizeSheetAgent).filter(Boolean);
-  if (!sheetAgents.length) {
-    result.skipped += 1;
-    return result;
-  }
-
   const sheetEmails = new Set(sheetAgents.map((agent) => agent.email));
-  sheetEmails.forEach((email) => missingSheetAgentCounts.delete(email));
   let reloadRemote = false;
 
   for (const sheetAgent of sheetAgents) {
@@ -2974,17 +2967,10 @@ async function syncAgentsFromSheet(sheetAgentRows) {
       agent.id !== state.currentUserId &&
       !pendingAgentApprovals.has(agent.id) &&
       !pendingAgentDeletions.has(agent.id) &&
-      !sheetEmails.has(String(agent.email || "").toLowerCase()) &&
-      (() => {
-        const email = String(agent.email || "").toLowerCase();
-        const misses = (missingSheetAgentCounts.get(email) || 0) + 1;
-        missingSheetAgentCounts.set(email, misses);
-        return misses >= 3;
-      })(),
+      !sheetEmails.has(String(agent.email || "").toLowerCase()),
   );
 
   for (const agent of removedAgents) {
-    missingSheetAgentCounts.delete(String(agent.email || "").toLowerCase());
     state.agents = state.agents.filter((item) => item.id !== agent.id);
     result.removed += 1;
   }
