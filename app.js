@@ -1369,45 +1369,12 @@ function setGlobalLoading(active, message = "Sedang diproses...") {
 }
 
 const LIFECYCLE_INTRO_DURATION_MS = 3000;
-const LIFECYCLE_MUTATION_SELECTOR = [
-  "#get-lead-button",
-  "#stop-lead-button",
-  ".call-button",
-  "[data-lead-status]",
-  "[data-lead-note-save]",
-  "[data-agent-approve]",
-  "[data-agent-reject]",
-  "[data-agent-remove]",
-  "[data-agent-toggle]",
-  "[data-agent-force-offline]",
-  "[data-appointment-status]",
-  "[data-appointment-delete]",
-  "[data-project-toggle]",
-  "#manual-lead-form button[type='submit']",
-  "#appointment-form button[type='submit']",
-  "#agent-form button[type='submit']",
-  "#project-form button[type='submit']",
-  "#contact-form button[type='submit']",
-].join(",");
-
-function lifecycleMutationGateClosed() {
-  return document.body.classList.contains("authenticated") && initialDashboardSyncState !== "ready";
-}
-
 function updateLifecycleMutationGate() {
-  const locked = lifecycleMutationGateClosed();
-  document.body.classList.toggle("business-mutations-locked", locked);
-  document.querySelectorAll(LIFECYCLE_MUTATION_SELECTOR).forEach((control) => {
-    control.classList.toggle("lifecycle-mutation-control", locked);
-    if (locked) control.setAttribute("aria-disabled", "true");
-    else control.removeAttribute("aria-disabled");
-  });
+  document.body.classList.remove("business-mutations-locked");
 }
 
 function guardLifecycleMutation() {
-  if (!lifecycleMutationGateClosed()) return true;
-  showToast("Sync masih berjalan", "Sedang sync Lead Laju…", "error");
-  return false;
+  return true;
 }
 
 function showLifecycleSyncOverlay(mode) {

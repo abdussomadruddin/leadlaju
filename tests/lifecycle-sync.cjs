@@ -66,7 +66,7 @@ test('true cold start begins cinematic and authoritative sync in parallel with l
   assert.equal(harness.syncCalls(), 1);
   assert.equal(harness.timers[0].delay, 3000);
   assert.equal(harness.overlay.classList.contains('cinematic'), true);
-  assert.equal(harness.body.classList.contains('business-mutations-locked'), true);
+  assert.equal(harness.body.classList.contains('business-mutations-locked'), false);
   assert.match(html, />Sedang sync Lead Laju…</);
 });
 
@@ -149,20 +149,20 @@ test('push around resume does not replay cinematic or change CALL NOW and Log Le
   assert.match(source.slice(snapshotStart, snapshotEnd), /APP_LOG_LEAD_VISIBLE/);
 });
 
-test('initial failure ends presentation, keeps mutations locked, and allows later recovery', () => {
+test('initial failure ends presentation without disabling available buttons', () => {
   const harness = createLifecycleHarness();
   harness.context.beginColdStartSync();
   harness.context.failLifecycleSync();
   harness.timers[0].callback();
   assert.equal(harness.context.lifecycleState().syncState, 'failed');
   assert.equal(harness.overlay.classList.contains('visible'), false);
-  assert.equal(harness.body.classList.contains('business-mutations-locked'), true);
+  assert.equal(harness.body.classList.contains('business-mutations-locked'), false);
   harness.context.completeLifecycleAuthoritativeRender();
   assert.equal(harness.context.lifecycleState().syncState, 'ready');
   assert.equal(harness.body.classList.contains('business-mutations-locked'), false);
 });
 
-test('real GET LEAD handler blocks requests until authoritative readiness then remains executable', async () => {
+test('real GET LEAD handler remains executable while authoritative sync is pending', async () => {
   const lifecycle = createLifecycleHarness();
   const start = source.indexOf('async function setAgentLeadAvailability(ready)');
   const end = source.indexOf('\nfunction enforceAgentNotificationAccess', start);
@@ -182,19 +182,19 @@ test('real GET LEAD handler blocks requests until authoritative readiness then r
   lifecycle.context.openLeadAvailabilityConfirmation = () => {};
   lifecycle.context.syncGoogleSheet = () => Promise.resolve(true);
   lifecycle.context.beginColdStartSync();
-  assert.equal(await lifecycle.context.setAgentLeadAvailability(false), false);
-  assert.equal(userReads, 0);
-  assert.equal(mutationRequests, 0);
-  lifecycle.context.completeLifecycleAuthoritativeRender();
   assert.equal(await lifecycle.context.setAgentLeadAvailability(false), true);
   assert.equal(userReads, 1);
   assert.equal(mutationRequests, 1);
+  lifecycle.context.completeLifecycleAuthoritativeRender();
+  assert.equal(await lifecycle.context.setAgentLeadAvailability(false), true);
+  assert.equal(userReads, 2);
+  assert.equal(mutationRequests, 2);
 });
 
 test('passive dashboard interaction is not globally disabled', () => {
   assert.doesNotMatch(css, /body\.business-mutations-locked\s*\{[^}]*pointer-events\s*:\s*none/s);
   assert.doesNotMatch(css, /body\.business-mutations-locked\s*\{[^}]*overflow\s*:\s*hidden/s);
-  assert.match(css, /\.lifecycle-mutation-control/);
+  assert.doesNotMatch(css, /\.lifecycle-mutation-control/);
 });
 
 test('reduced motion preserves brand and copy while suppressing heavy animation', () => {

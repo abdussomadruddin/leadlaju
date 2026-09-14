@@ -3063,12 +3063,6 @@ td small {
   display: none;
 }
 
-body.business-mutations-locked .lifecycle-mutation-control {
-  pointer-events: none;
-  opacity: 0.5;
-  cursor: wait;
-}
-
 @keyframes leadlaju-brand-reveal {
   0% { opacity: 0; filter: blur(14px); transform: scale(0.94); clip-path: inset(0 52% 0 48%); }
   24% { opacity: 0.82; }
