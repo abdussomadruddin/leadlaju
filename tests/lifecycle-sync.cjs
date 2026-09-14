@@ -81,13 +81,12 @@ test('faster sync commits readiness immediately but waits only for cinematic rev
   assert.equal(harness.overlay.classList.contains('visible'), false);
 });
 
-test('slower sync leaves a lightweight waiting state until authoritative render finishes', () => {
+test('slower sync indicator disappears after three seconds while sync continues', () => {
   const harness = createLifecycleHarness();
   harness.context.beginColdStartSync();
   harness.timers[0].callback();
   assert.equal(harness.context.lifecycleState().syncState, 'pending');
-  assert.equal(harness.overlay.classList.contains('waiting'), true);
-  assert.match(css, /\.lifecycle-sync-overlay\.waiting,[\s\S]*\.lifecycle-sync-overlay\.resume \{[\s\S]*inset: auto auto max\(16px, env\(safe-area-inset-bottom\)\) 50%/);
+  assert.equal(harness.overlay.classList.contains('visible'), false);
   harness.context.completeLifecycleAuthoritativeRender();
   assert.equal(harness.overlay.classList.contains('visible'), false);
   assert.equal(harness.body.classList.contains('business-mutations-locked'), false);
@@ -106,6 +105,22 @@ test('background resume skips cinematic and deduplicates related foreground requ
   assert.equal(harness.syncCalls(), 2);
   assert.equal(harness.overlay.classList.contains('resume'), true);
   assert.equal(harness.overlay.classList.contains('cinematic'), false);
+  assert.equal(harness.timers[1].delay, 1000);
+  harness.timers[1].callback();
+  assert.equal(harness.overlay.classList.contains('visible'), false);
+});
+
+test('completed resume sync keeps its indicator visible until the one-second presentation ends', () => {
+  const harness = createLifecycleHarness();
+  harness.context.beginColdStartSync();
+  harness.context.completeLifecycleAuthoritativeRender();
+  harness.timers[0].callback();
+  harness.syncResolvers.shift()(true);
+  harness.context.beginResumeSync();
+  harness.context.completeLifecycleAuthoritativeRender();
+  assert.equal(harness.overlay.classList.contains('visible'), true);
+  harness.timers[1].callback();
+  assert.equal(harness.overlay.classList.contains('visible'), false);
 });
 
 test('multiple resumes keep the cinematic execution count at one', () => {

@@ -1369,6 +1369,7 @@ function setGlobalLoading(active, message = "Sedang diproses...") {
 }
 
 const LIFECYCLE_INTRO_DURATION_MS = 3000;
+const LIFECYCLE_RESUME_INDICATOR_DURATION_MS = 1000;
 function updateLifecycleMutationGate() {
   document.body.classList.remove("business-mutations-locked");
 }
@@ -1391,10 +1392,6 @@ function hideLifecycleSyncOverlay() {
 function settleLifecyclePresentation() {
   updateLifecycleMutationGate();
   if (!introRevealComplete) return;
-  if (initialDashboardSyncState === "pending") {
-    showLifecycleSyncOverlay("waiting");
-    return;
-  }
   hideLifecycleSyncOverlay();
 }
 
@@ -1447,11 +1444,16 @@ function beginResumeSync() {
   if (!leadLajuIntroShown || initialDashboardSyncState === "pending" || resumeSyncPending) {
     return lifecycleSyncPromise || Promise.resolve(false);
   }
-  introRevealComplete = true;
+  introRevealComplete = false;
   initialDashboardSyncState = "pending";
   resumeSyncPending = true;
   showLifecycleSyncOverlay("resume");
   updateLifecycleMutationGate();
+  window.clearTimeout(lifecycleIntroTimer);
+  lifecycleIntroTimer = window.setTimeout(() => {
+    introRevealComplete = true;
+    settleLifecyclePresentation();
+  }, LIFECYCLE_RESUME_INDICATOR_DURATION_MS);
   lifecycleSyncPromise = runLifecycleAuthoritativeSync()
     .finally(() => {
       resumeSyncPending = false;
