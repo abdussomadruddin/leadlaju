@@ -135,6 +135,7 @@ const leadStatusWriteTimes = new Map();
 const pendingLeadNoteUpdates = new Map();
 const pendingAgentApprovals = new Set();
 const pendingAgentDeletions = new Set();
+const authoritativelyDeletedAgentIds = new Set();
 const missingSheetAgentCounts = new Map();
 let serviceWorkerRegistrationPromise = null;
 let notificationAudioContext = null;
@@ -903,11 +904,6 @@ async function handleAgentSignup(event) {
     setSignupError("Pengesahan kata laluan tidak sepadan.");
     return;
   }
-  if (!remoteDatabaseClient && state.agents.some((agent) => agent.email.toLowerCase() === email)) {
-    setSignupError("Emel ini sudah wujud dalam sistem.");
-    return;
-  }
-
   submitButton.disabled = true;
   submitButton.classList.add("is-loading");
   submitButton.setAttribute("aria-busy", "true");
@@ -2905,6 +2901,7 @@ async function syncAgentsFromSheet(sheetAgentRows) {
   let reloadRemote = false;
 
   for (const sheetAgent of sheetAgents) {
+    if (authoritativelyDeletedAgentIds.has(sheetAgent.id)) continue;
     const existingAgent = state.agents.find((agent) => {
       const emailMatches = agent.email?.toLowerCase() === sheetAgent.email;
       return (sheetAgent.id && agent.id === sheetAgent.id) || emailMatches;
@@ -4893,7 +4890,6 @@ async function deleteAgentWithLoading(agent, options = {}) {
   }
   setGlobalLoading(true, options.rejection ? `Sedang reject ${agent.name}...` : `Sedang memadam ${agent.name}...`);
   try {
-    await waitForCurrentSync();
     if (remoteDatabaseMode) {
       const { data, error } = await remoteDatabaseClient.functions.invoke("admin-manage-agent", {
         body: { action: "delete", userId: agent.id, email: agent.email },
@@ -4904,10 +4900,10 @@ async function deleteAgentWithLoading(agent, options = {}) {
     if (!result?.ok || Number(result.deleted) < 1) {
       throw new Error(result?.error || "Google Sheet belum mengesahkan ejen telah dipadam.");
     }
+    authoritativelyDeletedAgentIds.add(agent.id);
     state.agents = state.agents.filter((item) => item.id !== agent.id);
     saveState();
     renderAll();
-    await syncGoogleSheetFresh({ silent: true, agentsOnly: true });
     showToast(
       options.rejection ? "Permohonan ditolak" : "Ejen dibuang",
       `${agent.name} telah dipadam daripada dashboard dan Google Sheet.`,

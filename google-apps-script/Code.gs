@@ -372,7 +372,12 @@ function doPost(event) {
       return jsonResponse(result);
     }
     if (payload.action === "signup_agent") {
-      const input = Object.assign({}, payload.agent || payload, { role: "agent", active: "inactive", lead_ready: false });
+      const input = Object.assign({}, payload.agent || payload, {
+        role: "agent",
+        active: "inactive",
+        lead_ready: false,
+        signupRequest: true,
+      });
       return jsonResponse(upsertAgent_(input));
     }
     if (payload.action === "approve_agent") {
@@ -392,9 +397,7 @@ function doPost(event) {
       return jsonResponse(result);
     }
     if (payload.action === "delete_agent") {
-      const result = deleteAgent_(payload.agent || payload);
-      if (result.ok) rebalanceLeadQueue_();
-      return jsonResponse(result);
+      return jsonResponse(deleteAgent_(payload.agent || payload));
     }
     if (payload.action === "replace_agents") {
       const result = replaceAgents_(payload.agents || []);
@@ -745,6 +748,7 @@ function registerPushSubscription_(payload) {
   const values = sheet.getDataRange().getDisplayValues();
   const endpointIndex = headers.findIndex((header) => PUSH_FIELD_ALIASES.endpoint.includes(header));
   let rowNumber = 0;
+  let matchedRowId = "";
 
   for (let index = 1; index < values.length; index += 1) {
     const rowEndpoint = endpointIndex >= 0 ? String(values[index][endpointIndex] || "").trim() : "";
@@ -1336,8 +1340,13 @@ function upsertAgent_(input) {
     const rowEmail = emailIndex >= 0 ? String(row[emailIndex] || "").trim().toLowerCase() : "";
     if (rowId === agent.id || rowEmail === agent.email.toLowerCase()) {
       rowNumber = index + 1;
+      matchedRowId = rowId;
       break;
     }
+  }
+
+  if (input.signupRequest && rowNumber && matchedRowId !== agent.id) {
+    return { ok: false, error: "Emel ini sudah didaftarkan." };
   }
 
   const existingRow = rowNumber ? values[rowNumber - 1].slice(0, headers.length) : null;

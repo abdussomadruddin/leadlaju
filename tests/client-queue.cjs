@@ -306,15 +306,33 @@ test('reject and delete wait for authoritative removal before hiding the agent c
   const end = source.indexOf('\nasync function toggleAgent', start);
   const body = source.slice(start, end);
   assert.match(source, /const pendingAgentDeletions = new Set\(\)/);
+  assert.match(source, /const authoritativelyDeletedAgentIds = new Set\(\)/);
+  assert.match(source, /authoritativelyDeletedAgentIds\.has\(sheetAgent\.id\)/);
   assert.match(source, /pendingAgentDeletions\.has\(existingAgent\?\.id \|\| sheetAgent\.id\)/);
   assert.match(body, /setGlobalLoading\(true,/);
-  assert.match(body, /await waitForCurrentSync\(\)/);
+  assert.doesNotMatch(body, /await waitForCurrentSync\(\)/);
   assert.match(body, /const result = await deleteAgentFromSheet\(agent\)/);
   assert.ok(body.indexOf('const result = await deleteAgentFromSheet(agent)') < body.indexOf('state.agents = state.agents.filter'));
   assert.match(body, /Number\(result\.deleted\) < 1/);
-  assert.match(body, /await syncGoogleSheetFresh\(\{ silent: true, agentsOnly: true \}\)/);
+  assert.match(body, /authoritativelyDeletedAgentIds\.add\(agent\.id\)/);
+  assert.doesNotMatch(body, /syncGoogleSheetFresh/);
   assert.match(body, /finally[\s\S]*pendingAgentDeletions\.delete\(agent\.id\)[\s\S]*setGlobalLoading\(false\)/);
   assert.match(proxy, /const deletingAgent = payload\.action === "delete_agent"/);
+});
+
+test('rejected email can register again while existing server email remains protected', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const server = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const signupStart = source.indexOf('async function handleAgentSignup(');
+  const signupEnd = source.indexOf('\nfunction sendAgentLogoutState', signupStart);
+  const signup = source.slice(signupStart, signupEnd);
+  assert.doesNotMatch(signup, /state\.agents\.some\(\(agent\) => agent\.email/);
+  assert.match(server, /signupRequest: true/);
+  assert.match(server, /if \(input\.signupRequest && rowNumber && matchedRowId !== agent\.id\)/);
+  assert.match(server, /Emel ini sudah didaftarkan\./);
+  const deleteStart = server.indexOf('if (payload.action === "delete_agent")');
+  const deleteEnd = server.indexOf('\n    if (payload.action === "replace_agents")', deleteStart);
+  assert.doesNotMatch(server.slice(deleteStart, deleteEnd), /rebalanceLeadQueue_/);
 });
 
 test('lead and agent deletion require two confirmations', () => {
