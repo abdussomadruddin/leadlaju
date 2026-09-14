@@ -218,8 +218,9 @@ test('agent signup stays loading until a complete persisted agent is confirmed',
   assert.match(body, /persistedAgent\?\.id[\s\S]*persistedAgent\?\.name[\s\S]*persistedAgent\?\.phone[\s\S]*persistedAgent\?\.email/);
   assert.ok(body.indexOf('setGlobalLoading(false)') < body.indexOf('signupSuccessModal.classList.add("open")'));
   assert.match(html, /id="signup-success-modal"/);
-  assert.match(html, /id="signup-call-admin"/);
-  assert.match(html, /id="signup-whatsapp-admin"/);
+  assert.match(html, /Menunggu approval admin/);
+  assert.doesNotMatch(html, /id="signup-call-admin"/);
+  assert.doesNotMatch(html, /id="signup-whatsapp-admin"/);
   assert.match(html, /id="close-signup-success"/);
 });
 

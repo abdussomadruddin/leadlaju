@@ -177,8 +177,6 @@ const elements = {
   signupConfirmPassword: document.querySelector("#signup-confirm-password"),
   signupError: document.querySelector("#signup-error"),
   signupSuccessModal: document.querySelector("#signup-success-modal"),
-  signupCallAdmin: document.querySelector("#signup-call-admin"),
-  signupWhatsappAdmin: document.querySelector("#signup-whatsapp-admin"),
   closeSignupSuccess: document.querySelector("#close-signup-success"),
   resetPasswordModal: document.querySelector("#reset-password-modal"),
   resetRequestForm: document.querySelector("#reset-request-form"),
@@ -981,9 +979,6 @@ async function handleAgentSignup(event) {
   elements.signupForm.reset();
   showSignupForm(false);
   setLoginError("");
-  const adminPhone = String(state.agents.find((agent) => agent.role === "admin")?.phone || "+60173559147").replace(/\D/g, "");
-  elements.signupCallAdmin.href = `tel:+${adminPhone}`;
-  elements.signupWhatsappAdmin.href = `https://wa.me/${adminPhone}`;
   elements.signupSuccessModal.classList.add("open");
   elements.signupSuccessModal.setAttribute("aria-hidden", "false");
 }

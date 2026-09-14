@@ -2921,30 +2921,6 @@ td small {
   line-height: 1.6;
 }
 
-.signup-success-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.signup-success-actions .primary-button {
-  display: grid;
-  place-items: center;
-  min-height: 48px;
-  text-decoration: none;
-}
-
-.signup-success-actions .whatsapp {
-  background: var(--green);
-}
-
-@media (max-width: 420px) {
-  .signup-success-actions {
-    grid-template-columns: 1fr;
-  }
-}
-
 .availability-confirmation-card .modal-heading {
   justify-content: center;
 }
