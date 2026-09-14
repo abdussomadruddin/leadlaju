@@ -833,9 +833,13 @@ test('notification still proceeds when no app client is open or an old client do
   const broadcastStart = worker.indexOf('async function broadcastLeadSnapshot');
   const broadcastEnd = worker.indexOf('\nasync function deliverLeadNotification', broadcastStart);
   const broadcast = worker.slice(broadcastStart, broadcastEnd);
-  assert.match(broadcast, /Promise\.all\(clients\.map/);
+  assert.match(broadcast, /visibleClients = clients\.filter/);
+  assert.match(broadcast, /Promise\.all\(visibleClients\.map/);
+  assert.match(broadcast, /hiddenClients\.forEach\(\(client\) => client\.postMessage\(message\)\)/);
   assert.match(worker, /setTimeout\(\(\) => finish\(false\), timeoutMs\)/);
+  assert.match(worker, /timeoutMs = 5000/);
   assert.match(broadcast, /clientCount: clients\.length/);
+  assert.match(broadcast, /visibleClientCount: visibleClients\.length/);
   assert.match(broadcast, /readyCount: readyResults\.filter\(Boolean\)\.length/);
   assert.doesNotMatch(broadcast, /if \(!clients\.length\).*return/);
 });

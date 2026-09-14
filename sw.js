@@ -223,7 +223,7 @@ async function showLeadNotification(payload = {}, timing = createLeadTiming(payl
   await self.registration.showNotification(title, options);
 }
 
-function deliverLeadSnapshotToClient(client, message, timeoutMs = 1000) {
+function deliverLeadSnapshotToClient(client, message, timeoutMs = 5000) {
   return new Promise((resolve) => {
     const channel = new MessageChannel();
     let settled = false;
@@ -261,7 +261,10 @@ async function broadcastLeadSnapshot(payload = {}, timing = createLeadTiming(pay
       swBroadcastCompleteEpoch: null,
     },
   };
-  const readyResults = await Promise.all(clients.map((client) => deliverLeadSnapshotToClient(client, message)));
+  const visibleClients = clients.filter((client) => client.visibilityState === "visible" || client.focused);
+  const hiddenClients = clients.filter((client) => !visibleClients.includes(client));
+  hiddenClients.forEach((client) => client.postMessage(message));
+  const readyResults = await Promise.all(visibleClients.map((client) => deliverLeadSnapshotToClient(client, message)));
   timing.swBroadcastCompleteEpoch = Date.now();
   logLeadTiming("SW_BROADCAST_COMPLETE", timing);
   clients.forEach((client) => client.postMessage({
@@ -275,6 +278,7 @@ async function broadcastLeadSnapshot(payload = {}, timing = createLeadTiming(pay
   }));
   return {
     clientCount: clients.length,
+    visibleClientCount: visibleClients.length,
     readyCount: readyResults.filter(Boolean).length,
   };
 }
