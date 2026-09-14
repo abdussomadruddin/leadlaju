@@ -191,9 +191,9 @@ async function acknowledgeLeadHandoff(data = {}) {
   }
 }
 
-async function showLeadNotification(payload = {}, timing = createLeadTiming(payload)) {
+async function showLeadNotification(payload = {}, timing = createLeadTiming(payload), config = {}) {
   logLeadTiming("SW_NOTIFICATION_START", timing);
-  await cacheLeadSnapshot(payload);
+  if (!config.snapshotCached) await cacheLeadSnapshot(payload);
   const title = payload.title || "Lead baru masuk";
   const options = {
     body: payload.body || "Lead baru perlu dihubungi dalam masa 5 minit.",
@@ -223,13 +223,33 @@ async function showLeadNotification(payload = {}, timing = createLeadTiming(payl
   await self.registration.showNotification(title, options);
 }
 
+function deliverLeadSnapshotToClient(client, message, timeoutMs = 1000) {
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    let settled = false;
+    const finish = (ready) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(Boolean(ready));
+    };
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    channel.port1.onmessage = (event) => finish(event.data?.ready);
+    try {
+      client.postMessage(message, [channel.port2]);
+    } catch {
+      finish(false);
+    }
+  });
+}
+
 async function broadcastLeadSnapshot(payload = {}, timing = createLeadTiming(payload)) {
-  if (!payload.leadId || !payload.leadSnapshot) return;
+  if (!payload.leadId || !payload.leadSnapshot) return { clientCount: 0, readyCount: 0 };
   const identity = leadHandoffIdentity(payload);
   timing.swBroadcastStartEpoch = Date.now();
   logLeadTiming("SW_BROADCAST_START", timing);
   const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-  clients.forEach((client) => client.postMessage({
+  const message = {
     type: "LEAD_SNAPSHOT",
     leadId: payload.leadId,
     leadSnapshot: payload.leadSnapshot,
@@ -240,7 +260,8 @@ async function broadcastLeadSnapshot(payload = {}, timing = createLeadTiming(pay
       swBroadcastStartEpoch: timing.swBroadcastStartEpoch,
       swBroadcastCompleteEpoch: null,
     },
-  }));
+  };
+  const readyResults = await Promise.all(clients.map((client) => deliverLeadSnapshotToClient(client, message)));
   timing.swBroadcastCompleteEpoch = Date.now();
   logLeadTiming("SW_BROADCAST_COMPLETE", timing);
   clients.forEach((client) => client.postMessage({
@@ -252,6 +273,16 @@ async function broadcastLeadSnapshot(payload = {}, timing = createLeadTiming(pay
       swBroadcastCompleteEpoch: timing.swBroadcastCompleteEpoch,
     },
   }));
+  return {
+    clientCount: clients.length,
+    readyCount: readyResults.filter(Boolean).length,
+  };
+}
+
+async function deliverLeadNotification(payload = {}, timing = createLeadTiming(payload)) {
+  await cacheLeadSnapshot(payload);
+  await broadcastLeadSnapshot(payload, timing);
+  await showLeadNotification(payload, timing, { snapshotCached: true });
 }
 
 self.addEventListener("message", (event) => {
@@ -269,10 +300,7 @@ self.addEventListener("message", (event) => {
   }
   if (event.data?.type === "LEAD_NOTIFICATION") {
     const timing = createLeadTiming(event.data.payload);
-    event.waitUntil(Promise.all([
-      showLeadNotification(event.data.payload, timing),
-      broadcastLeadSnapshot(event.data.payload, timing),
-    ]));
+    event.waitUntil(deliverLeadNotification(event.data.payload, timing));
   }
 });
 
@@ -286,10 +314,7 @@ self.addEventListener("push", (event) => {
   const timing = createLeadTiming(payload);
   timing.swPushEpoch = Date.now();
   logLeadTiming("SW_PUSH", timing);
-  event.waitUntil(Promise.all([
-    showLeadNotification(payload, timing),
-    broadcastLeadSnapshot(payload, timing),
-  ]));
+  event.waitUntil(deliverLeadNotification(payload, timing));
 });
 
 self.addEventListener("notificationclick", (event) => {

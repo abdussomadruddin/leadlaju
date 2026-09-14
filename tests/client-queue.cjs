@@ -711,7 +711,8 @@ test('notification click fetches the assigned lead directly for an instant dashb
   assert.match(source, /parseLeadTimestamp\(lead\.expires_at \|\| lead\.expiresAt, 0\) > now/);
   const instantStart = source.indexOf('async function acceptAssignmentSnapshot');
   const instantBody = source.slice(instantStart, source.indexOf('\nasync function showNotificationLeadImmediately', instantStart));
-  assert.ok(instantBody.indexOf('renderAll();') < instantBody.indexOf('await savePromise'));
+  assert.ok(instantBody.indexOf('renderAll();') < instantBody.indexOf('Promise.resolve(savePromise)'));
+  assert.doesNotMatch(instantBody, /await savePromise/);
   assert.match(worker, /notificationData\.leadId \? "OPEN_DASHBOARD"/);
   assert.match(worker, /leadlaju-notification-snapshots/);
   assert.match(worker, /async function cacheLeadSnapshot\(payload/);
@@ -807,6 +808,36 @@ test('service worker sends timing metadata separately from the canonical lead sn
   assert.match(body, /swBroadcastCompleteEpoch:/);
   assert.match(body, /type: "LEAD_SNAPSHOT_TIMING"/);
   assert.doesNotMatch(body, /payload\.leadSnapshot\.(timing|swPushEpoch|swBroadcastStartEpoch|swBroadcastCompleteEpoch)/);
+});
+
+test('open agent renders the pushed CALL NOW before the device notification is shown', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const worker = fs.readFileSync('sw.js', 'utf8');
+  const deliveryStart = worker.indexOf('async function deliverLeadNotification');
+  const deliveryEnd = worker.indexOf('\nself.addEventListener("message"', deliveryStart);
+  const delivery = worker.slice(deliveryStart, deliveryEnd);
+  assert.ok(delivery.indexOf('await cacheLeadSnapshot(payload)') < delivery.indexOf('await broadcastLeadSnapshot(payload, timing)'));
+  assert.ok(delivery.indexOf('await broadcastLeadSnapshot(payload, timing)') < delivery.indexOf('await showLeadNotification(payload, timing'));
+  assert.match(worker, /new MessageChannel\(\)/);
+  assert.match(worker, /channel\.port1\.onmessage/);
+  assert.match(worker, /client\.postMessage\(message, \[channel\.port2\]\)/);
+  const messageStart = source.indexOf('if (event.data?.type === "LEAD_SNAPSHOT")');
+  const messageEnd = source.indexOf('\n    if (event.data?.type === "LEAD_ASSIGNMENT_HANDOFF")', messageStart);
+  const messageBody = source.slice(messageStart, messageEnd);
+  assert.match(messageBody, /consumeAssignmentHandoff\(event\.data, timing\)\.then\(\(ready\) =>/);
+  assert.match(messageBody, /event\.ports\?\.\[0\]\?\.postMessage\(\{ ready \}\)/);
+});
+
+test('notification still proceeds when no app client is open or an old client does not acknowledge', () => {
+  const worker = fs.readFileSync('sw.js', 'utf8');
+  const broadcastStart = worker.indexOf('async function broadcastLeadSnapshot');
+  const broadcastEnd = worker.indexOf('\nasync function deliverLeadNotification', broadcastStart);
+  const broadcast = worker.slice(broadcastStart, broadcastEnd);
+  assert.match(broadcast, /Promise\.all\(clients\.map/);
+  assert.match(worker, /setTimeout\(\(\) => finish\(false\), timeoutMs\)/);
+  assert.match(broadcast, /clientCount: clients\.length/);
+  assert.match(broadcast, /readyCount: readyResults\.filter\(Boolean\)\.length/);
+  assert.doesNotMatch(broadcast, /if \(!clients\.length\).*return/);
 });
 
 test('app writes a readable single-line delivery trace without lead business data', () => {

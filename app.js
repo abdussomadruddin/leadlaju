@@ -1714,11 +1714,9 @@ async function acceptAssignmentSnapshot(leadSnapshot, timing = {}) {
   if (committedLead && canAccessLead(committedLead) && !isVisuallyExpiredAssignment(committedLead)) {
     logLeadTiming("APP_LOG_LEAD_VISIBLE", leadSnapshot, timing);
   }
-  const saved = await savePromise;
-  if (saved) {
-    saveState();
-    renderAll();
-  }
+  Promise.resolve(savePromise).then((saved) => {
+    if (saved) saveState();
+  }).catch(() => {});
   return { accepted: true, terminal: false };
 }
 
@@ -5817,7 +5815,11 @@ if ("serviceWorker" in navigator) {
       const timing = { ...(event.data.timing || {}), appMessageReceivedEpoch };
       logLeadTiming("APP_MESSAGE_RECEIVED", event.data.leadSnapshot || {}, timing, appMessageReceivedEpoch);
       if (timing.key) leadTimingDeliveries.set(timing.key, { leadSnapshot: event.data.leadSnapshot || {}, timing });
-      consumeAssignmentHandoff(event.data, timing);
+      consumeAssignmentHandoff(event.data, timing).then((ready) => {
+        event.ports?.[0]?.postMessage({ ready });
+      }).catch(() => {
+        event.ports?.[0]?.postMessage({ ready: false });
+      });
     }
     if (event.data?.type === "LEAD_ASSIGNMENT_HANDOFF") consumeAssignmentHandoff(event.data);
     if (event.data?.type === "LEAD_SNAPSHOT_TIMING") {
