@@ -711,7 +711,7 @@ function startAuthenticatedApp(user) {
     updateCountdown();
   }, 1000);
   scheduleExpiryWatchdog();
-  registerServiceWorker();
+  registerServiceWorker().then(() => announceAssignmentReceiverReady());
   syncPushSubscription().catch((error) => console.warn("Push subscription sync failed", error));
   markCurrentLeadNotificationsSeen();
   scheduleSync();
@@ -1370,6 +1370,7 @@ function setGlobalLoading(active, message = "Sedang diproses...") {
 
 const LIFECYCLE_INTRO_DURATION_MS = 3000;
 const LIFECYCLE_RESUME_INDICATOR_DURATION_MS = 1000;
+const LEAD_HANDOFF_SCHEMA_VERSION = 1;
 function updateLifecycleMutationGate() {
   document.body.classList.remove("business-mutations-locked");
 }
@@ -1638,12 +1639,49 @@ async function syncNotificationLead(leadId) {
   }
 }
 
-async function showNotificationLeadImmediately(leadSnapshot, timing = {}) {
+function assignmentSnapshotDisposition(leadSnapshot) {
   if (!leadSnapshot?.id || !currentAgentMatches(
     leadSnapshot.assigned_agent_id || leadSnapshot.assignedAgentId,
     leadSnapshot.assigned_agent_email || leadSnapshot.assignedAgentEmail,
     leadSnapshot.assigned_agent_name || leadSnapshot.assignedAgentName,
-  )) return false;
+  )) return { accepted: false, terminal: false };
+  const incomingRevision = Number(leadSnapshot.assignment_revision ?? leadSnapshot.assignmentRevision) || 0;
+  const expiresAt = parseLeadTimestamp(leadSnapshot.expires_at || leadSnapshot.expiresAt, 0);
+  const active = String(leadSnapshot.queue_state || leadSnapshot.queueState || "").toLowerCase() === "active";
+  if (normalizeSheetStatus(leadSnapshot.status) !== "new" || !active || expiresAt <= Date.now()) {
+    return { accepted: false, terminal: true };
+  }
+  const existing = state.leads.find((lead) => lead.id === leadSnapshot.id || lead.dedupeKey === leadSnapshot.id);
+  if (existing && incomingRevision < (Number(existing.assignmentRevision) || 0)) {
+    return { accepted: false, terminal: true };
+  }
+  const incomingStatusRevision = Number(leadSnapshot.status_revision ?? leadSnapshot.statusRevision) || 0;
+  if (existing && existing.status !== "new" && incomingStatusRevision <= (Number(existing.statusRevision) || 0)) {
+    return { accepted: false, terminal: true };
+  }
+  const currentActive = getVisibleActiveLead();
+  if (currentActive && currentActive.id !== leadSnapshot.id && currentActive.dedupeKey !== leadSnapshot.id) {
+    const incomingReceivedAt = parseLeadTimestamp(leadSnapshot.received_at || leadSnapshot.receivedAt, 0);
+    if (incomingReceivedAt > Number(currentActive.receivedAt || 0)) {
+      return { accepted: true, terminal: false, supersededLead: currentActive };
+    }
+    return { accepted: false, terminal: true, reconcile: true };
+  }
+  return { accepted: true, terminal: false };
+}
+
+async function acceptAssignmentSnapshot(leadSnapshot, timing = {}) {
+  const disposition = assignmentSnapshotDisposition(leadSnapshot);
+  if (!disposition.accepted) {
+    if (disposition.reconcile) syncGoogleSheetFresh({ silent: true, notifyNewLeads: false });
+    return disposition;
+  }
+  if (disposition.supersededLead) locallyExpiredAssignments.add(expiryAssignmentKey(disposition.supersededLead));
+  if (!leadSnapshot?.id || !currentAgentMatches(
+    leadSnapshot.assigned_agent_id || leadSnapshot.assignedAgentId,
+    leadSnapshot.assigned_agent_email || leadSnapshot.assignedAgentEmail,
+    leadSnapshot.assigned_agent_name || leadSnapshot.assignedAgentName,
+  )) return { accepted: false, terminal: false };
   logLeadTiming("APP_SNAPSHOT_START", leadSnapshot, timing);
   markAuthoritativeLeadCommit({ id: leadSnapshot.id });
   const savePromise = addLead(leadSnapshot, {
@@ -1670,7 +1708,40 @@ async function showNotificationLeadImmediately(leadSnapshot, timing = {}) {
     saveState();
     renderAll();
   }
+  return { accepted: true, terminal: false };
+}
+
+async function showNotificationLeadImmediately(leadSnapshot, timing = {}) {
+  return (await acceptAssignmentSnapshot(leadSnapshot, timing)).accepted;
+}
+
+function postAssignmentServiceWorkerMessage(message) {
+  if (!("serviceWorker" in navigator)) return false;
+  const worker = navigator.serviceWorker.controller;
+  if (worker) {
+    worker.postMessage(message);
+    return true;
+  }
+  navigator.serviceWorker.ready.then((registration) => registration.active?.postMessage(message)).catch(() => {});
   return true;
+}
+
+function announceAssignmentReceiverReady() {
+  const user = getCurrentUser();
+  if (user?.role !== "agent" || !user.id) return false;
+  return postAssignmentServiceWorkerMessage({ type: "APP_READY_FOR_LEAD_ASSIGNMENT", agentId: user.id });
+}
+
+function acknowledgeAssignmentHandoff(handoffKey) {
+  if (!handoffKey) return;
+  postAssignmentServiceWorkerMessage({ type: "LEAD_ASSIGNMENT_HANDOFF_ACK", handoffKey });
+}
+
+async function consumeAssignmentHandoff(data = {}, timing = {}) {
+  if (data.schemaVersion != null && data.schemaVersion !== LEAD_HANDOFF_SCHEMA_VERSION) return false;
+  const result = await acceptAssignmentSnapshot(data.leadSnapshot, timing);
+  if (result.accepted || result.terminal) acknowledgeAssignmentHandoff(data.handoffKey);
+  return result.accepted;
 }
 
 async function showCachedNotificationLead(leadId) {
@@ -1697,7 +1768,9 @@ async function showLatestCachedNotificationLead() {
       const response = await cache.match(request);
       if (!response) return null;
       try {
-        return { request, lead: await response.json() };
+        const cached = await response.json();
+        if (cached.leadSnapshot && cached.schemaVersion !== LEAD_HANDOFF_SCHEMA_VERSION) return null;
+        return { request, lead: cached.leadSnapshot || cached, handoffKey: cached.handoffKey || "" };
       } catch {
         await cache.delete(request);
         return null;
@@ -1717,8 +1790,10 @@ async function showLatestCachedNotificationLead() {
         parseLeadTimestamp(right.lead.received_at || right.lead.receivedAt, 0) -
         parseLeadTimestamp(left.lead.received_at || left.lead.receivedAt, 0));
     if (!matching.length) return false;
-    await cache.delete(matching[0].request);
-    return showNotificationLeadImmediately(matching[0].lead);
+    if (!matching[0].handoffKey) await cache.delete(matching[0].request);
+    const result = await acceptAssignmentSnapshot(matching[0].lead);
+    if (result.accepted || result.terminal) acknowledgeAssignmentHandoff(matching[0].handoffKey);
+    return result.accepted;
   } catch (error) {
     console.warn("Latest notification snapshot could not be opened", error);
     return false;
@@ -5731,8 +5806,9 @@ if ("serviceWorker" in navigator) {
       const timing = { ...(event.data.timing || {}), appMessageReceivedEpoch };
       logLeadTiming("APP_MESSAGE_RECEIVED", event.data.leadSnapshot || {}, timing, appMessageReceivedEpoch);
       if (timing.key) leadTimingDeliveries.set(timing.key, { leadSnapshot: event.data.leadSnapshot || {}, timing });
-      showNotificationLeadImmediately(event.data.leadSnapshot, timing);
+      consumeAssignmentHandoff(event.data, timing);
     }
+    if (event.data?.type === "LEAD_ASSIGNMENT_HANDOFF") consumeAssignmentHandoff(event.data);
     if (event.data?.type === "LEAD_SNAPSHOT_TIMING") {
       const timing = event.data.timing || {};
       const pending = timing.key ? leadTimingDeliveries.get(timing.key) : null;
@@ -5744,7 +5820,7 @@ if ("serviceWorker" in navigator) {
     }
     if (event.data?.type === "OPEN_DASHBOARD") {
       switchView("dashboard");
-      if (event.data.leadSnapshot) showNotificationLeadImmediately(event.data.leadSnapshot);
+      if (event.data.leadSnapshot) consumeAssignmentHandoff(event.data);
       if (event.data.leadId) syncNotificationLead(event.data.leadId);
     }
     if (event.data?.type === "OPEN_VIEW") switchView(event.data.view || "dashboard");

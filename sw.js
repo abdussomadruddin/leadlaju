@@ -1,4 +1,6 @@
 const CACHE_NAME = "leadlaju-pwa-v20260912-lead-monitor-v72";
+const LEAD_HANDOFF_CACHE = "leadlaju-notification-snapshots";
+const LEAD_HANDOFF_SCHEMA_VERSION = 1;
 const APP_SHELL = [
   "/",
   "/index.html",
@@ -47,7 +49,7 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))))
+      .then((keys) => Promise.all(keys.filter((key) => ![CACHE_NAME, LEAD_HANDOFF_CACHE].includes(key)).map((key) => caches.delete(key))))
       .then(() => self.clients.claim()),
   );
 });
@@ -87,15 +89,106 @@ self.addEventListener("fetch", (event) => {
   );
 });
 
+function leadHandoffIdentity(payload = {}) {
+  const snapshot = payload.leadSnapshot || {};
+  const agentId = String(snapshot.assigned_agent_id || snapshot.assignedAgentId || "").trim();
+  const leadId = String(payload.leadId || snapshot.id || "").trim();
+  const revision = Number(snapshot.assignment_revision ?? snapshot.assignmentRevision) || 0;
+  if (!agentId || !leadId || revision < 1) return null;
+  return {
+    agentId,
+    leadId,
+    revision,
+    key: `${agentId}:${leadId}:${revision}`,
+    path: `/__lead_handoff__/v${LEAD_HANDOFF_SCHEMA_VERSION}/${encodeURIComponent(agentId)}/${encodeURIComponent(leadId)}/${revision}`,
+  };
+}
+
 async function cacheLeadSnapshot(payload = {}) {
-  if (!payload.leadId || !payload.leadSnapshot) return;
-  const cache = await caches.open("leadlaju-notification-snapshots");
+  if (!payload.leadId || !payload.leadSnapshot) return null;
+  const cache = await caches.open(LEAD_HANDOFF_CACHE);
+  const identity = leadHandoffIdentity(payload);
+  if (identity) {
+    await cache.put(
+      new Request(new URL(identity.path, self.location.origin)),
+      new Response(JSON.stringify({
+        schemaVersion: LEAD_HANDOFF_SCHEMA_VERSION,
+        handoffKey: identity.key,
+        assignedAgentId: identity.agentId,
+        leadId: identity.leadId,
+        assignmentRevision: identity.revision,
+        createdAt: Date.now(),
+        leadSnapshot: payload.leadSnapshot,
+      }), { headers: { "Content-Type": "application/json" } }),
+    );
+  }
   await cache.put(
     new Request(new URL(`/__lead_snapshot__/${encodeURIComponent(payload.leadId)}`, self.location.origin)),
     new Response(JSON.stringify(payload.leadSnapshot), {
       headers: { "Content-Type": "application/json" },
     }),
   );
+  return identity;
+}
+
+async function replayLeadHandoffs(client, agentId) {
+  if (!client || !agentId) return;
+  const cache = await caches.open(LEAD_HANDOFF_CACHE);
+  const requests = await cache.keys();
+  const handoffs = [];
+  for (const request of requests) {
+    if (!new URL(request.url).pathname.startsWith(`/__lead_handoff__/v${LEAD_HANDOFF_SCHEMA_VERSION}/`)) continue;
+    const response = await cache.match(request);
+    if (!response) continue;
+    try {
+      const handoff = await response.json();
+      if (handoff?.schemaVersion !== LEAD_HANDOFF_SCHEMA_VERSION || handoff.assignedAgentId !== agentId) continue;
+      handoffs.push(handoff);
+    } catch {
+      await cache.delete(request);
+    }
+  }
+  handoffs
+    .sort((left, right) => {
+      const leftTime = Date.parse(left.leadSnapshot?.received_at || left.leadSnapshot?.receivedAt || "") || 0;
+      const rightTime = Date.parse(right.leadSnapshot?.received_at || right.leadSnapshot?.receivedAt || "") || 0;
+      return rightTime - leftTime || Number(right.createdAt || 0) - Number(left.createdAt || 0);
+    })
+    .forEach((handoff) => client.postMessage({ type: "LEAD_ASSIGNMENT_HANDOFF", ...handoff }));
+}
+
+async function acknowledgeLeadHandoff(data = {}) {
+  const key = String(data.handoffKey || "").trim();
+  if (!key) return;
+  const cache = await caches.open(LEAD_HANDOFF_CACHE);
+  const requests = await cache.keys();
+  let acknowledged = null;
+  for (const request of requests) {
+    if (!new URL(request.url).pathname.startsWith(`/__lead_handoff__/v${LEAD_HANDOFF_SCHEMA_VERSION}/`)) continue;
+    const response = await cache.match(request);
+    if (!response) continue;
+    try {
+      const handoff = await response.json();
+      if (handoff?.handoffKey !== key) continue;
+      acknowledged = handoff;
+      await cache.delete(request);
+      break;
+    } catch {
+      await cache.delete(request);
+    }
+  }
+  if (!acknowledged) return;
+  const leadId = String(acknowledged.leadId || "").trim();
+  const revision = Number(acknowledged.assignmentRevision) || 0;
+  const legacyRequest = new Request(new URL(`/__lead_snapshot__/${encodeURIComponent(leadId)}`, self.location.origin));
+  const legacyResponse = await cache.match(legacyRequest);
+  if (!legacyResponse) return;
+  try {
+    const snapshot = await legacyResponse.json();
+    if (leadTimingKey({ leadId, leadSnapshot: snapshot }) === `${leadId}:${revision}`) await cache.delete(legacyRequest);
+  } catch {
+    await cache.delete(legacyRequest);
+  }
 }
 
 async function showLeadNotification(payload = {}, timing = createLeadTiming(payload)) {
@@ -132,6 +225,7 @@ async function showLeadNotification(payload = {}, timing = createLeadTiming(payl
 
 async function broadcastLeadSnapshot(payload = {}, timing = createLeadTiming(payload)) {
   if (!payload.leadId || !payload.leadSnapshot) return;
+  const identity = leadHandoffIdentity(payload);
   timing.swBroadcastStartEpoch = Date.now();
   logLeadTiming("SW_BROADCAST_START", timing);
   const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
@@ -139,6 +233,7 @@ async function broadcastLeadSnapshot(payload = {}, timing = createLeadTiming(pay
     type: "LEAD_SNAPSHOT",
     leadId: payload.leadId,
     leadSnapshot: payload.leadSnapshot,
+    handoffKey: identity?.key || null,
     timing: {
       key: timing.key,
       swPushEpoch: Number(timing.swPushEpoch) || null,
@@ -162,6 +257,14 @@ async function broadcastLeadSnapshot(payload = {}, timing = createLeadTiming(pay
 self.addEventListener("message", (event) => {
   if (event.data?.type === "SKIP_WAITING") {
     event.waitUntil(self.skipWaiting());
+    return;
+  }
+  if (event.data?.type === "APP_READY_FOR_LEAD_ASSIGNMENT") {
+    event.waitUntil(replayLeadHandoffs(event.source, String(event.data.agentId || "").trim()));
+    return;
+  }
+  if (event.data?.type === "LEAD_ASSIGNMENT_HANDOFF_ACK") {
+    event.waitUntil(acknowledgeLeadHandoff(event.data));
     return;
   }
   if (event.data?.type === "LEAD_NOTIFICATION") {
@@ -209,6 +312,7 @@ self.addEventListener("notificationclick", (event) => {
           view,
           leadId: notificationData.leadId || null,
           leadSnapshot: notificationData.leadSnapshot || null,
+          handoffKey: leadHandoffIdentity(notificationData)?.key || null,
           potentialCount: Number(notificationData.potentialCount) || 0,
         });
         return;

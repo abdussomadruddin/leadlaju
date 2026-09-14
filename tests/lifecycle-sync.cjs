@@ -145,7 +145,7 @@ test('push remains immediate during lifecycle loading and retains stale generati
   const messageStart = source.indexOf('navigator.serviceWorker.addEventListener("message"');
   const messageEnd = source.indexOf('\nwindow.addEventListener("beforeinstallprompt"', messageStart);
   const messageBody = source.slice(messageStart, messageEnd);
-  assert.match(messageBody, /showNotificationLeadImmediately\(event\.data\.leadSnapshot, timing\)/);
+  assert.match(messageBody, /consumeAssignmentHandoff\(event\.data, timing\)/);
   assert.doesNotMatch(messageBody, /initialDashboardSyncState|introRevealComplete|await lifecycleSyncPromise/);
   assert.match(source, /authoritativeStateGeneration/);
   assert.match(source, /authoritativeLeadGenerations/);
@@ -156,8 +156,8 @@ test('push remains immediate during lifecycle loading and retains stale generati
 test('push around resume does not replay cinematic or change CALL NOW and Log Lead rendering', () => {
   const resumeStart = source.indexOf('function beginResumeSync()');
   const resumeEnd = source.indexOf('\nfunction openLeadAvailabilityConfirmation', resumeStart);
-  const snapshotStart = source.indexOf('async function showNotificationLeadImmediately');
-  const snapshotEnd = source.indexOf('\nasync function showCachedNotificationLead', snapshotStart);
+  const snapshotStart = source.indexOf('async function acceptAssignmentSnapshot');
+  const snapshotEnd = source.indexOf('\nasync function showNotificationLeadImmediately', snapshotStart);
   assert.doesNotMatch(source.slice(resumeStart, resumeEnd), /cinematic/);
   assert.match(source.slice(snapshotStart, snapshotEnd), /renderAll\(\)/);
   assert.match(source.slice(snapshotStart, snapshotEnd), /APP_CALL_NOW_VISIBLE/);

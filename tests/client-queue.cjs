@@ -702,15 +702,15 @@ test('notification click fetches the assigned lead directly for an instant dashb
   assert.match(source, /async function syncNotificationLead\(leadId\)/);
   assert.match(source, /url\.searchParams\.set\("lead_id", requestedId\)/);
   assert.match(source, /if \(event\.data\.leadId\) syncNotificationLead/);
-  assert.match(source, /showNotificationLeadImmediately\(event\.data\.leadSnapshot\)/);
+  assert.match(source, /consumeAssignmentHandoff\(event\.data/);
   assert.match(worker, /leadId: notificationData\.leadId/);
   assert.match(worker, /leadSnapshot: notificationData\.leadSnapshot/);
   assert.match(server, /event\?\.parameter\?\.lead_id/);
   assert.match(source, /showCachedNotificationLead\(pendingNotificationLeadId\)/);
   assert.match(source, /showLatestCachedNotificationLead\(\)/);
   assert.match(source, /parseLeadTimestamp\(lead\.expires_at \|\| lead\.expiresAt, 0\) > now/);
-  const instantStart = source.indexOf('async function showNotificationLeadImmediately');
-  const instantBody = source.slice(instantStart, source.indexOf('\nasync function ', instantStart + 1));
+  const instantStart = source.indexOf('async function acceptAssignmentSnapshot');
+  const instantBody = source.slice(instantStart, source.indexOf('\nasync function showNotificationLeadImmediately', instantStart));
   assert.ok(instantBody.indexOf('renderAll();') < instantBody.indexOf('await savePromise'));
   assert.match(worker, /notificationData\.leadId \? "OPEN_DASHBOARD"/);
   assert.match(worker, /leadlaju-notification-snapshots/);
@@ -731,9 +731,13 @@ test('notification timing instrumentation leaves the immediate snapshot render p
   const source = fs.readFileSync('app.js', 'utf8');
   const helperStart = source.indexOf('function leadTimingKey(');
   const helperEnd = source.indexOf('\nfunction shouldNotifyForLead(', helperStart);
-  const instantStart = source.indexOf('async function showNotificationLeadImmediately');
-  const instantEnd = source.indexOf('\nasync function showCachedNotificationLead', instantStart);
-  const snapshot = { id: 'lead-timing', assignment_revision: 9, assigned_agent_id: 'agent-a' };
+  const instantStart = source.indexOf('function assignmentSnapshotDisposition');
+  const instantEnd = source.indexOf('\nfunction postAssignmentServiceWorkerMessage', instantStart);
+  const snapshot = {
+    id: 'lead-timing', assignment_revision: 9, status_revision: 1,
+    assigned_agent_id: 'agent-a', status: 'New', queue_state: 'active',
+    expires_at: Date.now() + 60000,
+  };
   const logs = [];
   let releaseSave;
   const context = vm.createContext({
@@ -745,6 +749,9 @@ test('notification timing instrumentation leaves the immediate snapshot render p
     getCurrentUser: () => ({ role: 'agent' }),
     markAuthoritativeLeadCommit() {},
     currentAgentMatches: () => true,
+    parseLeadTimestamp: value => new Date(value).getTime(),
+    normalizeSheetStatus: value => String(value || '').toLowerCase(),
+    syncGoogleSheetFresh() {},
     switchView() {},
     canAccessLead: () => true,
     isVisuallyExpiredAssignment: () => false,
@@ -841,7 +848,7 @@ test('snapshot timing is passed only to diagnostics and not to canonical lead st
   const messageStart = source.indexOf('navigator.serviceWorker.addEventListener("message"');
   const messageBody = source.slice(messageStart, source.indexOf('\nwindow.addEventListener("beforeinstallprompt"', messageStart));
   assert.match(messageBody, /const timing = \{ \.\.\.\(event\.data\.timing \|\| \{\}\), appMessageReceivedEpoch \}/);
-  assert.match(messageBody, /showNotificationLeadImmediately\(event\.data\.leadSnapshot, timing\)/);
+  assert.match(messageBody, /consumeAssignmentHandoff\(event\.data, timing\)/);
   assert.match(messageBody, /leadTimingDeliveries\.set/);
   assert.match(messageBody, /event\.data\?\.type === "LEAD_SNAPSHOT_TIMING"/);
   assert.match(messageBody, /logLeadTiming\("DELIVERY_TRACE"/);
@@ -849,6 +856,110 @@ test('snapshot timing is passed only to diagnostics and not to canonical lead st
   const addLeadStart = source.indexOf('async function addLead(');
   const addLeadBody = source.slice(addLeadStart, source.indexOf('\nfunction openManualLeadModal', addLeadStart));
   assert.doesNotMatch(addLeadBody, /timing/);
+});
+
+test('notification handoffs use agent lead and assignment revision without overwriting another lead', () => {
+  const worker = fs.readFileSync('sw.js', 'utf8');
+  const start = worker.indexOf('function leadHandoffIdentity(');
+  const end = worker.indexOf('\nasync function cacheLeadSnapshot', start);
+  const context = vm.createContext({ String, Number, encodeURIComponent, LEAD_HANDOFF_SCHEMA_VERSION: 1 });
+  vm.runInContext(worker.slice(start, end), context);
+  const first = context.leadHandoffIdentity({
+    leadId: 'lead-a', leadSnapshot: { assigned_agent_id: 'agent-1', assignment_revision: 7 },
+  });
+  const second = context.leadHandoffIdentity({
+    leadId: 'lead-b', leadSnapshot: { assigned_agent_id: 'agent-1', assignment_revision: 3 },
+  });
+  assert.equal(first.key, 'agent-1:lead-a:7');
+  assert.equal(second.key, 'agent-1:lead-b:3');
+  assert.notEqual(first.path, second.path);
+  assert.doesNotMatch(worker, /let pendingLead\s*=/);
+});
+
+test('cold-start notification handoff waits for authenticated app readiness and acknowledgement', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const worker = fs.readFileSync('sw.js', 'utf8');
+  const startApp = source.slice(source.indexOf('function startAuthenticatedApp('), source.indexOf('\nfunction ', source.indexOf('function startAuthenticatedApp(') + 1));
+  const click = worker.slice(worker.indexOf('self.addEventListener("notificationclick"'), worker.length);
+  assert.match(startApp, /registerServiceWorker\(\)\.then\(\(\) => announceAssignmentReceiverReady\(\)\)/);
+  assert.match(source, /type: "APP_READY_FOR_LEAD_ASSIGNMENT"/);
+  assert.match(worker, /replayLeadHandoffs\(event\.source/);
+  assert.match(worker, /type: "LEAD_ASSIGNMENT_HANDOFF"/);
+  assert.match(source, /type: "LEAD_ASSIGNMENT_HANDOFF_ACK"/);
+  assert.match(worker, /acknowledgeLeadHandoff\(event\.data\)/);
+  assert.ok(click.indexOf('await cacheLeadSnapshot(notificationData)') < click.indexOf('await self.clients.openWindow(targetUrl)'));
+  assert.match(worker, /\[CACHE_NAME, LEAD_HANDOFF_CACHE\]\.includes\(key\)/);
+});
+
+test('snapshot acceptance rejects wrong owner expiry old revision and unrelated stale notification', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const start = source.indexOf('function assignmentSnapshotDisposition(');
+  const end = source.indexOf('\nasync function acceptAssignmentSnapshot', start);
+  const state = { leads: [] };
+  let ownerMatches = true;
+  let visibleLead = null;
+  const context = vm.createContext({
+    state, Number, String,
+    Date: { now: () => 1000 },
+    currentAgentMatches: () => ownerMatches,
+    parseLeadTimestamp: value => Number(value) || 0,
+    normalizeSheetStatus: value => String(value || '').toLowerCase(),
+    getVisibleActiveLead: () => visibleLead,
+  });
+  vm.runInContext(source.slice(start, end), context);
+  const base = {
+    id: 'lead-a', assigned_agent_id: 'agent-1', assignment_revision: 4,
+    status_revision: 1, status: 'New', queue_state: 'active', expires_at: 2000,
+  };
+  assert.equal(context.assignmentSnapshotDisposition(base).accepted, true);
+  ownerMatches = false;
+  assert.deepEqual({ ...context.assignmentSnapshotDisposition(base) }, { accepted: false, terminal: false });
+  ownerMatches = true;
+  assert.equal(context.assignmentSnapshotDisposition({ ...base, expires_at: 999 }).terminal, true);
+  state.leads.push({ id: 'local-a', dedupeKey: 'lead-a', assignmentRevision: 5, statusRevision: 1, status: 'new' });
+  assert.equal(context.assignmentSnapshotDisposition(base).terminal, true);
+  state.leads.length = 0;
+  visibleLead = { id: 'lead-b', dedupeKey: 'lead-b' };
+  assert.deepEqual({ ...context.assignmentSnapshotDisposition(base) }, { accepted: false, terminal: true, reconcile: true });
+  visibleLead.receivedAt = 1200;
+  const newer = context.assignmentSnapshotDisposition({ ...base, received_at: 1500 });
+  assert.equal(newer.accepted, true);
+  assert.equal(newer.supersededLead, visibleLead);
+});
+
+test('same assignment is idempotent while a contacted local revision cannot be reverted to New', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const start = source.indexOf('function assignmentSnapshotDisposition(');
+  const end = source.indexOf('\nasync function acceptAssignmentSnapshot', start);
+  const local = { id: 'local', dedupeKey: 'lead-a', assignmentRevision: 8, statusRevision: 3, status: 'new' };
+  const context = vm.createContext({
+    state: { leads: [local] }, Number, String,
+    Date: { now: () => 1000 }, currentAgentMatches: () => true,
+    parseLeadTimestamp: value => Number(value) || 0,
+    normalizeSheetStatus: value => String(value || '').toLowerCase(),
+    getVisibleActiveLead: () => local.status === 'new' ? local : null,
+  });
+  vm.runInContext(source.slice(start, end), context);
+  const snapshot = {
+    id: 'lead-a', assigned_agent_id: 'agent-1', assignment_revision: 8,
+    status_revision: 3, status: 'New', queue_state: 'active', expires_at: 2000,
+  };
+  assert.equal(context.assignmentSnapshotDisposition(snapshot).accepted, true);
+  local.status = 'contacted';
+  assert.deepEqual({ ...context.assignmentSnapshotDisposition(snapshot) }, { accepted: false, terminal: true });
+});
+
+test('new and immediately previous service worker handoff formats remain compatible', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const worker = fs.readFileSync('sw.js', 'utf8');
+  assert.match(worker, /schemaVersion: LEAD_HANDOFF_SCHEMA_VERSION/);
+  assert.match(worker, /leadSnapshot: payload\.leadSnapshot/);
+  assert.match(worker, /\/__lead_snapshot__\//);
+  assert.match(source, /cached\.leadSnapshot \|\| cached/);
+  assert.match(source, /event\.data\?\.type === "LEAD_SNAPSHOT"/);
+  assert.match(source, /event\.data\?\.type === "LEAD_ASSIGNMENT_HANDOFF"/);
+  assert.match(source, /data\.schemaVersion != null && data\.schemaVersion !== LEAD_HANDOFF_SCHEMA_VERSION/);
+  assert.match(source, /if \(!matching\[0\]\.handoffKey\) await cache\.delete/);
 });
 
 test('login UI is not blocked by the initial Google Sheet agent sync', () => {
