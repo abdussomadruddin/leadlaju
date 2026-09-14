@@ -137,6 +137,7 @@ const pendingAgentApprovals = new Set();
 const pendingAgentDeletions = new Set();
 const authoritativelyDeletedAgentIds = new Set();
 let serviceWorkerRegistrationPromise = null;
+let cachedAssignmentCheckInProgress = false;
 let notificationAudioContext = null;
 let lastAgentPresenceHeartbeatAt = 0;
 let deferredInstallPrompt = null;
@@ -1806,6 +1807,16 @@ async function showLatestCachedNotificationLead() {
   } catch (error) {
     console.warn("Latest notification snapshot could not be opened", error);
     return false;
+  }
+}
+
+async function checkCachedAssignmentSnapshot() {
+  if (cachedAssignmentCheckInProgress) return false;
+  cachedAssignmentCheckInProgress = true;
+  try {
+    return await showLatestCachedNotificationLead();
+  } finally {
+    cachedAssignmentCheckInProgress = false;
   }
 }
 
@@ -5597,7 +5608,10 @@ function scheduleSync() {
   window.clearInterval(syncTimer);
   if (!getSheetEndpoint()) return;
   syncTimer = window.setInterval(
-    () => syncGoogleSheet({ silent: true }),
+    () => {
+      checkCachedAssignmentSnapshot();
+      syncGoogleSheet({ silent: true });
+    },
     DEFAULT_SYNC_INTERVAL_SECONDS * 1000,
   );
 }

@@ -844,6 +844,23 @@ test('notification still proceeds when no app client is open or an old client do
   assert.doesNotMatch(broadcast, /if \(!clients\.length\).*return/);
 });
 
+test('phone polling consumes the locally cached push snapshot without waiting for Sheet sync', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const checkStart = source.indexOf('async function checkCachedAssignmentSnapshot');
+  const checkEnd = source.indexOf('\nasync function registerServiceWorker', checkStart);
+  const checkBody = source.slice(checkStart, checkEnd);
+  const scheduleStart = source.indexOf('function scheduleSync()');
+  const scheduleEnd = source.indexOf('\nfunction waitForCurrentSync', scheduleStart);
+  const scheduleBody = source.slice(scheduleStart, scheduleEnd);
+  assert.match(checkBody, /cachedAssignmentCheckInProgress/);
+  assert.match(checkBody, /await showLatestCachedNotificationLead\(\)/);
+  assert.match(checkBody, /finally \{/);
+  assert.match(scheduleBody, /checkCachedAssignmentSnapshot\(\)/);
+  assert.match(scheduleBody, /syncGoogleSheet\(\{ silent: true \}\)/);
+  assert.ok(scheduleBody.indexOf('checkCachedAssignmentSnapshot()') < scheduleBody.indexOf('syncGoogleSheet({ silent: true })'));
+  assert.match(scheduleBody, /DEFAULT_SYNC_INTERVAL_SECONDS \* 1000/);
+});
+
 test('app writes a readable single-line delivery trace without lead business data', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const start = source.indexOf('function logLeadTiming(');
