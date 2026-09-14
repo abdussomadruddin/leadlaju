@@ -64,7 +64,7 @@ test('true cold start begins cinematic and authoritative sync in parallel with l
   const harness = createLifecycleHarness();
   harness.context.beginColdStartSync();
   assert.equal(harness.syncCalls(), 1);
-  assert.equal(harness.timers[0].delay, 2000);
+  assert.equal(harness.timers[0].delay, 3000);
   assert.equal(harness.overlay.classList.contains('cinematic'), true);
   assert.equal(harness.body.classList.contains('business-mutations-locked'), true);
   assert.match(html, />Sedang sync Lead Laju…</);
@@ -87,6 +87,7 @@ test('slower sync leaves a lightweight waiting state until authoritative render 
   harness.timers[0].callback();
   assert.equal(harness.context.lifecycleState().syncState, 'pending');
   assert.equal(harness.overlay.classList.contains('waiting'), true);
+  assert.match(css, /\.lifecycle-sync-overlay\.waiting,[\s\S]*\.lifecycle-sync-overlay\.resume \{[\s\S]*inset: auto auto max\(16px, env\(safe-area-inset-bottom\)\) 50%/);
   harness.context.completeLifecycleAuthoritativeRender();
   assert.equal(harness.overlay.classList.contains('visible'), false);
   assert.equal(harness.body.classList.contains('business-mutations-locked'), false);

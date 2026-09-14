@@ -1368,7 +1368,7 @@ function setGlobalLoading(active, message = "Sedang diproses...") {
   elements.globalLoadingOverlay.setAttribute("aria-hidden", String(!visible));
 }
 
-const LIFECYCLE_INTRO_DURATION_MS = 2000;
+const LIFECYCLE_INTRO_DURATION_MS = 3000;
 const LIFECYCLE_MUTATION_SELECTOR = [
   "#get-lead-button",
   "#stop-lead-button",

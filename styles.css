@@ -3020,6 +3020,7 @@ td small {
   display: block;
 }
 
+.lifecycle-sync-overlay.waiting,
 .lifecycle-sync-overlay.resume {
   inset: auto auto max(16px, env(safe-area-inset-bottom)) 50%;
   width: max-content;
@@ -3033,6 +3034,7 @@ td small {
   -webkit-backdrop-filter: blur(12px);
 }
 
+.lifecycle-sync-overlay.waiting .lifecycle-sync-content,
 .lifecycle-sync-overlay.resume .lifecycle-sync-content {
   display: flex;
   min-width: 0;
@@ -3041,17 +3043,21 @@ td small {
   padding: 9px 13px;
 }
 
+.lifecycle-sync-overlay.waiting .lifecycle-wait-indicator,
 .lifecycle-sync-overlay.resume .lifecycle-wait-indicator {
   width: 16px;
   height: 16px;
   border-width: 2px;
 }
 
+.lifecycle-sync-overlay.waiting .lifecycle-sync-content > strong,
 .lifecycle-sync-overlay.resume .lifecycle-sync-content > strong {
   font-size: 0.78rem;
   white-space: nowrap;
 }
 
+.lifecycle-sync-overlay.waiting .lifecycle-brand,
+.lifecycle-sync-overlay.waiting .lifecycle-light,
 .lifecycle-sync-overlay.resume .lifecycle-brand,
 .lifecycle-sync-overlay.resume .lifecycle-light {
   display: none;
