@@ -818,9 +818,7 @@ test('open agent renders the pushed CALL NOW before the device notification is s
   const delivery = worker.slice(deliveryStart, deliveryEnd);
   assert.ok(delivery.indexOf('await cacheLeadSnapshot(payload)') < delivery.indexOf('await broadcastLeadSnapshot(payload, timing)'));
   assert.ok(delivery.indexOf('await broadcastLeadSnapshot(payload, timing)') < delivery.indexOf('await showLeadNotification(payload, timing'));
-  assert.match(worker, /new MessageChannel\(\)/);
-  assert.match(worker, /channel\.port1\.onmessage/);
-  assert.match(worker, /client\.postMessage\(message, \[channel\.port2\]\)/);
+  assert.match(worker, /client\.postMessage\(message\)/);
   const messageStart = source.indexOf('if (event.data?.type === "LEAD_SNAPSHOT")');
   const messageEnd = source.indexOf('\n    if (event.data?.type === "LEAD_ASSIGNMENT_HANDOFF")', messageStart);
   const messageBody = source.slice(messageStart, messageEnd);
@@ -833,14 +831,9 @@ test('notification still proceeds when no app client is open or an old client do
   const broadcastStart = worker.indexOf('async function broadcastLeadSnapshot');
   const broadcastEnd = worker.indexOf('\nasync function deliverLeadNotification', broadcastStart);
   const broadcast = worker.slice(broadcastStart, broadcastEnd);
-  assert.match(broadcast, /visibleClients = clients\.filter/);
-  assert.match(broadcast, /Promise\.all\(visibleClients\.map/);
-  assert.match(broadcast, /hiddenClients\.forEach\(\(client\) => client\.postMessage\(message\)\)/);
-  assert.match(worker, /setTimeout\(\(\) => finish\(false\), timeoutMs\)/);
-  assert.match(worker, /timeoutMs = 5000/);
+  assert.match(broadcast, /clients\.map\(\(client\) => deliverLeadSnapshotToClient/);
   assert.match(broadcast, /clientCount: clients\.length/);
-  assert.match(broadcast, /visibleClientCount: visibleClients\.length/);
-  assert.match(broadcast, /readyCount: readyResults\.filter\(Boolean\)\.length/);
+  assert.match(broadcast, /deliveredClientCount: deliveredResults\.filter\(Boolean\)\.length/);
   assert.doesNotMatch(broadcast, /if \(!clients\.length\).*return/);
 });
 
@@ -859,6 +852,17 @@ test('phone polling consumes the locally cached push snapshot without waiting fo
   assert.match(scheduleBody, /syncGoogleSheet\(\{ silent: true \}\)/);
   assert.ok(scheduleBody.indexOf('checkCachedAssignmentSnapshot()') < scheduleBody.indexOf('syncGoogleSheet({ silent: true })'));
   assert.match(scheduleBody, /DEFAULT_SYNC_INTERVAL_SECONDS \* 1000/);
+});
+
+test('every new lead notification is held for the full seven seconds after snapshot delivery', () => {
+  const worker = fs.readFileSync('sw.js', 'utf8');
+  const deliveryStart = worker.indexOf('async function deliverLeadNotification');
+  const deliveryEnd = worker.indexOf('\nself.addEventListener("message"', deliveryStart);
+  const delivery = worker.slice(deliveryStart, deliveryEnd);
+  assert.match(worker, /const LEAD_NOTIFICATION_HOLD_MS = 7000/);
+  assert.ok(delivery.indexOf('await cacheLeadSnapshot(payload)') < delivery.indexOf('await broadcastLeadSnapshot(payload, timing)'));
+  assert.ok(delivery.indexOf('await broadcastLeadSnapshot(payload, timing)') < delivery.indexOf('setTimeout(resolve, LEAD_NOTIFICATION_HOLD_MS)'));
+  assert.ok(delivery.indexOf('setTimeout(resolve, LEAD_NOTIFICATION_HOLD_MS)') < delivery.indexOf('await showLeadNotification(payload, timing'));
 });
 
 test('app writes a readable single-line delivery trace without lead business data', () => {

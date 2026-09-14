@@ -1,6 +1,7 @@
 const CACHE_NAME = "leadlaju-pwa-v20260912-lead-monitor-v72";
 const LEAD_HANDOFF_CACHE = "leadlaju-notification-snapshots";
 const LEAD_HANDOFF_SCHEMA_VERSION = 1;
+const LEAD_NOTIFICATION_HOLD_MS = 7000;
 const APP_SHELL = [
   "/",
   "/index.html",
@@ -223,24 +224,13 @@ async function showLeadNotification(payload = {}, timing = createLeadTiming(payl
   await self.registration.showNotification(title, options);
 }
 
-function deliverLeadSnapshotToClient(client, message, timeoutMs = 5000) {
-  return new Promise((resolve) => {
-    const channel = new MessageChannel();
-    let settled = false;
-    const finish = (ready) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(Boolean(ready));
-    };
-    const timer = setTimeout(() => finish(false), timeoutMs);
-    channel.port1.onmessage = (event) => finish(event.data?.ready);
-    try {
-      client.postMessage(message, [channel.port2]);
-    } catch {
-      finish(false);
-    }
-  });
+function deliverLeadSnapshotToClient(client, message) {
+  try {
+    client.postMessage(message);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function broadcastLeadSnapshot(payload = {}, timing = createLeadTiming(payload)) {
@@ -261,10 +251,7 @@ async function broadcastLeadSnapshot(payload = {}, timing = createLeadTiming(pay
       swBroadcastCompleteEpoch: null,
     },
   };
-  const visibleClients = clients.filter((client) => client.visibilityState === "visible" || client.focused);
-  const hiddenClients = clients.filter((client) => !visibleClients.includes(client));
-  hiddenClients.forEach((client) => client.postMessage(message));
-  const readyResults = await Promise.all(visibleClients.map((client) => deliverLeadSnapshotToClient(client, message)));
+  const deliveredResults = clients.map((client) => deliverLeadSnapshotToClient(client, message));
   timing.swBroadcastCompleteEpoch = Date.now();
   logLeadTiming("SW_BROADCAST_COMPLETE", timing);
   clients.forEach((client) => client.postMessage({
@@ -278,14 +265,14 @@ async function broadcastLeadSnapshot(payload = {}, timing = createLeadTiming(pay
   }));
   return {
     clientCount: clients.length,
-    visibleClientCount: visibleClients.length,
-    readyCount: readyResults.filter(Boolean).length,
+    deliveredClientCount: deliveredResults.filter(Boolean).length,
   };
 }
 
 async function deliverLeadNotification(payload = {}, timing = createLeadTiming(payload)) {
   await cacheLeadSnapshot(payload);
   await broadcastLeadSnapshot(payload, timing);
+  await new Promise((resolve) => setTimeout(resolve, LEAD_NOTIFICATION_HOLD_MS));
   await showLeadNotification(payload, timing, { snapshotCached: true });
 }
 
