@@ -2931,6 +2931,163 @@ td small {
   line-height: 1.6;
 }
 
+.lifecycle-sync-overlay {
+  position: fixed;
+  z-index: 110;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  color: #fff;
+  background: #0a1429;
+  transition: opacity 180ms ease, visibility 180ms ease;
+}
+
+.lifecycle-sync-overlay.visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+.lifecycle-sync-content {
+  position: relative;
+  display: grid;
+  min-width: min(82vw, 460px);
+  justify-items: center;
+  gap: 18px;
+  overflow: hidden;
+  padding: 32px;
+}
+
+.lifecycle-brand {
+  display: flex;
+  gap: 0.28em;
+  font-family: "Manrope", sans-serif;
+  font-size: 4.2rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+@media (max-width: 600px) {
+  .lifecycle-brand {
+    font-size: 2.3rem;
+  }
+
+  .lifecycle-sync-overlay.resume {
+    inset: max(12px, env(safe-area-inset-top)) 12px auto 12px;
+  }
+
+  .lifecycle-sync-overlay.resume .lifecycle-sync-content {
+    justify-content: center;
+  }
+}
+
+.lifecycle-sync-overlay.cinematic .lifecycle-brand {
+  animation: leadlaju-brand-reveal 1.7s cubic-bezier(0.22, 0.75, 0.2, 1) both;
+}
+
+.lifecycle-brand span:last-child {
+  color: #4d8dff;
+}
+
+.lifecycle-light {
+  position: absolute;
+  top: 20px;
+  bottom: 54px;
+  width: 34%;
+  opacity: 0;
+  background: linear-gradient(90deg, transparent, rgba(108, 164, 255, 0.42), transparent);
+  transform: skewX(-12deg) translateX(-230%);
+}
+
+.lifecycle-sync-overlay.cinematic .lifecycle-light {
+  animation: leadlaju-light-pass 1.35s 280ms ease-out both;
+}
+
+.lifecycle-sync-content > strong {
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: rgba(255, 255, 255, 0.76);
+}
+
+.lifecycle-wait-indicator {
+  display: none;
+  width: 28px;
+  height: 28px;
+  border: 3px solid rgba(255, 255, 255, 0.2);
+  border-top-color: #4d8dff;
+  border-radius: 50%;
+  animation: loading-spin 720ms linear infinite;
+}
+
+.lifecycle-sync-overlay.waiting .lifecycle-wait-indicator,
+.lifecycle-sync-overlay.resume .lifecycle-wait-indicator {
+  display: block;
+}
+
+.lifecycle-sync-overlay.resume {
+  inset: 18px 18px auto auto;
+  place-items: initial;
+  border-radius: 8px;
+  background: rgba(10, 20, 41, 0.94);
+  box-shadow: var(--shadow-lg);
+}
+
+.lifecycle-sync-overlay.resume .lifecycle-sync-content {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 11px;
+  padding: 14px 18px;
+}
+
+.lifecycle-sync-overlay.resume .lifecycle-brand,
+.lifecycle-sync-overlay.resume .lifecycle-light {
+  display: none;
+}
+
+body.business-mutations-locked .lifecycle-mutation-control {
+  pointer-events: none;
+  opacity: 0.5;
+  cursor: wait;
+}
+
+@keyframes leadlaju-brand-reveal {
+  0% { opacity: 0; filter: blur(14px); transform: scale(0.94); clip-path: inset(0 52% 0 48%); }
+  24% { opacity: 0.82; }
+  70% { filter: blur(1px); transform: scale(1.015); clip-path: inset(0); }
+  100% { opacity: 1; filter: blur(0); transform: scale(1); clip-path: inset(0); }
+}
+
+@keyframes leadlaju-light-pass {
+  0% { opacity: 0; transform: skewX(-12deg) translateX(-230%); }
+  28% { opacity: 1; }
+  100% { opacity: 0; transform: skewX(-12deg) translateX(230%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lifecycle-sync-overlay *,
+  .lifecycle-sync-overlay *::before,
+  .lifecycle-sync-overlay *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .lifecycle-sync-overlay.cinematic .lifecycle-brand {
+    opacity: 1;
+    filter: none;
+    transform: none;
+    clip-path: none;
+  }
+
+  .lifecycle-light {
+    display: none;
+  }
+}
+
 .global-loading-overlay {
   position: fixed;
   z-index: 100;

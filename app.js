@@ -156,6 +156,13 @@ const leadTimingDeliveries = new Map();
 const authoritativeLeadGenerations = new Map();
 let authoritativeStateGeneration = 0;
 const locallyExpiredAssignments = new Set();
+let leadLajuIntroShown = false;
+let introRevealComplete = false;
+let initialDashboardSyncState = "idle";
+let resumeSyncPending = false;
+let runtimeWasHidden = false;
+let lifecycleIntroTimer = null;
+let lifecycleSyncPromise = null;
 
 const elements = {
   sidebar: document.querySelector("#sidebar"),
@@ -219,6 +226,7 @@ const elements = {
   closeLeadAvailability: document.querySelector("#close-lead-availability"),
   globalLoadingOverlay: document.querySelector("#global-loading-overlay"),
   globalLoadingMessage: document.querySelector("#global-loading-message"),
+  lifecycleSyncOverlay: document.querySelector("#lifecycle-sync-overlay"),
   enableRequiredNotifications: document.querySelector("#enable-required-notifications"),
   addToHomeScreen: document.querySelector("#add-to-home-screen"),
   closeNotificationReminder: document.querySelector("#close-notification-reminder"),
@@ -695,6 +703,7 @@ function startAuthenticatedApp(user) {
   elements.loginForm.reset();
   elements.loginPassword.type = "password";
   elements.passwordToggle.setAttribute("aria-label", "Tunjukkan kata laluan");
+  const startupSync = leadLajuIntroShown ? beginResumeSync() : beginColdStartSync();
 
   window.clearInterval(tickTimer);
   tickTimer = window.setInterval(() => {
@@ -716,7 +725,7 @@ function startAuthenticatedApp(user) {
       showCachedNotificationLead(pendingNotificationLeadId);
       syncNotificationLead(pendingNotificationLeadId);
     }
-    syncGoogleSheet({ silent: true, notifyNewLeads: true }).finally(() => {
+    startupSync.finally(() => {
       if (pendingPotentialReminder) openPotentialReminderModal();
     });
   } else if (pendingPotentialReminder) {
@@ -1357,6 +1366,130 @@ function setGlobalLoading(active, message = "Sedang diproses...") {
   elements.globalLoadingMessage.textContent = message;
   elements.globalLoadingOverlay.classList.toggle("visible", visible);
   elements.globalLoadingOverlay.setAttribute("aria-hidden", String(!visible));
+}
+
+const LIFECYCLE_INTRO_DURATION_MS = 2000;
+const LIFECYCLE_MUTATION_SELECTOR = [
+  "#get-lead-button",
+  "#stop-lead-button",
+  ".call-button",
+  "[data-lead-status]",
+  "[data-lead-note-save]",
+  "[data-agent-approve]",
+  "[data-agent-reject]",
+  "[data-agent-remove]",
+  "[data-agent-toggle]",
+  "[data-agent-force-offline]",
+  "[data-appointment-status]",
+  "[data-appointment-delete]",
+  "[data-project-toggle]",
+  "#manual-lead-form button[type='submit']",
+  "#appointment-form button[type='submit']",
+  "#agent-form button[type='submit']",
+  "#project-form button[type='submit']",
+  "#contact-form button[type='submit']",
+].join(",");
+
+function lifecycleMutationGateClosed() {
+  return document.body.classList.contains("authenticated") && initialDashboardSyncState !== "ready";
+}
+
+function updateLifecycleMutationGate() {
+  const locked = lifecycleMutationGateClosed();
+  document.body.classList.toggle("business-mutations-locked", locked);
+  document.querySelectorAll(LIFECYCLE_MUTATION_SELECTOR).forEach((control) => {
+    control.classList.toggle("lifecycle-mutation-control", locked);
+    if (locked) control.setAttribute("aria-disabled", "true");
+    else control.removeAttribute("aria-disabled");
+  });
+}
+
+function guardLifecycleMutation() {
+  if (!lifecycleMutationGateClosed()) return true;
+  showToast("Sync masih berjalan", "Sedang sync Lead Laju…", "error");
+  return false;
+}
+
+function showLifecycleSyncOverlay(mode) {
+  elements.lifecycleSyncOverlay.classList.remove("cinematic", "waiting", "resume");
+  elements.lifecycleSyncOverlay.classList.add("visible", mode);
+  elements.lifecycleSyncOverlay.setAttribute("aria-hidden", "false");
+}
+
+function hideLifecycleSyncOverlay() {
+  elements.lifecycleSyncOverlay.classList.remove("visible", "cinematic", "waiting", "resume");
+  elements.lifecycleSyncOverlay.setAttribute("aria-hidden", "true");
+}
+
+function settleLifecyclePresentation() {
+  updateLifecycleMutationGate();
+  if (!introRevealComplete) return;
+  if (initialDashboardSyncState === "pending") {
+    showLifecycleSyncOverlay("waiting");
+    return;
+  }
+  hideLifecycleSyncOverlay();
+}
+
+function completeLifecycleAuthoritativeRender() {
+  if (initialDashboardSyncState === "pending" || initialDashboardSyncState === "failed") {
+    initialDashboardSyncState = "ready";
+    resumeSyncPending = false;
+    settleLifecyclePresentation();
+  }
+}
+
+function failLifecycleSync() {
+  if (initialDashboardSyncState !== "pending") return;
+  initialDashboardSyncState = "failed";
+  resumeSyncPending = false;
+  updateLifecycleMutationGate();
+  if (introRevealComplete) hideLifecycleSyncOverlay();
+}
+
+function runLifecycleAuthoritativeSync() {
+  return syncGoogleSheetFresh({ silent: true, notifyNewLeads: true, lifecycleSync: true })
+    .then((success) => {
+      if (!success) failLifecycleSync();
+      return success;
+    })
+    .catch((error) => {
+      failLifecycleSync();
+      console.error("Lifecycle sync failed", error);
+      return false;
+    });
+}
+
+function beginColdStartSync() {
+  leadLajuIntroShown = true;
+  introRevealComplete = false;
+  initialDashboardSyncState = "pending";
+  showLifecycleSyncOverlay("cinematic");
+  updateLifecycleMutationGate();
+  window.clearTimeout(lifecycleIntroTimer);
+  lifecycleIntroTimer = window.setTimeout(() => {
+    introRevealComplete = true;
+    settleLifecyclePresentation();
+  }, LIFECYCLE_INTRO_DURATION_MS);
+  lifecycleSyncPromise = runLifecycleAuthoritativeSync();
+  return lifecycleSyncPromise;
+}
+
+function beginResumeSync() {
+  if (!document.body.classList.contains("authenticated")) return Promise.resolve(false);
+  if (!leadLajuIntroShown || initialDashboardSyncState === "pending" || resumeSyncPending) {
+    return lifecycleSyncPromise || Promise.resolve(false);
+  }
+  introRevealComplete = true;
+  initialDashboardSyncState = "pending";
+  resumeSyncPending = true;
+  showLifecycleSyncOverlay("resume");
+  updateLifecycleMutationGate();
+  lifecycleSyncPromise = runLifecycleAuthoritativeSync()
+    .finally(() => {
+      resumeSyncPending = false;
+    });
+  return lifecycleSyncPromise;
 }
 
 function openLeadAvailabilityConfirmation(ready) {
@@ -2326,6 +2459,7 @@ function openManualLeadModal() {
 
 async function addManualLead(event) {
   event.preventDefault();
+  if (!guardLifecycleMutation()) return false;
   if (!isAdmin()) {
     elements.manualLeadError.textContent = "Hanya admin boleh tambah manual lead baru.";
     return;
@@ -2663,6 +2797,7 @@ async function updateAgentPresence(online, force = false) {
 }
 
 async function setAgentLeadAvailability(ready) {
+  if (!guardLifecycleMutation()) return false;
   const user = getCurrentUser();
   if (!user?.id || user.role !== "agent") return false;
   if (ready && (!("Notification" in window) || Notification.permission !== "granted")) {
@@ -3599,6 +3734,7 @@ function dialLeadPhone(phone) {
 }
 
 async function handleCall(leadId) {
+  if (!guardLifecycleMutation()) return false;
   const lead = state.leads.find((item) => item.id === leadId);
   if (!lead || lead.status !== "new") {
     showToast("Lead tidak tersedia", "Lead ini sudah diambil, tamat masa atau telah dikemas kini.", "error");
@@ -4239,6 +4375,7 @@ function appointmentActionPayload(appointment = {}) {
 
 async function saveAppointment(event) {
   event.preventDefault();
+  if (!guardLifecycleMutation()) return false;
   const lead = state.leads.find((item) => item.id === selectedAppointmentLeadId);
   if (!lead?.assignedAgentId || !canAccessLead(lead)) {
     elements.appointmentFormError.textContent = "Lead ini sudah tidak ditugaskan kepada anda.";
@@ -4271,6 +4408,7 @@ async function saveAppointment(event) {
 }
 
 async function updateAppointmentStatus(appointmentId, status) {
+  if (!guardLifecycleMutation()) return false;
   const appointment = state.appointments.find((item) => item.id === appointmentId);
   const lead = findLeadForAppointment(appointment);
   if (!appointment || !lead || !canAccessLead(lead)) return;
@@ -4290,6 +4428,7 @@ async function updateAppointmentStatus(appointmentId, status) {
 }
 
 async function deleteAppointment(appointmentId) {
+  if (!guardLifecycleMutation()) return false;
   const appointment = state.appointments.find((item) => item.id === appointmentId);
   const lead = findLeadForAppointment(appointment);
   if (!appointment || !lead || !canAccessLead(lead)) return;
@@ -4618,6 +4757,7 @@ function renderAll() {
   renderProjects();
   renderLeadMonitor();
   renderIntegration();
+  updateLifecycleMutationGate();
 }
 
 const viewTitles = {
@@ -4686,6 +4826,7 @@ function closeModal(modal) {
 
 async function addAgent(event) {
   event.preventDefault();
+  if (!guardLifecycleMutation()) return false;
   const name = elements.agentName.value.trim();
   const phone = elements.agentPhone.value.trim();
   const email = elements.agentEmail.value.trim();
@@ -4749,6 +4890,7 @@ async function addAgent(event) {
 }
 
 async function approveAgent(agentId) {
+  if (!guardLifecycleMutation()) return false;
   const agent = getAgent(agentId);
   if (!agent || agent.active || pendingAgentApprovals.has(agentId)) return;
   if (!normalizeProjectIds(agent.eligibleProjectIds).length) {
@@ -4820,6 +4962,7 @@ async function saveProject(project) {
 
 async function addProject(event) {
   event.preventDefault();
+  if (!guardLifecycleMutation()) return false;
   if (!isAdmin()) return;
   const name = elements.projectName.value.trim().replace(/\s+/g, " ");
   if (!name) return;
@@ -4840,6 +4983,7 @@ async function addProject(event) {
 }
 
 async function toggleProject(projectId) {
+  if (!guardLifecycleMutation()) return false;
   if (!isAdmin()) return;
   const project = state.projects.find((item) => item.id === projectId);
   if (!project) return;
@@ -4862,6 +5006,7 @@ async function rejectAgent(agentId) {
 }
 
 async function deleteAgentWithLoading(agent, options = {}) {
+  if (!guardLifecycleMutation()) return false;
   if (!agent || pendingAgentDeletions.has(agent.id)) return false;
   const rejectButton = [...elements.agentsGrid.querySelectorAll("[data-agent-reject]")]
     .find((button) => button.dataset.agentReject === agent.id);
@@ -4907,6 +5052,7 @@ async function deleteAgentWithLoading(agent, options = {}) {
 }
 
 async function toggleAgent(agentId) {
+  if (!guardLifecycleMutation()) return false;
   const agent = getAgent(agentId);
   if (!agent) return;
   agent.active = !agent.active;
@@ -4950,6 +5096,7 @@ function confirmPermanentDelete(itemType, itemName) {
 }
 
 async function forceAgentOffline(agentId) {
+  if (!guardLifecycleMutation()) return false;
   if (!isAdmin()) return;
   const agent = getAgent(agentId);
   if (!agent || agent.role !== "agent") return;
@@ -4981,6 +5128,7 @@ function openAgentPasswordModal(agentId) {
 
 async function updateAgentPassword(event) {
   event.preventDefault();
+  if (!guardLifecycleMutation()) return false;
   const agent = getAgent(selectedAgentId);
   const password = elements.agentNewPassword.value;
   const confirmation = elements.agentConfirmPassword.value;
@@ -5032,6 +5180,7 @@ function openContactModal(leadId) {
 
 async function updateContact(event) {
   event.preventDefault();
+  if (!guardLifecycleMutation()) return false;
   const lead = state.leads.find((item) => item.id === selectedContactId);
   if (!lead || !canViewLeadPhone(lead)) {
     elements.contactFormError.textContent = "Lead ini tidak boleh dikemas kini.";
@@ -5069,6 +5218,7 @@ async function updateContact(event) {
 }
 
 async function saveLeadNote(leadId, button = null) {
+  if (!guardLifecycleMutation()) return false;
   const lead = state.leads.find((item) => item.id === leadId);
   const field = [...elements.leadsTableBody.querySelectorAll("[data-lead-note]")].find(
     (item) => item.dataset.leadNote === leadId,
@@ -5123,6 +5273,7 @@ async function saveLeadNote(leadId, button = null) {
 }
 
 async function updateLeadStatusFromLog(leadId, nextStatus, field = null) {
+  if (!guardLifecycleMutation()) return false;
   const lead = state.leads.find((item) => item.id === leadId);
   if (!lead) return false;
 
@@ -5193,6 +5344,7 @@ async function updateLeadStatusFromLog(leadId, nextStatus, field = null) {
 }
 
 async function deleteLeadEverywhere(leadId) {
+  if (!guardLifecycleMutation()) return false;
   if (!isAdmin()) {
     showToast("Admin sahaja", "Hanya admin boleh padam lead daripada dashboard.", "error");
     return;
@@ -5322,6 +5474,12 @@ async function syncGoogleSheet(options = {}) {
     }
     scheduleSync();
     renderAll();
+    if (
+      options.lifecycleSync ||
+      (typeof initialDashboardSyncState !== "undefined" && initialDashboardSyncState === "failed")
+    ) {
+      completeLifecycleAuthoritativeRender();
+    }
     elements.connectionResult.classList.remove("error");
     elements.connectionResult.innerHTML = '<span class="status-dot"></span><span>Disambungkan. Sync baru sahaja.</span>';
     enforceAgentNotificationAccess();
@@ -5362,6 +5520,7 @@ async function syncGoogleSheet(options = {}) {
     }
     return true;
   } catch (error) {
+    if (options.lifecycleSync) failLifecycleSync();
     state.integration.connected = false;
     saveState();
     elements.connectionResult.classList.add("error");
@@ -5640,10 +5799,27 @@ window.addEventListener("focus", () => {
   if (latestAdminReminder) sendAdminFollowUpNotification(latestAdminReminder);
 });
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) {
+  if (document.hidden) {
+    runtimeWasHidden = true;
+  } else {
     processExpiredLeads();
     checkFollowUpReminder();
     if (latestAdminReminder) sendAdminFollowUpNotification(latestAdminReminder);
+    if (runtimeWasHidden) {
+      runtimeWasHidden = false;
+      beginResumeSync();
+    }
+  }
+});
+
+window.addEventListener("pagehide", (event) => {
+  if (event.persisted) runtimeWasHidden = true;
+});
+
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted && runtimeWasHidden) {
+    runtimeWasHidden = false;
+    beginResumeSync();
   }
 });
 
@@ -5729,6 +5905,7 @@ async function bootstrap() {
   const sessionUser = getSessionUser();
   if (sessionUser) {
     startAuthenticatedApp(sessionUser);
+    return;
   } else {
     showLogin();
   }

@@ -1331,7 +1331,7 @@ test('a stale assignment timer revalidates the exact assignment before expiry', 
 test('focus and visibility immediately recheck an overdue assignment', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   assert.match(source, /window\.addEventListener\("focus", \(\) => \{\s*processExpiredLeads\(\)/);
-  assert.match(source, /document\.addEventListener\("visibilitychange", \(\) => \{\s*if \(!document\.hidden\) \{\s*processExpiredLeads\(\)/);
+  assert.match(source, /document\.addEventListener\("visibilitychange", \(\) => \{[\s\S]*?if \(document\.hidden\)[\s\S]*?else \{\s*processExpiredLeads\(\)/);
 });
 
 test('failed expiry stays authoritative locally and becomes retryable', () => {
