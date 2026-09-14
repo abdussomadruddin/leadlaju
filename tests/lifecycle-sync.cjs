@@ -48,6 +48,7 @@ function createLifecycleHarness() {
     let initialDashboardSyncState = "idle";
     let resumeSyncPending = false;
     let lifecycleIntroTimer = null;
+    let lifecycleHideTimer = null;
     let lifecycleSyncPromise = null;
   `, context);
   vm.runInContext(source.slice(start, end), context);
@@ -105,8 +106,9 @@ test('background resume skips cinematic and deduplicates related foreground requ
   assert.equal(harness.syncCalls(), 2);
   assert.equal(harness.overlay.classList.contains('resume'), true);
   assert.equal(harness.overlay.classList.contains('cinematic'), false);
-  assert.equal(harness.timers[1].delay, 1000);
-  harness.timers[1].callback();
+  const resumeTimer = harness.timers.find((timer) => timer.delay === 1000);
+  assert.ok(resumeTimer);
+  resumeTimer.callback();
   assert.equal(harness.overlay.classList.contains('visible'), false);
 });
 
@@ -119,8 +121,36 @@ test('completed resume sync keeps its indicator visible until the one-second pre
   harness.context.beginResumeSync();
   harness.context.completeLifecycleAuthoritativeRender();
   assert.equal(harness.overlay.classList.contains('visible'), true);
-  harness.timers[1].callback();
+  const resumeTimer = harness.timers.find((timer) => timer.delay === 1000);
+  assert.ok(resumeTimer);
+  resumeTimer.callback();
   assert.equal(harness.overlay.classList.contains('visible'), false);
+  assert.equal(harness.overlay.classList.contains('resume'), true);
+  const fadeTimer = harness.timers.at(-1);
+  assert.equal(fadeTimer.delay, 180);
+  fadeTimer.callback();
+  assert.equal(harness.overlay.classList.contains('resume'), false);
+});
+
+test('sync indicator retains its compact mode throughout fade-out to prevent a fullscreen flicker', () => {
+  const start = source.indexOf('function hideLifecycleSyncOverlay()');
+  const end = source.indexOf('\nfunction settleLifecyclePresentation', start);
+  const body = source.slice(start, end);
+  assert.match(body, /classList\.remove\("visible"\)/);
+  assert.match(body, /setTimeout\(\(\) =>/);
+  assert.match(body, /classList\.remove\("cinematic", "waiting", "resume"\)/);
+  assert.ok(body.indexOf('classList.remove("visible")') < body.indexOf('classList.remove("cinematic", "waiting", "resume")'));
+  assert.match(css, /transition: opacity 180ms ease, visibility 0s linear 180ms/);
+});
+
+test('restored authenticated sessions skip the fullscreen cinematic on PWA reopen', () => {
+  const start = source.indexOf('function startAuthenticatedApp(user, options = {})');
+  const end = source.indexOf('\nfunction ', start + 1);
+  const body = source.slice(start, end);
+  assert.match(body, /if \(options\.restoredSession\) leadLajuIntroShown = true/);
+  assert.match(source, /startAuthenticatedApp\(sessionUser, \{ restoredSession: true \}\)/);
+  assert.match(source, /startAuthenticatedApp\(user, \{ freshLogin: true \}\)/);
+  assert.match(source, /startAuthenticatedApp\(signedInUser, \{ freshLogin: true \}\)/);
 });
 
 test('multiple resumes keep the cinematic execution count at one', () => {

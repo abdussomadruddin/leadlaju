@@ -162,6 +162,7 @@ let initialDashboardSyncState = "idle";
 let resumeSyncPending = false;
 let runtimeWasHidden = false;
 let lifecycleIntroTimer = null;
+let lifecycleHideTimer = null;
 let lifecycleSyncPromise = null;
 
 const elements = {
@@ -692,7 +693,7 @@ function getSessionUser() {
   return user;
 }
 
-function startAuthenticatedApp(user) {
+function startAuthenticatedApp(user, options = {}) {
   state.currentUserId = user.id;
   if (user.role === "agent") agentPresenceSessionStartedAt = Date.now();
   saveState();
@@ -703,7 +704,10 @@ function startAuthenticatedApp(user) {
   elements.loginForm.reset();
   elements.loginPassword.type = "password";
   elements.passwordToggle.setAttribute("aria-label", "Tunjukkan kata laluan");
-  const startupSync = leadLajuIntroShown ? beginResumeSync() : beginColdStartSync();
+  if (options.restoredSession) leadLajuIntroShown = true;
+  const startupSync = options.freshLogin
+    ? beginColdStartSync()
+    : leadLajuIntroShown ? beginResumeSync() : beginColdStartSync();
 
   window.clearInterval(tickTimer);
   tickTimer = window.setInterval(() => {
@@ -853,7 +857,7 @@ async function handleLogin(event) {
     setLoginError("");
     activeView = "dashboard";
     switchView("dashboard");
-    startAuthenticatedApp(signedInUser);
+    startAuthenticatedApp(signedInUser, { freshLogin: true });
     return;
   }
 
@@ -882,7 +886,7 @@ async function handleLogin(event) {
   setLoginError("");
   activeView = "dashboard";
   switchView("dashboard");
-  startAuthenticatedApp(user);
+  startAuthenticatedApp(user, { freshLogin: true });
 }
 
 async function handleAgentSignup(event) {
@@ -1380,14 +1384,21 @@ function guardLifecycleMutation() {
 }
 
 function showLifecycleSyncOverlay(mode) {
+  window.clearTimeout(lifecycleHideTimer);
   elements.lifecycleSyncOverlay.classList.remove("cinematic", "waiting", "resume");
   elements.lifecycleSyncOverlay.classList.add("visible", mode);
   elements.lifecycleSyncOverlay.setAttribute("aria-hidden", "false");
 }
 
 function hideLifecycleSyncOverlay() {
-  elements.lifecycleSyncOverlay.classList.remove("visible", "cinematic", "waiting", "resume");
+  window.clearTimeout(lifecycleHideTimer);
+  elements.lifecycleSyncOverlay.classList.remove("visible");
   elements.lifecycleSyncOverlay.setAttribute("aria-hidden", "true");
+  lifecycleHideTimer = window.setTimeout(() => {
+    if (!elements.lifecycleSyncOverlay.classList.contains("visible")) {
+      elements.lifecycleSyncOverlay.classList.remove("cinematic", "waiting", "resume");
+    }
+  }, 180);
 }
 
 function settleLifecyclePresentation() {
@@ -5949,7 +5960,7 @@ async function bootstrap() {
 
   const sessionUser = getSessionUser();
   if (sessionUser) {
-    startAuthenticatedApp(sessionUser);
+    startAuthenticatedApp(sessionUser, { restoredSession: true });
     return;
   } else {
     showLogin();

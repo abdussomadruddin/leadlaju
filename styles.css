@@ -2942,12 +2942,14 @@ td small {
   visibility: hidden;
   color: #fff;
   background: #0a1429;
-  transition: opacity 180ms ease, visibility 180ms ease;
+  transition: opacity 180ms ease, visibility 0s linear 180ms;
+  will-change: opacity;
 }
 
 .lifecycle-sync-overlay.visible {
   opacity: 1;
   visibility: visible;
+  transition-delay: 0s;
 }
 
 .lifecycle-sync-content {
