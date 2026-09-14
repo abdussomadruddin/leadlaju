@@ -1,7 +1,7 @@
 const CACHE_NAME = "leadlaju-pwa-v20260912-lead-monitor-v72";
 const LEAD_HANDOFF_CACHE = "leadlaju-notification-snapshots";
 const LEAD_HANDOFF_SCHEMA_VERSION = 1;
-const LEAD_NOTIFICATION_HOLD_MS = 15000;
+const LEAD_NOTIFICATION_HOLD_MS = 7000;
 const APP_SHELL = [
   "/",
   "/index.html",
