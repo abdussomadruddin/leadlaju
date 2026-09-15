@@ -86,14 +86,20 @@ Deno.serve(async (request) => {
     const revision = Number(first.payload?.assignment_revision) || 0;
     const { data: lead, error: leadError } = await admin.from("leads")
       .select("id,name,phone,email,city,source,notes,status,queue_state,assigned_agent_id,received_at,expires_at,assignment_revision,status_revision,created_at,projects(name)")
-      .eq("id", leadId).eq("assigned_agent_id", first.user_id).eq("assignment_revision", revision).maybeSingle();
+      .eq("id", leadId)
+      .eq("assigned_agent_id", first.user_id)
+      .eq("assignment_revision", revision)
+      .eq("status", "new")
+      .eq("queue_state", "active")
+      .gt("expires_at", new Date().toISOString())
+      .maybeSingle();
     if (leadError || !lead) {
       await admin.rpc("finish_notification_outbox", {
         p_outbox_id: outboxId,
-        p_success: false,
-        p_error: leadError?.message || "Canonical assignment no longer exists",
+        p_success: !leadError,
+        p_error: leadError?.message || null,
       });
-      failed += 1;
+      if (leadError) failed += 1;
       continue;
     }
 

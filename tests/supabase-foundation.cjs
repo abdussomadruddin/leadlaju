@@ -220,6 +220,10 @@ test('notification worker claims outbox rows atomically and fans out to every ac
   assert.match(notificationWorker, /for \(const row of rows\)/);
   assert.match(notificationWorker, /leadSnapshot/);
   assert.match(notificationWorker, /statusCode === 404 \|\| statusCode === 410/);
+  assert.match(notificationWorker, /\.eq\("status", "new"\)/);
+  assert.match(notificationWorker, /\.eq\("queue_state", "active"\)/);
+  assert.match(notificationWorker, /\.gt\("expires_at", new Date\(\)\.toISOString\(\)\)/);
+  assert.match(notificationWorker, /p_success: !leadError/);
   assert.doesNotMatch(notificationWorker, /VAPID_PRIVATE_KEY\) \|\| ["'][^"']+["']/);
 });
 
