@@ -5229,17 +5229,17 @@ async function addAgent(event) {
           body: { action: "signup_request", name, phone, email: email.toLowerCase(), password, eligible_project_ids: eligibleProjectIds },
         });
         if (signup.error || !signup.data?.ok) throw signup.error || new Error(signup.data?.error || "Ejen gagal didaftarkan.");
-        const approval = await remoteDatabaseClient.functions.invoke("admin-manage-agent", {
-          body: { action: "approve", userId: signup.data.userId },
-        });
-        if (approval.error || !approval.data?.ok) throw approval.error || new Error(approval.data?.error || "Ejen gagal diaktifkan.");
       }
       await loadRemoteState(state.currentUserId);
       elements.agentForm.reset();
       editingAgentId = null;
       closeModal(elements.agentModal);
       renderAll();
-      showToast(editingAgent ? "Ejen dikemaskini" : "Ejen didaftarkan", `${name} telah disimpan dalam Supabase.`, "success");
+      showToast(
+        editingAgent ? "Ejen dikemaskini" : "Permohonan dihantar",
+        editingAgent ? `${name} telah disimpan dalam Supabase.` : `${name} sedang menunggu approval admin.`,
+        "success",
+      );
       return true;
     } catch (error) {
       showToast("Ejen tidak disimpan", error?.message || "Semak sambungan Supabase.", "error");
@@ -5330,11 +5330,22 @@ async function approveAgent(agentId) {
     renderAll();
     showToast("Ejen approved", `${confirmedAgent.name} kini aktif dan dipaparkan dalam dashboard.`, "success");
   } catch (error) {
+    const isMissingCanonicalAgent = remoteDatabaseMode && /agent not found|invalid agent/i.test(String(error?.message || ""));
+    if (isMissingCanonicalAgent) {
+      authoritativelyDeletedAgentIds.add(agentId);
+      state.agents = state.agents.filter((item) => item.id !== agentId);
+      saveState();
+      await loadRemoteState(state.currentUserId);
+    }
     const currentAgent = getAgent(agentId);
     if (currentAgent) currentAgent.active = false;
     saveState();
     console.error(error);
-    showToast("Approval gagal", error.message || "Semak sambungan Google Sheet.", "error");
+    showToast(
+      isMissingCanonicalAgent ? "Kad ejen dikemas kini" : "Approval gagal",
+      isMissingCanonicalAgent ? "Ejen ini sudah tiada dalam Supabase dan telah dibuang daripada dashboard." : (error.message || "Semak sambungan Supabase."),
+      isMissingCanonicalAgent ? "success" : "error",
+    );
     renderAll();
   } finally {
     pendingAgentApprovals.delete(agentId);
