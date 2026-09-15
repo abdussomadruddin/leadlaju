@@ -1093,6 +1093,7 @@ async function handleAgentSignup(event) {
         email,
         password,
         role: "agent",
+        approvalStatus: "pending",
         active: false,
         leadsHandled: 0,
         createdAt: Date.now(),
@@ -1107,6 +1108,7 @@ async function handleAgentSignup(event) {
         email,
         password,
         role: "agent",
+        approvalStatus: "pending",
         active: false,
         leadsHandled: 0,
         createdAt: Date.now(),
@@ -4797,7 +4799,7 @@ function renderAgents() {
     .filter((agent) => agent.approvalStatus !== "rejected")
     .map(
       (agent) => {
-        const isPendingAgent = agent.role === "agent" && !agent.active;
+        const isPendingAgent = agent.role === "agent" && agent.approvalStatus === "pending";
         const roleLabel = agent.role === "admin" ? "Administrator" : isPendingAgent ? "Menunggu approval" : "Property Agent";
         const projectNames = normalizeProjectIds(agent.eligibleProjectIds)
           .map((projectId) => state.projects.find((project) => project.id === projectId)?.name)
@@ -5288,7 +5290,7 @@ async function addAgent(event) {
 async function approveAgent(agentId) {
   if (!guardLifecycleMutation()) return false;
   const agent = getAgent(agentId);
-  if (!agent || agent.active || pendingAgentApprovals.has(agentId)) return;
+  if (!agent || agent.approvalStatus !== "pending" || pendingAgentApprovals.has(agentId)) return;
   if (!normalizeProjectIds(agent.eligibleProjectIds).length) {
     showToast("Pilih projek dahulu", `Edit ${agent.name} dan tick sekurang-kurangnya satu projek sebelum approve.`, "error");
     openAgentModal(agentId);

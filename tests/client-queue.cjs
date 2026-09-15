@@ -123,6 +123,25 @@ test('approval conflicts return a readable application response instead of a non
   assert.doesNotMatch(source, /Status ejen sudah berubah\. Sila sync semula\." \}, 409/);
 });
 
+test('only canonical pending profiles render and execute the approval action', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const renderStart = source.indexOf('function renderAgents()');
+  const renderBody = source.slice(renderStart, source.indexOf('\nfunction renderProjects()', renderStart));
+  const approveStart = source.indexOf('async function approveAgent(');
+  const approveBody = source.slice(approveStart, source.indexOf('\nasync function saveProject', approveStart));
+  assert.match(renderBody, /agent\.approvalStatus === "pending"/);
+  assert.doesNotMatch(renderBody, /isPendingAgent = agent\.role === "agent" && !agent\.active/);
+  assert.match(approveBody, /agent\.approvalStatus !== "pending"/);
+});
+
+test('new signup state records pending approval separately from active status', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const start = source.indexOf('async function handleAgentSignup(');
+  const body = source.slice(start, source.indexOf('\nfunction showSignupSuccess', start));
+  assert.equal((body.match(/approvalStatus: "pending"/g) || []).length, 2);
+  assert.equal((body.match(/active: false/g) || []).length, 2);
+});
+
 test('client queue activation is read-only', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const start = source.indexOf('function activateQueuedLeads(');
