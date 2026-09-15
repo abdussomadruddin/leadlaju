@@ -857,6 +857,21 @@ test('service worker sends timing metadata separately from the canonical lead sn
   assert.doesNotMatch(body, /payload\.leadSnapshot\.(timing|swPushEpoch|swBroadcastStartEpoch|swBroadcastCompleteEpoch)/);
 });
 
+test('service worker never caches runtime API responses', () => {
+  const worker = fs.readFileSync('sw.js', 'utf8');
+  assert.match(worker, /url\.pathname\.startsWith\("\/api\/"\)/);
+  assert.match(worker, /event\.respondWith\(fetch\(request\)\);\s*return;/);
+});
+
+test('Supabase cutover clears legacy state and auth once without deleting the CALL NOW outbox', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  assert.match(source, /SUPABASE_CACHE_RESET_KEY = "leadlaju-supabase-cache-reset-v1"/);
+  assert.match(source, /localStorage\.removeItem\(STORAGE_KEY\)/);
+  assert.match(source, /localStorage\.removeItem\(AUTH_KEY\)/);
+  assert.match(source, /key\.startsWith\("sb-"\) && key\.endsWith\("-auth-token"\)/);
+  assert.doesNotMatch(source, /deleteDatabase\(CONTACT_OUTBOX_DB\)/);
+});
+
 test('open agent renders the pushed CALL NOW before the device notification is shown', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const worker = fs.readFileSync('sw.js', 'utf8');

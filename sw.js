@@ -1,11 +1,11 @@
-const CACHE_NAME = "leadlaju-pwa-v20260915-supabase-realtime-v74";
+const CACHE_NAME = "leadlaju-pwa-v20260915-supabase-realtime-v75";
 const LEAD_HANDOFF_CACHE = "leadlaju-notification-snapshots";
 const LEAD_HANDOFF_SCHEMA_VERSION = 1;
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20260915-supabase-realtime-v74",
-  "/app.js?v=20260915-supabase-realtime-v74",
+  "/styles.css?v=20260915-supabase-realtime-v75",
+  "/app.js?v=20260915-supabase-realtime-v75",
   "/manifest.webmanifest?v=20260625-pwa-notifications",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",
@@ -59,6 +59,11 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET") return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+
+  if (url.pathname.startsWith("/api/")) {
+    event.respondWith(fetch(request));
+    return;
+  }
 
   if (request.mode === "navigate" || ["script", "style"].includes(request.destination)) {
     event.respondWith(

@@ -6,6 +6,7 @@ const ADMIN_REMINDER_DISMISSED_KEY = "leadlaju-admin-reminder-dismissed-v2";
 const ADMIN_REMINDER_NOTIFIED_KEY = "leadlaju-admin-reminder-notified-v2";
 const CONTACT_OUTBOX_DB = "leadlaju-contact-outbox-v1";
 const CONTACT_OUTBOX_STORE = "actions";
+const SUPABASE_CACHE_RESET_KEY = "leadlaju-supabase-cache-reset-v1";
 const SESSION_DURATION_MS = 365 * 24 * 60 * 60 * 1000;
 const RESPONSE_WINDOW_MS = 5 * 60 * 1000;
 const AGENT_COOLDOWN_MS = 5 * 60 * 1000;
@@ -107,6 +108,17 @@ const defaultState = {
   },
 };
 
+function resetLegacyGoogleSheetSessionOnce() {
+  if (localStorage.getItem(SUPABASE_CACHE_RESET_KEY) === "done") return;
+  localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem(AUTH_KEY);
+  Object.keys(localStorage)
+    .filter((key) => key.startsWith("sb-") && key.endsWith("-auth-token"))
+    .forEach((key) => localStorage.removeItem(key));
+  localStorage.setItem(SUPABASE_CACHE_RESET_KEY, "done");
+}
+
+resetLegacyGoogleSheetSessionOnce();
 let state = loadState();
 let activeView = "dashboard";
 let tickTimer;
@@ -2042,7 +2054,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20260915-supabase-realtime-v74")
+      .register("/sw.js?v=20260915-supabase-realtime-v75")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
