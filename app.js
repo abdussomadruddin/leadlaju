@@ -4,6 +4,8 @@ const NOTIFIED_LEADS_KEY = "leadlaju-notified-leads-v1";
 const FOLLOW_UP_REMINDER_KEY = "leadlaju-follow-up-reminders-v1";
 const ADMIN_REMINDER_DISMISSED_KEY = "leadlaju-admin-reminder-dismissed-v2";
 const ADMIN_REMINDER_NOTIFIED_KEY = "leadlaju-admin-reminder-notified-v2";
+const CONTACT_OUTBOX_DB = "leadlaju-contact-outbox-v1";
+const CONTACT_OUTBOX_STORE = "actions";
 const SESSION_DURATION_MS = 365 * 24 * 60 * 60 * 1000;
 const RESPONSE_WINDOW_MS = 5 * 60 * 1000;
 const AGENT_COOLDOWN_MS = 5 * 60 * 1000;
@@ -129,6 +131,8 @@ let editingAppointmentId = null;
 let pendingAppointmentRequestId = null;
 let remoteDatabaseClient = null;
 let remoteDatabaseMode = false;
+let remoteRealtimeChannels = [];
+let remoteReloadTimer = null;
 let claimingLeadId = null;
 const pendingLeadStatusUpdates = new Map();
 const leadStatusWriteTimes = new Map();
@@ -458,14 +462,107 @@ function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
-function loadRemoteDatabaseConfig() {
-  return null;
+function openContactOutbox() {
+  return new Promise((resolve, reject) => {
+    if (!("indexedDB" in window)) return reject(new Error("IndexedDB unavailable"));
+    const request = indexedDB.open(CONTACT_OUTBOX_DB, 1);
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(CONTACT_OUTBOX_STORE)) {
+        const store = database.createObjectStore(CONTACT_OUTBOX_STORE, { keyPath: "actionId" });
+        store.createIndex("agentId", "agentId", { unique: false });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("Outbox unavailable"));
+  });
 }
 
-function initRemoteDatabase() {
+async function writeContactOutbox(action) {
+  const database = await openContactOutbox();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(CONTACT_OUTBOX_STORE, "readwrite");
+    transaction.objectStore(CONTACT_OUTBOX_STORE).put(action);
+    transaction.oncomplete = () => { database.close(); resolve(true); };
+    transaction.onerror = () => { database.close(); reject(transaction.error); };
+  });
+}
+
+async function deleteContactOutbox(actionId) {
+  const database = await openContactOutbox();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(CONTACT_OUTBOX_STORE, "readwrite");
+    transaction.objectStore(CONTACT_OUTBOX_STORE).delete(actionId);
+    transaction.oncomplete = () => { database.close(); resolve(true); };
+    transaction.onerror = () => { database.close(); reject(transaction.error); };
+  });
+}
+
+async function readContactOutbox(agentId) {
+  const database = await openContactOutbox();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(CONTACT_OUTBOX_STORE, "readonly");
+    const request = transaction.objectStore(CONTACT_OUTBOX_STORE).index("agentId").getAll(agentId);
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error);
+    transaction.oncomplete = () => database.close();
+  });
+}
+
+async function submitContactAction(action) {
+  const { data, error } = await remoteDatabaseClient.rpc("contact_assignment", {
+    p_action_id: action.actionId,
+    p_lead_id: action.leadId,
+    p_assignment_revision: action.assignmentRevision,
+  });
+  if (error) throw error;
+  if (!data?.ok) throw new Error(data?.error || "CALL NOW rejected by canonical server state");
+  await deleteContactOutbox(action.actionId).catch(() => false);
+  return data;
+}
+
+async function flushContactOutbox() {
+  if (!remoteDatabaseMode || !remoteDatabaseClient || !navigator.onLine) return false;
+  const user = getCurrentUser();
+  if (!user?.id || user.role !== "agent") return false;
+  const actions = await readContactOutbox(user.id).catch(() => []);
+  for (const action of actions) {
+    await submitContactAction(action).catch(() => false);
+  }
+  if (actions.length) queueRemoteReload();
+  return true;
+}
+
+async function loadRemoteDatabaseConfig() {
+  if (new URLSearchParams(window.location.search).get("backend") !== "supabase") return null;
+  try {
+    const response = await fetch("/api/runtime-config", { cache: "no-store" });
+    if (!response.ok) return null;
+    const config = await response.json();
+    if (config.backend !== "supabase" || !config.supabaseUrl || !config.supabasePublishableKey) return null;
+    return config;
+  } catch (error) {
+    console.error("Supabase runtime config failed", error);
+    return null;
+  }
+}
+
+async function initRemoteDatabase() {
   remoteDatabaseClient = null;
   remoteDatabaseMode = false;
-  return null;
+  const config = await loadRemoteDatabaseConfig();
+  if (!config) return null;
+  try {
+    const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.116.0");
+    remoteDatabaseClient = createClient(config.supabaseUrl, config.supabasePublishableKey, {
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+    });
+    return remoteDatabaseClient;
+  } catch (error) {
+    console.error("Supabase client initialization failed", error);
+    remoteDatabaseClient = null;
+    return null;
+  }
 }
 
 function mapProfile(row) {
@@ -475,11 +572,14 @@ function mapProfile(row) {
     phone: row.phone || "",
     email: row.email,
     role: row.role || "agent",
-    active: row.active !== false,
+    active: row.active !== false && row.approval_status !== "pending" && row.approval_status !== "rejected",
     leadsHandled: row.leads_handled || 0,
     createdAt: row.created_at ? new Date(row.created_at).getTime() : null,
     cooldownUntil: row.cooldown_until ? new Date(row.cooldown_until).getTime() : null,
     eligibleProjectIds: normalizeProjectIds(row.eligible_project_ids),
+    leadReady: Boolean(row.lead_ready),
+    online: Boolean(row.presence_lease_until && new Date(row.presence_lease_until).getTime() > Date.now()),
+    notificationEnabled: Boolean(row.notification_ready),
   };
 }
 
@@ -495,10 +595,11 @@ function mapLead(row) {
     createdAt: new Date(row.created_at).getTime(),
     receivedAt: new Date(row.received_at || row.created_at).getTime(),
     assignedAgentId: row.assigned_agent_id,
-    expiresAt: new Date(row.expires_at).getTime(),
+    expiresAt: row.expires_at ? new Date(row.expires_at).getTime() : null,
     status: row.status || "new",
     passCount: row.pass_count || 0,
     assignmentRevision: Number(row.assignment_revision) || 0,
+    statusRevision: Number(row.status_revision) || 0,
     assignmentHistory: Array.isArray(row.assignment_history) ? row.assignment_history : [],
     queueState: String(row.queue_state || "").toLowerCase(),
     responseMs: row.response_ms,
@@ -523,18 +624,9 @@ async function loadRemoteState(userId) {
   const previousLeadKeys = new Set(state.leads.map(leadNotificationKey));
   const shouldDetectNewLeads = false;
   try {
-    const [profilesResult, leadsResult, activitiesResult, settingsResult] = await Promise.all([
-      remoteDatabaseClient.from("profiles").select("*").order("created_at"),
-      remoteDatabaseClient.rpc("get_visible_leads"),
-      remoteDatabaseClient.from("activities").select("*").order("created_at", { ascending: false }).limit(80),
-      remoteDatabaseClient.from("app_settings").select("*").eq("id", 1).maybeSingle(),
-    ]);
-
-    if (profilesResult.error) throw profilesResult.error;
-    if (leadsResult.error) throw leadsResult.error;
-    if (activitiesResult.error) throw activitiesResult.error;
-
-    const profiles = profilesResult.data.map(mapProfile);
+    const { data: snapshot, error } = await remoteDatabaseClient.rpc("get_dashboard_state");
+    if (error) throw error;
+    const profiles = (snapshot?.profiles || []).map(mapProfile);
     const currentUser = profiles.find((agent) => agent.id === userId);
     if (!currentUser) throw new Error("Profil pengguna belum tersedia.");
 
@@ -542,16 +634,16 @@ async function loadRemoteState(userId) {
       ...structuredClone(defaultState),
       currentUserId: userId,
       agents: profiles,
-      leads: leadsResult.data.map(mapLead),
-      activities: activitiesResult.data.map(mapActivity),
-      roundRobinIndex: settingsResult.data?.round_robin_index || 0,
+      leads: (snapshot?.leads || []).map(mapLead),
+      activities: (snapshot?.events || []).map(mapActivity),
+      appointments: normalizeAppointments(snapshot?.appointments),
+      projects: normalizeProjects(snapshot?.projects),
+      roundRobinIndex: state.roundRobinIndex || 0,
       integration: normalizeIntegration({
-        endpoint: settingsResult.data?.google_sheet_endpoint || DEFAULT_GOOGLE_SHEET_ENDPOINT,
-        interval: settingsResult.data?.poll_interval || defaultState.integration.interval,
+        endpoint: "",
+        interval: DEFAULT_SYNC_INTERVAL_SECONDS,
         connected: true,
-        lastSyncAt: settingsResult.data?.last_sync_at
-          ? new Date(settingsResult.data.last_sync_at).getTime()
-          : null,
+        lastSyncAt: Date.now(),
       }),
     };
     remoteDatabaseMode = true;
@@ -569,12 +661,30 @@ async function loadRemoteState(userId) {
   }
 }
 
-function subscribeToRemoteDatabase() {
-  return null;
+async function subscribeToRemoteDatabase() {
+  if (!remoteDatabaseClient || !remoteDatabaseMode || !state.currentUserId) return null;
+  remoteRealtimeChannels.forEach((channel) => remoteDatabaseClient.removeChannel(channel));
+  remoteRealtimeChannels = [];
+  await remoteDatabaseClient.realtime.setAuth();
+  const topics = [`user:${state.currentUserId}`];
+  if (isAdmin()) topics.push("admin:operations");
+  topics.forEach((topic) => {
+    const channel = remoteDatabaseClient.channel(topic, { config: { private: true } })
+      .on("broadcast", { event: "*" }, queueRemoteReload)
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") queueRemoteReload();
+      });
+    remoteRealtimeChannels.push(channel);
+  });
+  return remoteRealtimeChannels;
 }
 
 function queueRemoteReload() {
-  return null;
+  window.clearTimeout(remoteReloadTimer);
+  remoteReloadTimer = window.setTimeout(async () => {
+    if (!remoteDatabaseMode || !state.currentUserId) return;
+    if (await loadRemoteState(state.currentUserId)) renderAll();
+  }, 25);
 }
 
 async function persistProfile(agent) {
@@ -789,6 +899,16 @@ function renderSignupProjectOptions() {
 async function syncSignupProjects() {
   if (elements.signupForm.hidden) return false;
   try {
+    if (remoteDatabaseClient) {
+      const { data, error } = await remoteDatabaseClient.functions.invoke("admin-manage-agent", {
+        body: { action: "list_projects" },
+      });
+      if (error || !data?.ok || !Array.isArray(data.projects)) throw error || new Error(data?.error || "Senarai projek tidak sah");
+      state.projects = normalizeProjects(data.projects);
+      saveState();
+      renderSignupProjectOptions();
+      return true;
+    }
     const url = new URL(getSheetEndpoint());
     url.searchParams.set("_", Date.now().toString());
     const response = await fetch(url, { cache: "no-store" });
@@ -859,6 +979,8 @@ async function handleLogin(event) {
     activeView = "dashboard";
     switchView("dashboard");
     startAuthenticatedApp(signedInUser, { freshLogin: true });
+    subscribeToRemoteDatabase();
+    flushContactOutbox();
     return;
   }
 
@@ -994,6 +1116,13 @@ async function handleAgentSignup(event) {
 
 function sendAgentLogoutState(user) {
   if (!user?.id || user.role !== "agent") return;
+  if (remoteDatabaseMode && remoteDatabaseClient) {
+    remoteDatabaseClient.rpc("set_agent_availability", {
+      p_ready: false,
+      p_notification_ready: false,
+    }).catch(() => {});
+    return;
+  }
   postGoogleSheetAction({
     action: "set_agent_lead_availability",
     agent: { id: user.id, ready: false },
@@ -1013,6 +1142,11 @@ async function cleanUpPushAfterLogout() {
   try {
     const registration = await registerServiceWorker();
     const subscription = await registration?.pushManager?.getSubscription();
+    if (subscription && remoteDatabaseClient && remoteDatabaseMode) {
+      await remoteDatabaseClient.rpc("unregister_push_subscription", {
+        p_endpoint: subscription.endpoint,
+      }).catch(() => null);
+    }
     if (subscription) await subscription.unsubscribe();
     const notifications = await registration?.getNotifications();
     notifications?.forEach((notification) => notification.close());
@@ -1032,10 +1166,14 @@ function logout() {
   }
   localStorage.removeItem("leadlaju-push-subscription-owner");
   localStorage.removeItem(AUTH_KEY);
-  remoteDatabaseMode = false;
+  const wasRemote = remoteDatabaseMode;
+  remoteRealtimeChannels.forEach((channel) => remoteDatabaseClient?.removeChannel(channel));
+  remoteRealtimeChannels = [];
   showLogin();
-  if (remoteDatabaseClient) remoteDatabaseClient.auth.signOut().catch(() => {});
-  cleanUpPushAfterLogout();
+  const cleanup = cleanUpPushAfterLogout();
+  if (remoteDatabaseClient && wasRemote) cleanup.finally(() => remoteDatabaseClient.auth.signOut().catch(() => {}));
+  else if (remoteDatabaseClient) remoteDatabaseClient.auth.signOut().catch(() => {});
+  cleanup.finally(() => { remoteDatabaseMode = false; });
 }
 
 function togglePasswordVisibility() {
@@ -1425,6 +1563,21 @@ function failLifecycleSync() {
 }
 
 function runLifecycleAuthoritativeSync() {
+  if (typeof remoteDatabaseMode !== "undefined" && remoteDatabaseMode) {
+    return loadRemoteState(state.currentUserId)
+      .then((success) => {
+        if (success) {
+          renderAll();
+          completeLifecycleAuthoritativeRender();
+        } else failLifecycleSync();
+        return success;
+      })
+      .catch((error) => {
+        failLifecycleSync();
+        console.error("Supabase lifecycle sync failed", error);
+        return false;
+      });
+  }
   return syncGoogleSheetFresh({ silent: true, notifyNewLeads: true, lifecycleSync: true })
     .then((success) => {
       if (!success) failLifecycleSync();
@@ -1879,21 +2032,33 @@ async function syncPushSubscription(force = false) {
   const fingerprint = `${user.id}:${endpoint}:${subscriptionPayload.keys?.p256dh || ""}:${user.email}:${user.active}`;
   if (!force && localStorage.getItem(storageKey) === fingerprint) return true;
 
-  const pushed = await postGoogleSheetAction(
-    {
-      action: "register_push_subscription",
-      subscription: subscriptionPayload,
-      agent: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        active: user.active,
+  let pushed;
+  if (remoteDatabaseMode) {
+    const { data, error } = await remoteDatabaseClient.rpc("register_push_subscription", {
+      p_endpoint: endpoint,
+      p_p256dh: subscriptionPayload.keys?.p256dh || "",
+      p_auth: subscriptionPayload.keys?.auth || "",
+      p_user_agent: navigator.userAgent,
+    });
+    if (error) throw error;
+    pushed = Boolean(data?.ok);
+  } else {
+    pushed = await postGoogleSheetAction(
+      {
+        action: "register_push_subscription",
+        subscription: subscriptionPayload,
+        agent: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          active: user.active,
+        },
+        user_agent: navigator.userAgent,
       },
-      user_agent: navigator.userAgent,
-    },
-    "Push subscription sync failed",
-  );
+      "Push subscription sync failed",
+    );
+  }
 
   if (pushed) localStorage.setItem(storageKey, fingerprint);
   return pushed;
@@ -2846,6 +3011,15 @@ async function updateAgentPresence(online, force = false) {
   if (online && !force && now - lastAgentPresenceHeartbeatAt < AGENT_PRESENCE_HEARTBEAT_MS) {
     return true;
   }
+  if (remoteDatabaseMode) {
+    const { data, error } = await remoteDatabaseClient.rpc("heartbeat_agent", {
+      p_session_started_at: new Date(agentPresenceSessionStartedAt || now).toISOString(),
+      p_notification_ready: Notification.permission === "granted",
+    });
+    if (error || !data?.ok) return false;
+    lastAgentPresenceHeartbeatAt = online ? now : 0;
+    return true;
+  }
   const updated = await postGoogleSheetAction({
     action: "update_agent_presence",
     agent: {
@@ -2894,10 +3068,19 @@ async function setAgentLeadAvailability(ready) {
       }
       await updateAgentPresence(true, true);
     }
-    result = await postGoogleSheetActionWithResponse({
-      action: "set_agent_lead_availability",
-      agent: { id: user.id, email: user.email, ready },
-    }, "Lead availability update failed");
+    if (typeof remoteDatabaseMode !== "undefined" && remoteDatabaseMode) {
+      const response = await remoteDatabaseClient.rpc("set_agent_availability", {
+        p_ready: ready,
+        p_notification_ready: Notification.permission === "granted",
+      });
+      if (response.error || !response.data?.ok) throw response.error || new Error(response.data?.error || "Status tidak dapat disimpan.");
+      result = response.data;
+    } else {
+      result = await postGoogleSheetActionWithResponse({
+        action: "set_agent_lead_availability",
+        agent: { id: user.id, email: user.email, ready },
+      }, "Lead availability update failed");
+    }
 
     user.leadReady = Boolean(result?.lead_ready ?? ready);
     user.online = user.leadReady && Notification.permission === "granted";
@@ -2906,7 +3089,8 @@ async function setAgentLeadAvailability(ready) {
     statusRendered = true;
     finishLoading();
     openLeadAvailabilityConfirmation(user.leadReady);
-    syncGoogleSheet({ silent: true, notifyNewLeads: true });
+    if (typeof remoteDatabaseMode !== "undefined" && remoteDatabaseMode) queueRemoteReload();
+    else syncGoogleSheet({ silent: true, notifyNewLeads: true });
     return true;
   } catch (error) {
     showToast("Status tidak dikemas kini", error.message || "Semak sambungan dan cuba lagi.", "error");
@@ -3535,13 +3719,19 @@ async function remindAllAgentsForFollowUp() {
   };
   let pushed = false;
   try {
-    pushed = await postGoogleSheetAction(
-      {
-        action: "broadcast_follow_up_reminder",
-        reminder,
-      },
-      "Follow-up reminder broadcast failed",
-    );
+    if (remoteDatabaseMode) {
+      const { data, error } = await remoteDatabaseClient.rpc("broadcast_follow_up_reminder", {
+        p_message: reminder.message,
+      });
+      if (error || !data?.ok) throw error || new Error(data?.error || "Reminder gagal dihantar.");
+      pushed = true;
+      queueRemoteReload();
+    } else {
+      pushed = await postGoogleSheetAction(
+        { action: "broadcast_follow_up_reminder", reminder },
+        "Follow-up reminder broadcast failed",
+      );
+    }
   } finally {
     if (elements.remindAgentsButton) elements.remindAgentsButton.disabled = false;
   }
@@ -3821,19 +4011,24 @@ async function handleCall(leadId) {
     let claimedLead = lead;
     let phoneToCall = lead.phone;
 
+    let remoteContactAction = null;
+    let remoteWritePromise = null;
     if (remoteDatabaseMode) {
-      const { data, error } = await remoteDatabaseClient.rpc("claim_lead", { p_lead_id: leadId });
-      if (error) throw error;
-      if (!data?.length) {
-        showToast("Lead tidak dapat dikunci", "Lead mungkin telah dipindahkan, tamat masa atau diambil ejen lain.", "error");
-        await loadRemoteState(state.currentUserId);
-        renderAll();
-        return;
-      }
-      claimedLead = mapLead(data[0]);
-      phoneToCall = claimedLead.phone;
-      const currentLead = state.leads.find((item) => item.id === leadId);
-      if (currentLead) Object.assign(currentLead, claimedLead);
+      remoteContactAction = {
+        actionId: crypto.randomUUID(),
+        agentId: state.currentUserId,
+        leadId: lead.id,
+        assignmentRevision: Number(lead.assignmentRevision) || 0,
+        actionType: "contacted",
+        createdAt: Date.now(),
+      };
+      // Begin durable capture without awaiting so the direct tap still opens tel:.
+      const outboxWrite = writeContactOutbox(remoteContactAction);
+      lead.status = "contacted";
+      lead.contactedAt = Date.now();
+      lead.responseMs = Math.max(0, lead.contactedAt - lead.receivedAt);
+      lead.pendingContactAction = true;
+      remoteWritePromise = outboxWrite.then(() => submitContactAction(remoteContactAction));
     } else {
       lead.status = "contacted";
       lead.contactedAt = Date.now();
@@ -3851,7 +4046,9 @@ async function handleCall(leadId) {
 
     // Start the durable Sheet write while the page is still foregrounded. The
     // keepalive request continues when tel: moves the browser to the Phone app.
-    const statusUpdatePromise = updateLeadStatusInSheet(claimedLead || lead, "Contacted");
+    const statusUpdatePromise = remoteDatabaseMode
+      ? remoteWritePromise
+      : updateLeadStatusInSheet(claimedLead || lead, "Contacted");
     const callablePhone = String(phoneToCall || "").replace(/[^\d+]/g, "");
     if (callablePhone) {
       const callLink = document.querySelector("#dial-phone-link");
@@ -3868,7 +4065,10 @@ async function handleCall(leadId) {
       showToast("Nombor telefon tiada", "Lead ini belum ada nombor telefon yang boleh dipanggil.", "error");
     }
     await statusUpdatePromise;
-    if (agent) await upsertAgentToSheet(agent);
+    if (remoteDatabaseMode) {
+      lead.pendingContactAction = false;
+      queueRemoteReload();
+    } else if (agent) await upsertAgentToSheet(agent);
     saveState();
     showToast(
       "Lead berjaya dikunci",
@@ -3885,8 +4085,8 @@ async function handleCall(leadId) {
     }
     showToast("CALL NOW gagal", error?.message || "Semak sambungan Google Sheet dan cuba lagi.", "error");
     if (remoteDatabaseMode) {
-      await loadRemoteState(state.currentUserId);
-      renderAll();
+      lead.pendingContactAction = true;
+      showToast("CALL NOW direkod", "Tindakan disimpan pada peranti dan akan dihantar semula apabila sambungan pulih.", "error");
     }
   } finally {
     leadStatusWriteTimes.set(leadId, Date.now());
@@ -4458,10 +4658,20 @@ async function saveAppointment(event) {
   elements.appointmentSubmitButton.disabled = true;
   setGlobalLoading(true, "Menyimpan appointment...");
   try {
-    await postGoogleSheetActionWithResponse({ action, appointment }, "Appointment update failed");
+    if (remoteDatabaseMode) {
+      const remoteAction = editingAppointmentId ? "update" : reschedulingAppointmentId ? "reschedule" : "create";
+      const { data, error } = await remoteDatabaseClient.rpc("manage_appointment", {
+        p_action: remoteAction,
+        p_appointment: appointment,
+      });
+      if (error || !data?.ok) throw error || new Error(data?.error || "Appointment gagal disimpan.");
+    } else {
+      await postGoogleSheetActionWithResponse({ action, appointment }, "Appointment update failed");
+    }
     pendingAppointmentRequestId = null;
     closeModal(elements.appointmentModal);
-    await syncGoogleSheet({ silent: true });
+    if (remoteDatabaseMode) await loadRemoteState(state.currentUserId);
+    else await syncGoogleSheet({ silent: true });
     showToast(reschedulingAppointmentId ? "Appointment dijadual semula" : editingAppointmentId ? "Appointment dikemas kini" : "Appointment disimpan", `${lead.name} telah dikemas kini.`);
   } catch (error) {
     elements.appointmentFormError.textContent = error?.message || "Appointment tidak dapat disimpan.";
@@ -4478,11 +4688,20 @@ async function updateAppointmentStatus(appointmentId, status) {
   if (!appointment || !lead || !canAccessLead(lead)) return;
   setGlobalLoading(true, "Mengemas kini appointment...");
   try {
-    await postGoogleSheetActionWithResponse({
-      action: "update_appointment_status",
-      appointment: appointmentActionPayload({ id: appointmentId, status }),
-    }, "Appointment status update failed");
-    await syncGoogleSheet({ silent: true });
+    if (remoteDatabaseMode) {
+      const { data, error } = await remoteDatabaseClient.rpc("manage_appointment", {
+        p_action: "status",
+        p_appointment: { id: appointmentId, status },
+      });
+      if (error || !data?.ok) throw error || new Error(data?.error || "Status appointment gagal disimpan.");
+      await loadRemoteState(state.currentUserId);
+    } else {
+      await postGoogleSheetActionWithResponse({
+        action: "update_appointment_status",
+        appointment: appointmentActionPayload({ id: appointmentId, status }),
+      }, "Appointment status update failed");
+      await syncGoogleSheet({ silent: true });
+    }
     showToast("Appointment dikemas kini", `${lead.name}: ${formatAppointmentStatus(status)}.`);
   } catch (error) {
     showToast("Status gagal disimpan", error?.message || "Cuba lagi.", "error");
@@ -4499,11 +4718,20 @@ async function deleteAppointment(appointmentId) {
   if (!confirmPermanentDelete("appointment", `${appointment.leadName || lead.name} pada ${formatDateTime(appointment.scheduledAt)}`)) return;
   setGlobalLoading(true, "Memadam appointment...");
   try {
-    await postGoogleSheetActionWithResponse({
-      action: "delete_appointment",
-      appointment: appointmentActionPayload({ id: appointmentId }),
-    }, "Appointment delete failed");
-    await syncGoogleSheet({ silent: true });
+    if (remoteDatabaseMode) {
+      const { data, error } = await remoteDatabaseClient.rpc("manage_appointment", {
+        p_action: "delete",
+        p_appointment: { id: appointmentId },
+      });
+      if (error || !data?.ok) throw error || new Error(data?.error || "Appointment gagal dipadam.");
+      await loadRemoteState(state.currentUserId);
+    } else {
+      await postGoogleSheetActionWithResponse({
+        action: "delete_appointment",
+        appointment: appointmentActionPayload({ id: appointmentId }),
+      }, "Appointment delete failed");
+      await syncGoogleSheet({ silent: true });
+    }
     showToast("Appointment dipadam", `${lead.name} telah dikemas kini.`);
   } catch (error) {
     showToast("Appointment gagal dipadam", error?.message || "Cuba lagi.", "error");
@@ -4917,6 +5145,52 @@ async function addAgent(event) {
     return;
   }
 
+  if (remoteDatabaseMode) {
+    setGlobalLoading(true, editingAgent ? "Mengemas kini ejen..." : "Mendaftarkan ejen...");
+    try {
+      if (editingAgent) {
+        const { data, error } = await remoteDatabaseClient.rpc("admin_update_agent", {
+          p_agent_id: editingAgent.id,
+          p_name: name,
+          p_phone: phone,
+          p_email: email.toLowerCase(),
+          p_active: editingAgent.active,
+          p_project_ids: eligibleProjectIds,
+        });
+        if (error || !data?.ok) throw error || new Error(data?.error || "Ejen gagal dikemas kini.");
+        if (password) {
+          const passwordResult = await remoteDatabaseClient.functions.invoke("admin-manage-agent", {
+            body: { action: "update_password", userId: editingAgent.id, password },
+          });
+          if (passwordResult.error || !passwordResult.data?.ok) {
+            throw passwordResult.error || new Error(passwordResult.data?.error || "Kata laluan gagal dikemas kini.");
+          }
+        }
+      } else {
+        const signup = await remoteDatabaseClient.functions.invoke("admin-manage-agent", {
+          body: { action: "signup_request", name, phone, email: email.toLowerCase(), password, eligible_project_ids: eligibleProjectIds },
+        });
+        if (signup.error || !signup.data?.ok) throw signup.error || new Error(signup.data?.error || "Ejen gagal didaftarkan.");
+        const approval = await remoteDatabaseClient.functions.invoke("admin-manage-agent", {
+          body: { action: "approve", userId: signup.data.userId },
+        });
+        if (approval.error || !approval.data?.ok) throw approval.error || new Error(approval.data?.error || "Ejen gagal diaktifkan.");
+      }
+      await loadRemoteState(state.currentUserId);
+      elements.agentForm.reset();
+      editingAgentId = null;
+      closeModal(elements.agentModal);
+      renderAll();
+      showToast(editingAgent ? "Ejen dikemaskini" : "Ejen didaftarkan", `${name} telah disimpan dalam Supabase.`, "success");
+      return true;
+    } catch (error) {
+      showToast("Ejen tidak disimpan", error?.message || "Semak sambungan Supabase.", "error");
+      return false;
+    } finally {
+      setGlobalLoading(false);
+    }
+  }
+
   if (editingAgent) {
     editingAgent.name = name;
     editingAgent.phone = phone;
@@ -4990,7 +5264,8 @@ async function approveAgent(agentId) {
     const approvedAgent = getAgent(agentId) || agent;
     approvedAgent.active = true;
     saveState();
-    await syncGoogleSheetFresh({ silent: true, agentsOnly: true });
+    if (remoteDatabaseMode) await loadRemoteState(state.currentUserId);
+    else await syncGoogleSheetFresh({ silent: true, agentsOnly: true });
     const confirmedAgent = getAgent(agentId) || approvedAgent;
     confirmedAgent.active = true;
     saveState();
@@ -5017,6 +5292,19 @@ async function approveAgent(agentId) {
 }
 
 async function saveProject(project) {
+  if (remoteDatabaseMode) {
+    const { data, error } = await remoteDatabaseClient.rpc("admin_upsert_project", {
+      p_project: {
+        id: project.id,
+        name: project.name,
+        active: project.active,
+        created_at: new Date(project.createdAt || Date.now()).toISOString(),
+      },
+    });
+    if (error || !data?.ok) return false;
+    if (data.project?.id) project.id = data.project.id;
+    return true;
+  }
   return postGoogleSheetAction(
     { action: project.id ? "update_project" : "add_project", project },
     "Project sheet sync failed",
@@ -5090,10 +5378,11 @@ async function deleteAgentWithLoading(agent, options = {}) {
         body: { action: "delete", userId: agent.id, email: agent.email },
       });
       if (error || !data?.ok) throw new Error(data?.error || error?.message || "Ejen tidak dapat dibuang.");
-    }
-    const result = await deleteAgentFromSheet(agent);
-    if (!result?.ok) {
-      throw new Error(result?.error || "Google Sheet belum mengesahkan ejen telah dipadam.");
+    } else {
+      const result = await deleteAgentFromSheet(agent);
+      if (!result?.ok) {
+        throw new Error(result?.error || "Google Sheet belum mengesahkan ejen telah dipadam.");
+      }
     }
     authoritativelyDeletedAgentIds.add(agent.id);
     state.agents = state.agents.filter((item) => item.id !== agent.id);
@@ -5101,7 +5390,9 @@ async function deleteAgentWithLoading(agent, options = {}) {
     renderAll();
     showToast(
       options.rejection ? "Permohonan ditolak" : "Ejen dibuang",
-      `${agent.name} telah dipadam daripada dashboard dan Google Sheet.`,
+      remoteDatabaseMode
+        ? `${agent.name} telah dipadam daripada dashboard Supabase.`
+        : `${agent.name} telah dipadam daripada dashboard dan Google Sheet.`,
       "success",
     );
     return true;
@@ -5122,14 +5413,27 @@ async function toggleAgent(agentId) {
   agent.active = !agent.active;
 
   saveState();
-  try {
-    await persistProfile(agent);
-  } catch (error) {
-    console.error(error);
-    showToast("Perubahan belum disimpan", "Semak sambungan Google Sheet.", "error");
+  let agentsPushed = false;
+  if (remoteDatabaseMode) {
+    const { data, error } = await remoteDatabaseClient.rpc("admin_update_agent", {
+      p_agent_id: agent.id,
+      p_name: agent.name,
+      p_phone: agent.phone,
+      p_email: agent.email,
+      p_active: agent.active,
+      p_project_ids: normalizeProjectIds(agent.eligibleProjectIds),
+    });
+    agentsPushed = !error && Boolean(data?.ok);
+    if (agentsPushed) await loadRemoteState(state.currentUserId);
+  } else {
+    try {
+      await persistProfile(agent);
+    } catch (error) {
+      console.error(error);
+    }
+    agentsPushed = await upsertAgentToSheet(agent);
+    if (agentsPushed) await syncGoogleSheet({ silent: true, notifyNewLeads: true });
   }
-  const agentsPushed = await upsertAgentToSheet(agent);
-  if (agentsPushed) await syncGoogleSheet({ silent: true, notifyNewLeads: true });
   showToast(
     agentsPushed ? (agent.active ? "Ejen diaktifkan" : "Ejen dinyahaktifkan") : "Status ejen belum sync",
     agentsPushed
@@ -5165,7 +5469,13 @@ async function forceAgentOffline(agentId) {
   const agent = getAgent(agentId);
   if (!agent || agent.role !== "agent") return;
   if (!window.confirm(`Paksa ${agent.name} keluar daripada semua sesi aktif?`)) return;
-  const forced = await forceAgentOfflineInSheet(agent);
+  let forced;
+  if (remoteDatabaseMode) {
+    const { data, error } = await remoteDatabaseClient.rpc("force_agent_offline", { p_agent_id: agent.id });
+    forced = !error && Boolean(data?.ok);
+  } else {
+    forced = await forceAgentOfflineInSheet(agent);
+  }
   if (!forced) {
     showToast("Force offline gagal", "Semak sambungan Google Sheet dan cuba semula.", "error");
     return;
@@ -5174,7 +5484,8 @@ async function forceAgentOffline(agentId) {
   agent.notificationEnabled = false;
   saveState();
   renderAll();
-  await syncGoogleSheet({ silent: true, agentsOnly: true });
+  if (remoteDatabaseMode) await loadRemoteState(state.currentUserId);
+  else await syncGoogleSheet({ silent: true, agentsOnly: true });
   showToast("Ejen dipaksa offline", `${agent.name} perlu login semula dan aktifkan loceng.`);
 }
 
@@ -5219,7 +5530,7 @@ async function updateAgentPassword(event) {
     agent.password = password;
     saveState();
   }
-  await upsertAgentToSheet(agent);
+  if (!remoteDatabaseMode) await upsertAgentToSheet(agent);
 
   closeModal(elements.agentPasswordModal);
   showToast("Kata laluan dikemas kini", `Kata laluan ${agent.name} telah ditukar.`);
@@ -5250,6 +5561,7 @@ async function updateContact(event) {
     elements.contactFormError.textContent = "Lead ini tidak boleh dikemas kini.";
     return;
   }
+  const previousLead = { ...lead };
   const nextStatus = normalizeSheetStatus(elements.contactStatus.value);
   lead.name = elements.contactName.value.trim();
   lead.phone = elements.contactPhone.value.trim();
@@ -5262,18 +5574,32 @@ async function updateContact(event) {
   }
   setGlobalLoading(true, "Menyimpan perubahan lead...");
   try {
-    await persistLead(lead);
-    const noteSynced = await updateLeadNotesInSheet(lead, lead.notes);
-    if (!noteSynced) throw new Error("Nota tidak dapat disimpan ke Google Sheet.");
-    if (getLeadVisualStatus(lead) !== nextStatus) {
-      const statusSynced = await updateLeadStatusFromLog(lead.id, nextStatus, elements.contactStatus);
-      if (!statusSynced) throw new Error("Status tidak dapat disahkan dalam Google Sheet.");
+    if (remoteDatabaseMode) {
+      const { data, error } = await remoteDatabaseClient.rpc("admin_update_lead_details", {
+        p_lead_id: lead.id,
+        p_name: lead.name,
+        p_phone: lead.phone,
+        p_email: lead.email,
+        p_project_name: lead.project,
+        p_notes: lead.notes,
+      });
+      if (error || !data?.ok) throw error || new Error(data?.error || "Lead gagal dikemas kini.");
+    } else {
+      await persistLead(lead);
+      const noteSynced = await updateLeadNotesInSheet(lead, lead.notes);
+      if (!noteSynced) throw new Error("Nota tidak dapat disimpan ke Google Sheet.");
     }
+    if (normalizeSheetStatus(previousLead.status) !== nextStatus) {
+      const statusSynced = await updateLeadStatusFromLog(lead.id, nextStatus, elements.contactStatus);
+      if (!statusSynced) throw new Error("Status tidak dapat disahkan oleh server.");
+    }
+    if (remoteDatabaseMode) await loadRemoteState(state.currentUserId);
     saveState();
     closeModal(elements.contactModal);
     showToast("Rekod pelanggan disimpan", `${lead.name} telah dikemas kini.`);
     renderAll();
   } catch (error) {
+    Object.assign(lead, previousLead);
     console.error(error);
     elements.contactFormError.textContent = "Perubahan tidak dapat disimpan ke dashboard.";
   } finally {
@@ -5313,12 +5639,13 @@ async function saveLeadNote(leadId, button = null) {
       const { data, error } = await remoteDatabaseClient.rpc("update_lead_notes", {
         p_lead_id: lead.id,
         p_notes: nextNotes,
+        p_expected_status_revision: Number(lead.statusRevision) || 0,
       });
-      if (error) throw error;
-      if (data === false) throw new Error("Anda hanya boleh edit nota lead yang boleh dilihat oleh akaun ini.");
+      if (error || !data?.ok) throw error || new Error(data?.error || "Nota ditolak oleh server.");
+    } else {
+      const noteSynced = await updateLeadNotesInSheet(lead, nextNotes);
+      if (!noteSynced) throw new Error("Nota tidak dapat disimpan ke Google Sheet.");
     }
-    const noteSynced = await updateLeadNotesInSheet(lead, nextNotes);
-    if (!noteSynced) throw new Error("Nota tidak dapat disimpan ke Google Sheet.");
     saveState();
     if (leadNoteDrafts.get(draftKey) === submittedDraft) leadNoteDrafts.delete(draftKey);
     showToast("Nota disimpan", `Nota untuk ${lead.name} telah dikemas kini.`);
@@ -5379,12 +5706,24 @@ async function updateLeadStatusFromLog(leadId, nextStatus, field = null) {
 
   try {
     applySheetStatusToLead(lead, normalizedStatus);
-    await persistLead(lead);
     saveState();
     renderAll();
-
-    const statusSynced = await updateLeadStatusInSheet(lead, normalizedStatus);
-    if (!statusSynced) throw new Error("Status tidak dapat disimpan ke Google Sheet.");
+    if (remoteDatabaseMode) {
+      const { data, error } = await remoteDatabaseClient.rpc("update_lead_status", {
+        p_action_id: crypto.randomUUID(),
+        p_lead_id: lead.id,
+        p_status: normalizedStatus,
+        p_expected_assignment_revision: Number(previousLead.assignmentRevision) || 0,
+        p_expected_status_revision: Number(previousLead.statusRevision) || 0,
+      });
+      if (error || !data?.ok) throw error || new Error(data?.error || "Status ditolak oleh server.");
+      lead.statusRevision = Number(data.status_revision) || lead.statusRevision;
+      queueRemoteReload();
+    } else {
+      await persistLead(lead);
+      const statusSynced = await updateLeadStatusInSheet(lead, normalizedStatus);
+      if (!statusSynced) throw new Error("Status tidak dapat disimpan ke Google Sheet.");
+    }
 
     showToast("Status dikemas kini", `${lead.name} kini ${formatSheetStatus(normalizedStatus)}.`);
     return true;
@@ -5418,19 +5757,31 @@ async function deleteLeadEverywhere(leadId) {
 
   if (!confirmPermanentDelete("lead", lead.name)) return;
 
-  const sheetDeleted = await deleteLeadFromSheet(lead);
+  let sheetDeleted;
+  if (remoteDatabaseMode) {
+    const { data, error } = await remoteDatabaseClient.rpc("admin_delete_lead", { p_lead_id: lead.id });
+    sheetDeleted = !error && Boolean(data?.ok);
+  } else {
+    sheetDeleted = await deleteLeadFromSheet(lead);
+  }
   if (!sheetDeleted) {
-    showToast("Lead tidak dipadam", "Google Sheet belum dapat dikemas kini. Semak Web App URL.", "error");
+    showToast("Lead tidak dipadam", remoteDatabaseMode ? "Supabase belum mengesahkan pemadaman." : "Google Sheet belum dapat dikemas kini. Semak Web App URL.", "error");
     return;
   }
 
   try {
-    await deleteLeads([lead.id]);
+    if (remoteDatabaseMode) {
+      state.leads = state.leads.filter((item) => item.id !== lead.id);
+      state.activities = state.activities.filter((activity) => activity.leadId !== lead.id);
+      saveState();
+    } else {
+      await deleteLeads([lead.id]);
+    }
     if (selectedContactId === lead.id) {
       selectedContactId = null;
       closeModal(elements.contactModal);
     }
-    showToast("Lead dipadam", "Google Sheet dan dashboard telah diselaraskan.");
+    showToast("Lead dipadam", remoteDatabaseMode ? "Supabase dan dashboard telah diselaraskan." : "Google Sheet dan dashboard telah diselaraskan.");
     renderAll();
   } catch (error) {
     console.error(error);
@@ -5606,6 +5957,10 @@ async function syncGoogleSheet(options = {}) {
 
 function scheduleSync() {
   window.clearInterval(syncTimer);
+  if (remoteDatabaseMode) {
+    syncTimer = window.setInterval(() => queueRemoteReload(), 30000);
+    return;
+  }
   if (!getSheetEndpoint()) return;
   syncTimer = window.setInterval(
     () => {
@@ -5972,7 +6327,26 @@ document.addEventListener("keydown", (event) => {
 async function bootstrap() {
   state.integration = normalizeIntegration(state.integration);
   saveState();
-  initRemoteDatabase();
+  await initRemoteDatabase();
+
+  if (remoteDatabaseClient) {
+    const { data } = await remoteDatabaseClient.auth.getSession();
+    if (data.session?.user) {
+      const loaded = await loadRemoteState(data.session.user.id);
+      if (loaded) {
+        const sessionUser = getCurrentUser();
+        if (sessionUser?.active) {
+          startAuthenticatedApp(sessionUser, { restoredSession: true });
+          subscribeToRemoteDatabase();
+          flushContactOutbox();
+          return;
+        }
+      }
+      await remoteDatabaseClient.auth.signOut();
+    }
+    showLogin();
+    return;
+  }
 
   const sessionUser = getSessionUser();
   if (sessionUser) {
@@ -5992,4 +6366,5 @@ async function bootstrap() {
 }
 
 lockViewportZoom();
+window.addEventListener("online", flushContactOutbox);
 bootstrap();
