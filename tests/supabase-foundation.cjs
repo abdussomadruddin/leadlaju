@@ -149,6 +149,11 @@ test('Supabase agent signup remains pending until an authenticated admin approve
   assert.match(manageAgent, /action === "approve"/);
   assert.match(manageAgent, /approval_status: "approved"/);
   assert.match(manageAgent, /active: true/);
+  assert.match(manageAgent, /action === "update_details"/);
+  assert.match(manageAgent, /admin\.auth\.admin\.updateUserById\(userId, \{ email \}\)/);
+  assert.match(manageAgent, /admin_update_agent/);
+  assert.match(manageAgent, /updateUserById\(userId, \{ email: target\.email \}\)/);
+  assert.match(app, /action: "update_details"/);
 });
 
 test('Supabase agent rejection deletes the Auth user and cascades canonical profile state', () => {

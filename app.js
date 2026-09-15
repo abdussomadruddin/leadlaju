@@ -5160,13 +5160,16 @@ async function addAgent(event) {
     setGlobalLoading(true, editingAgent ? "Mengemas kini ejen..." : "Mendaftarkan ejen...");
     try {
       if (editingAgent) {
-        const { data, error } = await remoteDatabaseClient.rpc("admin_update_agent", {
-          p_agent_id: editingAgent.id,
-          p_name: name,
-          p_phone: phone,
-          p_email: email.toLowerCase(),
-          p_active: editingAgent.active,
-          p_project_ids: eligibleProjectIds,
+        const { data, error } = await remoteDatabaseClient.functions.invoke("admin-manage-agent", {
+          body: {
+            action: "update_details",
+            userId: editingAgent.id,
+            name,
+            phone,
+            email: email.toLowerCase(),
+            active: editingAgent.active,
+            eligible_project_ids: eligibleProjectIds,
+          },
         });
         if (error || !data?.ok) throw error || new Error(data?.error || "Ejen gagal dikemas kini.");
         if (password) {

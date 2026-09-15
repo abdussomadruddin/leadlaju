@@ -119,6 +119,15 @@ Deno.serve(async (request) => {
       .eq("id", userId).maybeSingle();
     if (!target || target.role !== "agent") return response({ ok: false, error: "Agent not found" }, 404);
 
+    const actorClient = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      {
+        global: { headers: { Authorization: request.headers.get("Authorization") || "" } },
+        auth: { persistSession: false, autoRefreshToken: false },
+      },
+    );
+
     if (action === "approve") {
       const { count } = await admin.from("agent_project_eligibility")
         .select("agent_id", { count: "exact", head: true }).eq("agent_id", userId);
@@ -144,6 +153,35 @@ Deno.serve(async (request) => {
       return response({ ok: true, userId, password_updated: true });
     }
 
+    if (action === "update_details") {
+      const name = text(body.name);
+      const phone = text(body.phone);
+      const email = text(body.email).toLowerCase();
+      const active = body.active !== false;
+      const projectIds = Array.isArray(body.eligible_project_ids)
+        ? [...new Set(body.eligible_project_ids.map(text).filter(Boolean))]
+        : [];
+      if (!name || !phone || !email || !projectIds.length) {
+        return response({ ok: false, error: "Maklumat ejen tidak lengkap." }, 400);
+      }
+
+      const authPatch = email === target.email ? null : await admin.auth.admin.updateUserById(userId, { email });
+      if (authPatch?.error) throw authPatch.error;
+      const updated = await actorClient.rpc("admin_update_agent", {
+        p_agent_id: userId,
+        p_name: name,
+        p_phone: phone,
+        p_email: email,
+        p_active: active,
+        p_project_ids: projectIds,
+      });
+      if (updated.error || !updated.data?.ok) {
+        if (authPatch) await admin.auth.admin.updateUserById(userId, { email: target.email });
+        throw updated.error || new Error("Agent details could not be updated");
+      }
+      return response({ ok: true, userId, profile: updated.data.profile });
+    }
+
     if (action === "delete") {
       const { count: assignmentCount, error: assignmentError } = await admin.from("lead_assignments")
         .select("id", { count: "exact", head: true }).eq("agent_id", userId);
@@ -155,14 +193,6 @@ Deno.serve(async (request) => {
         return response({ ok: true, userId, deleted: true });
       }
 
-      const actorClient = createClient(
-        Deno.env.get("SUPABASE_URL")!,
-        Deno.env.get("SUPABASE_ANON_KEY")!,
-        {
-          global: { headers: { Authorization: request.headers.get("Authorization") || "" } },
-          auth: { persistSession: false, autoRefreshToken: false },
-        },
-      );
       const retired = await actorClient.rpc("admin_retire_agent", { p_agent_id: userId });
       if (retired.error || !retired.data?.ok) throw retired.error || new Error("Agent could not be retired");
       const updated = await admin.auth.admin.updateUserById(userId, {
