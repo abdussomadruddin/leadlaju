@@ -516,7 +516,17 @@ async function submitContactAction(action) {
     p_assignment_revision: action.assignmentRevision,
   });
   if (error) throw error;
-  if (!data?.ok) throw new Error(data?.error || "CALL NOW rejected by canonical server state");
+  if (!data?.ok) {
+    const rejection = new Error(data?.error || "CALL NOW rejected by canonical server state");
+    rejection.authoritativeRejection = true;
+    await writeContactOutbox({
+      ...action,
+      state: "conflict",
+      error: rejection.message,
+      resolvedAt: Date.now(),
+    }).catch(() => false);
+    throw rejection;
+  }
   await deleteContactOutbox(action.actionId).catch(() => false);
   return data;
 }
@@ -525,7 +535,8 @@ async function flushContactOutbox() {
   if (!remoteDatabaseMode || !remoteDatabaseClient || !navigator.onLine) return false;
   const user = getCurrentUser();
   if (!user?.id || user.role !== "agent") return false;
-  const actions = await readContactOutbox(user.id).catch(() => []);
+  const actions = (await readContactOutbox(user.id).catch(() => []))
+    .filter((action) => !action.state || action.state === "pending");
   for (const action of actions) {
     await submitContactAction(action).catch(() => false);
   }
@@ -4016,6 +4027,7 @@ async function handleCall(leadId) {
   pendingLeadStatusUpdates.set(leadId, { status: "contacted", token: updateToken });
   leadStatusWriteTimes.set(leadId, Date.now());
   setCallButtonLoading(leadId, true);
+  let remoteCapturePromise = null;
 
   try {
     let claimedLead = lead;
@@ -4031,14 +4043,20 @@ async function handleCall(leadId) {
         assignmentRevision: Number(lead.assignmentRevision) || 0,
         actionType: "contacted",
         createdAt: Date.now(),
+        state: "pending",
       };
       // Begin durable capture without awaiting so the direct tap still opens tel:.
-      const outboxWrite = writeContactOutbox(remoteContactAction);
+      remoteCapturePromise = writeContactOutbox(remoteContactAction)
+        .then(() => true)
+        .catch((error) => {
+          console.error("CALL NOW durable capture failed", error);
+          return false;
+        });
       lead.status = "contacted";
       lead.contactedAt = Date.now();
       lead.responseMs = Math.max(0, lead.contactedAt - lead.receivedAt);
       lead.pendingContactAction = true;
-      remoteWritePromise = outboxWrite.then(() => submitContactAction(remoteContactAction));
+      remoteWritePromise = remoteCapturePromise.then(() => submitContactAction(remoteContactAction));
     } else {
       lead.status = "contacted";
       lead.contactedAt = Date.now();
@@ -4096,7 +4114,16 @@ async function handleCall(leadId) {
     showToast("CALL NOW gagal", error?.message || "Semak sambungan Google Sheet dan cuba lagi.", "error");
     if (remoteDatabaseMode) {
       lead.pendingContactAction = true;
-      showToast("CALL NOW direkod", "Tindakan disimpan pada peranti dan akan dihantar semula apabila sambungan pulih.", "error");
+      const captured = await remoteCapturePromise?.catch(() => false);
+      showToast(
+        error?.authoritativeRejection ? "Tindakan belum diterima server" : captured ? "CALL NOW direkod" : "CALL NOW belum disimpan",
+        error?.authoritativeRejection
+          ? "Panggilan direkod pada peranti tetapi status canonical telah berubah."
+          : captured
+            ? "Tindakan disimpan pada peranti dan akan dihantar semula apabila sambungan pulih."
+            : "Panggilan telah dibuka, tetapi tindakan tidak dapat disimpan pada peranti. Sambung internet dan kemas kini status.",
+        "error",
+      );
     }
   } finally {
     leadStatusWriteTimes.set(leadId, Date.now());

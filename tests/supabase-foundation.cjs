@@ -179,10 +179,14 @@ test('Supabase CALL NOW starts durable agent-scoped capture before preserving th
   assert.match(app, /CONTACT_OUTBOX_DB = "leadlaju-contact-outbox-v1"/);
   assert.match(app, /agentId: state\.currentUserId/);
   assert.match(app, /assignmentRevision: Number\(lead\.assignmentRevision\)/);
-  assert.match(app, /const outboxWrite = writeContactOutbox\(remoteContactAction\)/);
-  assert.ok(app.indexOf('const outboxWrite = writeContactOutbox(remoteContactAction)') < app.indexOf('dialLeadPhone(callablePhone)'));
+  assert.match(app, /remoteCapturePromise = writeContactOutbox\(remoteContactAction\)/);
+  assert.ok(app.indexOf('remoteCapturePromise = writeContactOutbox(remoteContactAction)') < app.indexOf('dialLeadPhone(callablePhone)'));
   assert.match(app, /window\.addEventListener\("online", flushContactOutbox\)/);
   assert.match(app, /p_action_id: action\.actionId/);
+  assert.match(app, /state: "conflict"/);
+  assert.match(app, /\.filter\(\(action\) => !action\.state \|\| action\.state === "pending"\)/);
+  assert.match(app, /remoteCapturePromise\.then\(\(\) => submitContactAction\(remoteContactAction\)\)/);
+  assert.match(app, /CALL NOW belum disimpan/);
 });
 
 test('Supabase Realtime broadcasts canonical operational changes to private user and admin channels', () => {
