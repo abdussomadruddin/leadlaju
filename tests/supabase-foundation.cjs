@@ -273,6 +273,12 @@ test('all refresh entry points use Supabase state while remote mode is active', 
   assert.match(app, /remoteDatabaseMode = wasRemoteDatabaseMode/);
 });
 
+test('production runtime config enables Supabase without requiring a query flag', () => {
+  assert.match(app, /get\("backend"\) === "sheet"/);
+  assert.doesNotMatch(app, /get\("backend"\) !== "supabase"/);
+  assert.match(app, /config\.backend !== "supabase"/);
+});
+
 test('Sheet recovery sweep ingests missing leads only and never imports operational state', () => {
   assert.match(sheetSweep, /\.in\("source_lead_id", sourceIds\.slice/);
   assert.match(sheetSweep, /if \(!sourceId \|\| existing\.has\(sourceId\)\) continue/);

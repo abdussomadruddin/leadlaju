@@ -545,7 +545,7 @@ async function flushContactOutbox() {
 }
 
 async function loadRemoteDatabaseConfig() {
-  if (new URLSearchParams(window.location.search).get("backend") !== "supabase") return null;
+  if (new URLSearchParams(window.location.search).get("backend") === "sheet") return null;
   try {
     const response = await fetch("/api/runtime-config", { cache: "no-store" });
     if (!response.ok) return null;
