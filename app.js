@@ -1194,10 +1194,10 @@ async function handleAgentSignup(event) {
 function sendAgentLogoutState(user) {
   if (!user?.id || user.role !== "agent") return;
   if (remoteDatabaseMode && remoteDatabaseClient) {
-    remoteDatabaseClient.rpc("set_agent_availability", {
+    Promise.resolve(remoteDatabaseClient.rpc("set_agent_availability", {
       p_ready: false,
       p_notification_ready: false,
-    }).catch(() => {});
+    })).catch(() => {});
     return;
   }
   postGoogleSheetAction({

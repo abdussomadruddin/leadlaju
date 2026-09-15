@@ -1100,6 +1100,12 @@ test('logout reaches the login screen before network cleanup completes', () => {
   assert.match(body, /localStorage\.removeItem\(AUTH_KEY\)/);
 });
 
+test('agent logout safely detaches the Supabase availability thenable', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  assert.match(source, /Promise\.resolve\(remoteDatabaseClient\.rpc\("set_agent_availability"/);
+  assert.match(source, /\}\)\)\.catch\(\(\) => \{\}\);/);
+});
+
 test('agent sidebar hides the Google Sheet connection card', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const html = fs.readFileSync('index.html', 'utf8');
