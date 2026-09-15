@@ -1,4 +1,4 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.116.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -128,9 +128,33 @@ Deno.serve(async (request) => {
     }
 
     if (action === "delete") {
-      const deletion = await admin.auth.admin.deleteUser(userId);
-      if (deletion.error) throw deletion.error;
-      return response({ ok: true, userId, deleted: true });
+      const { count: assignmentCount, error: assignmentError } = await admin.from("lead_assignments")
+        .select("id", { count: "exact", head: true }).eq("agent_id", userId);
+      if (assignmentError) throw assignmentError;
+
+      if (!assignmentCount) {
+        const deletion = await admin.auth.admin.deleteUser(userId);
+        if (deletion.error) throw deletion.error;
+        return response({ ok: true, userId, deleted: true });
+      }
+
+      const actorClient = createClient(
+        Deno.env.get("SUPABASE_URL")!,
+        Deno.env.get("SUPABASE_ANON_KEY")!,
+        {
+          global: { headers: { Authorization: request.headers.get("Authorization") || "" } },
+          auth: { persistSession: false, autoRefreshToken: false },
+        },
+      );
+      const retired = await actorClient.rpc("admin_retire_agent", { p_agent_id: userId });
+      if (retired.error || !retired.data?.ok) throw retired.error || new Error("Agent could not be retired");
+      const updated = await admin.auth.admin.updateUserById(userId, {
+        email: retired.data.tombstone_email,
+        app_metadata: { role: "agent", approval_status: "rejected" },
+        ban_duration: "876000h",
+      });
+      if (updated.error) throw updated.error;
+      return response({ ok: true, userId, deleted: true, history_preserved: true });
     }
 
     return response({ ok: false, error: "Invalid action" }, 400);

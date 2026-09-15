@@ -1081,7 +1081,7 @@ test('appointment tracker is synced from the server and scoped to assigned leads
   assert.match(source, /lead\.assignedAgentId === state\.currentUserId/);
   assert.match(source, /editingAppointmentId \? "update_appointment" : reschedulingAppointmentId \? "reschedule_appointment" : "create_appointment"/);
   assert.match(source, /request_id: pendingAppointmentRequestId/);
-  assert.match(source, /lead_id: lead\.dedupeKey \|\| lead\.id/);
+  assert.match(source, /lead_id: remoteDatabaseMode \? lead\.id : \(lead\.dedupeKey \|\| lead\.id\)/);
   assert.match(source, /pendingAppointmentRequestId = `appointment-/);
   assert.match(html, /data-view="appointments"/);
   assert.match(html, /id="appointment-modal"/);
@@ -1416,7 +1416,7 @@ test('authoritative lead processing and removals finish before marker cleanup an
   const source = fs.readFileSync('app.js', 'utf8');
   const syncStart = source.indexOf('async function syncGoogleSheet(');
   const syncEnd = source.indexOf('\nfunction scheduleSync(', syncStart);
-  const body = source.slice(syncStart, syncEnd);
+  const body = source.slice(source.indexOf('const syncStartedAt = Date.now();', syncStart), syncEnd);
   const rowCommit = body.indexOf('await addLead(row');
   const removalCommit = body.indexOf('await deleteLeads(');
   const cleanup = body.indexOf('cleanupLocallyExpiredAssignments()');
@@ -1431,7 +1431,10 @@ test('authoritative lead processing and removals finish before marker cleanup an
 test('fresh authoritative assignment renders CALL NOW and Log Lead in one render cycle', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const syncStart = source.indexOf('async function syncGoogleSheet(');
-  const syncBody = source.slice(syncStart, source.indexOf('\nfunction scheduleSync(', syncStart));
+  const syncBody = source.slice(
+    source.indexOf('const syncStartedAt = Date.now();', syncStart),
+    source.indexOf('\nfunction scheduleSync(', syncStart),
+  );
   const renderStart = source.indexOf('function renderAll(');
   const renderBody = source.slice(renderStart, source.indexOf('\nconst viewTitles', renderStart));
   assert.equal((syncBody.match(/renderAll\(\)/g) || []).length, 1);

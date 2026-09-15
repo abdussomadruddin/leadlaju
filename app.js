@@ -572,6 +572,7 @@ function mapProfile(row) {
     phone: row.phone || "",
     email: row.email,
     role: row.role || "agent",
+    approvalStatus: row.approval_status || (row.active ? "approved" : "pending"),
     active: row.active !== false && row.approval_status !== "pending" && row.approval_status !== "rejected",
     leadsHandled: row.leads_handled || 0,
     createdAt: row.created_at ? new Date(row.created_at).getTime() : null,
@@ -621,6 +622,7 @@ function mapActivity(row) {
 
 async function loadRemoteState(userId) {
   if (!remoteDatabaseClient || !userId) return false;
+  const wasRemoteDatabaseMode = remoteDatabaseMode;
   const previousLeadKeys = new Set(state.leads.map(leadNotificationKey));
   const shouldDetectNewLeads = false;
   try {
@@ -655,8 +657,8 @@ async function loadRemoteState(userId) {
     }
     return true;
   } catch (error) {
-      console.error("Remote load failed", error);
-    remoteDatabaseMode = false;
+    console.error("Remote load failed", error);
+    remoteDatabaseMode = wasRemoteDatabaseMode;
     return false;
   }
 }
@@ -2704,7 +2706,7 @@ async function addManualLead(event) {
     return;
   }
 
-  const createdAt = formatSheetTimestamp();
+  const createdAt = remoteDatabaseMode ? new Date().toISOString() : formatSheetTimestamp();
   const leadInput = {
     id: `manual-${Date.now()}-${normalizePhone(phone)}`,
     name,
@@ -2717,20 +2719,28 @@ async function addManualLead(event) {
     status: "new",
   };
 
-  const pushedToSheet = await pushManualLeadToSheet(leadInput);
-  if (!pushedToSheet) {
-    elements.manualLeadError.textContent = "Google Sheet belum dapat dikemas kini. Semak Web App URL.";
-    return;
-  }
-
-  const result = await addLead(leadInput, { silent: true, updateExisting: true, notify: true, queueIfBlocked: true });
-  if (!result) {
-    elements.manualLeadError.textContent = "Lead sudah masuk Google Sheet, tetapi dashboard belum dapat sync. Semak ejen aktif.";
-    return;
+  if (remoteDatabaseMode) {
+    const { data, error } = await remoteDatabaseClient.rpc("admin_ingest_manual_lead", { p_lead: leadInput });
+    if (error || !data?.ok) {
+      elements.manualLeadError.textContent = error?.message || data?.error || "Lead tidak dapat disimpan ke Supabase.";
+      return;
+    }
+    await loadRemoteState(state.currentUserId);
+  } else {
+    const pushedToSheet = await pushManualLeadToSheet(leadInput);
+    if (!pushedToSheet) {
+      elements.manualLeadError.textContent = "Google Sheet belum dapat dikemas kini. Semak Web App URL.";
+      return;
+    }
+    const result = await addLead(leadInput, { silent: true, updateExisting: true, notify: true, queueIfBlocked: true });
+    if (!result) {
+      elements.manualLeadError.textContent = "Lead sudah masuk Google Sheet, tetapi dashboard belum dapat sync. Semak ejen aktif.";
+      return;
+    }
   }
 
   closeModal(elements.manualLeadModal);
-  showToast("Manual lead disimpan", "Google Sheet dan dashboard telah diselaraskan.", "success");
+  showToast("Manual lead disimpan", remoteDatabaseMode ? "Supabase dan dashboard telah diselaraskan." : "Google Sheet dan dashboard telah diselaraskan.", "success");
   renderAll();
 }
 
@@ -4648,7 +4658,7 @@ async function saveAppointment(event) {
   const appointment = appointmentActionPayload({
     id: editingAppointmentId || reschedulingAppointmentId || "",
     request_id: pendingAppointmentRequestId,
-    lead_id: lead.dedupeKey || lead.id,
+    lead_id: remoteDatabaseMode ? lead.id : (lead.dedupeKey || lead.id),
     type: elements.appointmentType.value,
     scheduled_at: elements.appointmentScheduledAt.value,
     location: elements.appointmentLocation.value.trim(),
@@ -4742,6 +4752,7 @@ async function deleteAppointment(appointmentId) {
 
 function renderAgents() {
   elements.agentsGrid.innerHTML = state.agents
+    .filter((agent) => agent.approvalStatus !== "rejected")
     .map(
       (agent) => {
         const isPendingAgent = agent.role === "agent" && !agent.active;
@@ -5790,6 +5801,27 @@ async function deleteLeadEverywhere(leadId) {
 }
 
 async function syncGoogleSheet(options = {}) {
+  if (remoteDatabaseMode) {
+    if (syncInProgress) return false;
+    syncInProgress = true;
+    try {
+      const loaded = await loadRemoteState(state.currentUserId);
+      if (!loaded) return false;
+      renderAll();
+      if (
+        options.lifecycleSync ||
+        (typeof initialDashboardSyncState !== "undefined" && initialDashboardSyncState === "failed")
+      ) {
+        completeLifecycleAuthoritativeRender();
+      }
+      return true;
+    } finally {
+      syncInProgress = false;
+      const waiters = syncCompletionWaiters;
+      syncCompletionWaiters = [];
+      waiters.forEach((resolve) => resolve());
+    }
+  }
   const syncStartedAt = Date.now();
   const endpoint = getSheetEndpoint();
   if (!endpoint) {

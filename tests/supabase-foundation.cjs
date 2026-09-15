@@ -17,8 +17,11 @@ const ingest = fs.readFileSync(path.join(root, 'supabase', 'functions', 'ingest-
 const migrate = fs.readFileSync(path.join(root, 'supabase', 'functions', 'migrate-sheet-snapshot', 'index.ts'), 'utf8');
 const manageAgent = fs.readFileSync(path.join(root, 'supabase', 'functions', 'admin-manage-agent', 'index.ts'), 'utf8');
 const notificationWorker = fs.readFileSync(path.join(root, 'supabase', 'functions', 'process-notification-outbox', 'index.ts'), 'utf8');
+const sheetSweep = fs.readFileSync(path.join(root, 'supabase', 'functions', 'sweep-sheet-input', 'index.ts'), 'utf8');
 const notificationClaims = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_notification_worker_claims.sql'))), 'utf8');
 const expirySchedule = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_schedule_assignment_expiry.sql'))), 'utf8');
+const pendingReconciliation = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_reconcile_stale_pending_assignments.sql'))), 'utf8');
+const safeAgentRetirement = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_retire_agent_safely.sql'))), 'utf8');
 const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
 
 test('Supabase foundation keeps one active lead and assignment per agent', () => {
@@ -64,6 +67,15 @@ test('expired assignments are missed, revisioned, queued and dispatched transact
   assert.match(sql, /retry_after_cycle = v_cycle \+ 1/);
   assert.match(sql, /assignment_revision = assignment_revision \+ 1/);
   assert.match(sql, /perform leadlaju_private\.dispatch_available_leads\(p_now\)/);
+});
+
+test('stale imported pending assignments cannot block a later canonical assignment', () => {
+  assert.match(pendingReconciliation, /before insert on public\.lead_assignments/);
+  assert.match(pendingReconciliation, /la\.agent_id = new\.agent_id or la\.lead_id = new\.lead_id/);
+  assert.match(pendingReconciliation, /l\.status = 'new'/);
+  assert.match(pendingReconciliation, /l\.queue_state = 'active'/);
+  assert.match(pendingReconciliation, /l\.assignment_revision = la\.assignment_revision/);
+  assert.match(pendingReconciliation, /set outcome = 'missed'/);
 });
 
 test('RLS is enabled and mutable canonical tables are not directly writable by clients', () => {
@@ -142,6 +154,18 @@ test('Supabase agent rejection deletes the Auth user and cascades canonical prof
   assert.match(manageAgent, /action === "delete"/);
   assert.match(manageAgent, /auth\.admin\.deleteUser\(userId\)/);
   assert.doesNotMatch(manageAgent, /password[^\n]*profiles/);
+  assert.match(manageAgent, /admin_retire_agent/);
+  assert.match(manageAgent, /tombstone_email/);
+});
+
+test('deleting an experienced agent preserves history and safely requeues an active lead', () => {
+  assert.match(safeAgentRetirement, /function public\.admin_retire_agent/);
+  assert.match(safeAgentRetirement, /outcome = 'missed'/);
+  assert.match(safeAgentRetirement, /queue_state = 'queued'/);
+  assert.match(safeAgentRetirement, /assignment_revision = assignment_revision \+ 1/);
+  assert.match(safeAgentRetirement, /approval_status = 'rejected'/);
+  assert.match(safeAgentRetirement, /perform leadlaju_private\.dispatch_available_leads\(now\(\)\)/);
+  assert.match(app, /filter\(\(agent\) => agent\.approvalStatus !== "rejected"\)/);
 });
 
 test('Supabase CALL NOW starts durable agent-scoped capture before preserving the tel user gesture', () => {
@@ -186,4 +210,26 @@ test('Supabase operational UI mutations branch away from Google Sheet writes', (
   assert.match(app, /remoteDatabaseClient\.rpc\("admin_update_agent"/);
   assert.match(app, /remoteDatabaseClient\.rpc\("admin_update_lead_details"/);
   assert.match(app, /remoteDatabaseClient\.rpc\("admin_delete_lead"/);
+  assert.match(app, /remoteDatabaseClient\.rpc\("admin_ingest_manual_lead"/);
+  assert.match(app, /lead_id: remoteDatabaseMode \? lead\.id : \(lead\.dedupeKey \|\| lead\.id\)/);
+});
+
+test('all refresh entry points use Supabase state while remote mode is active', () => {
+  const syncStart = app.indexOf('async function syncGoogleSheet(options = {})');
+  const sheetRead = app.indexOf('const syncStartedAt = Date.now();', syncStart);
+  const remoteBranch = app.slice(syncStart, sheetRead);
+  assert.match(remoteBranch, /if \(remoteDatabaseMode\)/);
+  assert.match(remoteBranch, /await loadRemoteState\(state\.currentUserId\)/);
+  assert.match(remoteBranch, /renderAll\(\)/);
+  assert.doesNotMatch(remoteBranch, /getSheetEndpoint|fetch\(/);
+  assert.match(app, /const wasRemoteDatabaseMode = remoteDatabaseMode/);
+  assert.match(app, /remoteDatabaseMode = wasRemoteDatabaseMode/);
+});
+
+test('Sheet recovery sweep ingests missing leads only and never imports operational state', () => {
+  assert.match(sheetSweep, /\.in\("source_lead_id", sourceIds\.slice/);
+  assert.match(sheetSweep, /if \(!sourceId \|\| existing\.has\(sourceId\)\) continue/);
+  assert.match(sheetSweep, /admin\.rpc\("ingest_lead"/);
+  assert.doesNotMatch(sheetSweep, /assigned_agent|assignment_revision|status_revision|queue_state|lead_ready/);
+  assert.match(sheetSweep, /malaysiaTimestamp/);
 });
