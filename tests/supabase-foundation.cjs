@@ -23,6 +23,7 @@ const expirySchedule = fs.readFileSync(path.join(migrations, fs.readdirSync(migr
 const pendingReconciliation = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_reconcile_stale_pending_assignments.sql'))), 'utf8');
 const safeAgentRetirement = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_retire_agent_safely.sql'))), 'utf8');
 const backgroundNotifications = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_operational_background_notifications.sql'))), 'utf8');
+const realtimeReloadSignals = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_realtime_state_reload_signals.sql'))), 'utf8');
 const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
 
 test('Supabase foundation keeps one active lead and assignment per agent', () => {
@@ -193,6 +194,15 @@ test('Supabase Realtime broadcasts canonical operational changes to private user
   assert.match(realtime, /'admin:operations'/);
   assert.match(app, /channel\(topic, \{ config: \{ private: true \} \}\)/);
   assert.match(app, /\.on\("broadcast", \{ event: "\*" \}, queueRemoteReload\)/);
+});
+
+test('Supabase Realtime refreshes shared team and project state without broadcasting profile PII', () => {
+  assert.match(realtimeReloadSignals, /tg_table_name in \('profiles', 'agent_availability', 'projects'\)/);
+  assert.match(realtimeReloadSignals, /realtime\.send\(/);
+  assert.match(realtimeReloadSignals, /jsonb_build_object\('table', tg_table_name, 'operation', tg_op\)/);
+  assert.match(realtimeReloadSignals, /'state_changed'/);
+  assert.match(realtimeReloadSignals, /eligibility_realtime_broadcast/);
+  assert.doesNotMatch(realtimeReloadSignals, /realtime\.send\([\s\S]*?v_new/);
 });
 
 test('Supabase expiry is server scheduled and never depends on a browser timer', () => {
