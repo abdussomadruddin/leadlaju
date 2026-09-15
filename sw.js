@@ -1,7 +1,6 @@
 const CACHE_NAME = "leadlaju-pwa-v20260912-lead-monitor-v72";
 const LEAD_HANDOFF_CACHE = "leadlaju-notification-snapshots";
 const LEAD_HANDOFF_SCHEMA_VERSION = 1;
-const LEAD_NOTIFICATION_HOLD_MS = 7000;
 const APP_SHELL = [
   "/",
   "/index.html",
@@ -272,7 +271,6 @@ async function broadcastLeadSnapshot(payload = {}, timing = createLeadTiming(pay
 async function deliverLeadNotification(payload = {}, timing = createLeadTiming(payload)) {
   await cacheLeadSnapshot(payload);
   await broadcastLeadSnapshot(payload, timing);
-  await new Promise((resolve) => setTimeout(resolve, LEAD_NOTIFICATION_HOLD_MS));
   await showLeadNotification(payload, timing, { snapshotCached: true });
 }
 

@@ -634,6 +634,8 @@ function mapActivity(row) {
 async function loadRemoteState(userId) {
   if (!remoteDatabaseClient || !userId) return false;
   const wasRemoteDatabaseMode = remoteDatabaseMode;
+  const remoteLoadGeneration = authoritativeStateGeneration;
+  const locallyCommittedLeads = state.leads.slice();
   const previousLeadKeys = new Set(state.leads.map(leadNotificationKey));
   const shouldDetectNewLeads = false;
   try {
@@ -643,11 +645,30 @@ async function loadRemoteState(userId) {
     const currentUser = profiles.find((agent) => agent.id === userId);
     if (!currentUser) throw new Error("Profil pengguna belum tersedia.");
 
+    const remoteLeads = (snapshot?.leads || []).map(mapLead);
+    // A request started before a push snapshot can return without that assignment.
+    // Keep the newer local canonical snapshot until a later authoritative read catches up.
+    locallyCommittedLeads.forEach((localLead) => {
+      if (!wasLeadCommittedAfterSyncStarted(localLead, remoteLoadGeneration)) return;
+      const index = remoteLeads.findIndex((remoteLead) =>
+        remoteLead.id === localLead.id || remoteLead.dedupeKey === localLead.dedupeKey,
+      );
+      const remoteLead = index >= 0 ? remoteLeads[index] : null;
+      const remoteIsOlder = !remoteLead || (
+        (Number(remoteLead.assignmentRevision) || 0) <= (Number(localLead.assignmentRevision) || 0) &&
+        (Number(remoteLead.statusRevision) || 0) <= (Number(localLead.statusRevision) || 0)
+      );
+      if (remoteIsOlder) {
+        if (index >= 0) remoteLeads[index] = localLead;
+        else remoteLeads.push(localLead);
+      }
+    });
+
     state = {
       ...structuredClone(defaultState),
       currentUserId: userId,
       agents: profiles,
-      leads: (snapshot?.leads || []).map(mapLead),
+      leads: remoteLeads,
       activities: (snapshot?.events || []).map(mapActivity),
       appointments: normalizeAppointments(snapshot?.appointments),
       projects: normalizeProjects(snapshot?.projects),

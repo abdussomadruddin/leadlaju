@@ -5,6 +5,8 @@ const PROJECTS_SHEET_NAME = "Projects";
 const REMINDERS_SHEET_NAME = "Reminders";
 const APPOINTMENTS_SHEET_NAME = "Appointments";
 const PUSH_SUBSCRIPTIONS_SHEET_NAME = "PushSubscriptions";
+const REPORTING_SHEET_NAME = "LeadLaju Reporting";
+const REPORT_EXPORT_SECRET_PROPERTY = "leadlaju_report_export_secret";
 const DEFAULT_SOURCE = "Manual Lead";
 const DEFAULT_AGENT_PASSWORD = "Agent123!";
 const MALAYSIA_TIME_ZONE = "Asia/Kuala_Lumpur";
@@ -346,6 +348,9 @@ function reconcileLeadAgentReferences_(sheet, headers, agents) {
 function doPost(event) {
   try {
     const payload = JSON.parse(event.postData.contents || "{}");
+    if (payload.action === "replace_reporting_snapshot") {
+      return jsonResponse(replaceReportingSnapshot_(payload));
+    }
     if (payload.action === "add_lead") {
       return jsonResponse(appendLead_(payload.lead || payload));
     }
@@ -446,6 +451,99 @@ function doPost(event) {
   } catch (error) {
     return jsonResponse({ ok: false, error: String(error) });
   }
+}
+
+function replaceReportingSnapshot_(payload) {
+  const expectedToken = PropertiesService.getScriptProperties().getProperty(REPORT_EXPORT_SECRET_PROPERTY);
+  if (!expectedToken || String(payload.reportToken || "") !== expectedToken) {
+    return { ok: false, error: "Unauthorized report export" };
+  }
+  const snapshot = payload.snapshot && typeof payload.snapshot === "object" ? payload.snapshot : null;
+  if (!snapshot) return { ok: false, error: "Invalid report snapshot" };
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = getOrCreateSheet_(spreadsheet, REPORTING_SHEET_NAME);
+    sheet.clear();
+    const generatedAt = reportCellValue_(snapshot.generatedAt || new Date().toISOString());
+    sheet.getRange(1, 1, 1, 2).setValues([["LeadLaju Reporting", generatedAt]]);
+    sheet.getRange(1, 1, 1, 2).setFontWeight("bold").setBackground("#1a73e8").setFontColor("#ffffff");
+
+    let row = 3;
+    row = writeReportingSection_(sheet, row, "Leads", [
+      "ID", "Source Lead ID", "Tarikh masuk", "Nama", "Telefon", "Emel", "Bandar", "Projek", "Sumber",
+      "Status", "Queue", "Agent", "Emel agent", "Assigned", "Tamat", "Assignment revision", "Status revision",
+      "Pass count", "Contacted", "Nota", "Dikemas kini",
+    ], Array.isArray(snapshot.leads) ? snapshot.leads : [], [
+      "id", "sourceLeadId", "createdAt", "name", "phone", "email", "city", "project", "source",
+      "status", "queueState", "assignedAgent", "assignedAgentEmail", "receivedAt", "expiresAt", "assignmentRevision",
+      "statusRevision", "passCount", "contactedAt", "notes", "updatedAt",
+    ]);
+    row = writeReportingSection_(sheet, row, "Agents", [
+      "ID", "Nama", "Telefon", "Emel", "Role", "Active", "Approval", "Get Lead", "Notification",
+      "Last seen", "Presence hingga", "Leads handled", "Tarikh daftar",
+    ], Array.isArray(snapshot.agents) ? snapshot.agents : [], [
+      "id", "name", "phone", "email", "role", "active", "approvalStatus", "leadReady", "notificationReady",
+      "lastSeenAt", "presenceLeaseUntil", "leadsHandled", "createdAt",
+    ]);
+    row = writeReportingSection_(sheet, row, "Projects", ["ID", "Nama", "Active", "Tarikh cipta"],
+      Array.isArray(snapshot.projects) ? snapshot.projects : [], ["id", "name", "active", "createdAt"]);
+    row = writeReportingSection_(sheet, row, "Appointments", [
+      "ID", "Lead ID", "Lead", "Projek", "Agent", "Jenis", "Tarikh", "Lokasi", "Nota", "Status", "Dikemas kini",
+    ], Array.isArray(snapshot.appointments) ? snapshot.appointments : [], [
+      "id", "leadId", "leadName", "project", "assignedAgent", "type", "scheduledAt", "location", "notes", "status", "updatedAt",
+    ]);
+    writeReportingSection_(sheet, row, "Reminders", ["ID", "Mesej", "Target", "Dibuat oleh", "Tarikh"],
+      Array.isArray(snapshot.reminders) ? snapshot.reminders : [], ["id", "message", "target", "createdBy", "createdAt"]);
+    sheet.setFrozenRows(3);
+    sheet.autoResizeColumns(1, Math.min(sheet.getLastColumn(), 21));
+    protectReportingSheet_(sheet);
+    SpreadsheetApp.flush();
+    return {
+      ok: true,
+      rowCounts: ["leads", "agents", "projects", "appointments", "reminders"].reduce((counts, key) => {
+        counts[key] = Array.isArray(snapshot[key]) ? snapshot[key].length : 0;
+        return counts;
+      }, {}),
+    };
+  } catch (error) {
+    return { ok: false, error: error && error.message ? error.message : String(error) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function writeReportingSection_(sheet, row, title, headers, records, keys) {
+  sheet.getRange(row, 1).setValue(title).setFontWeight("bold").setBackground("#dbeafe");
+  row += 1;
+  sheet.getRange(row, 1, 1, headers.length).setValues([headers]).setFontWeight("bold").setBackground("#e8f0fe");
+  row += 1;
+  if (records.length) {
+    const values = records.map((record) => keys.map((key) => reportCellValue_(record && record[key])));
+    sheet.getRange(row, 1, values.length, headers.length).setValues(values);
+    row += values.length;
+  }
+  return row + 2;
+}
+
+function reportCellValue_(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "boolean") return value ? "yes" : "no";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function protectReportingSheet_(sheet) {
+  const description = "LeadLaju reporting - generated from Supabase";
+  let protection = sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET)
+    .find((item) => item.getDescription() === description);
+  if (!protection) protection = sheet.protect().setDescription(description);
+  protection.setWarningOnly(false);
+  const editors = protection.getEditors();
+  if (editors.length) protection.removeEditors(editors);
+  if (protection.canDomainEdit()) protection.setDomainEdit(false);
 }
 
 function appendReminder_(input) {

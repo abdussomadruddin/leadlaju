@@ -901,15 +901,14 @@ test('phone polling consumes the locally cached push snapshot without waiting fo
   assert.match(scheduleBody, /DEFAULT_SYNC_INTERVAL_SECONDS \* 1000/);
 });
 
-test('every new lead notification is held for seven seconds without exceeding the mobile push lifetime', () => {
+test('every new lead notification is broadcast and shown without an artificial Service Worker hold', () => {
   const worker = fs.readFileSync('sw.js', 'utf8');
   const deliveryStart = worker.indexOf('async function deliverLeadNotification');
   const deliveryEnd = worker.indexOf('\nself.addEventListener("message"', deliveryStart);
   const delivery = worker.slice(deliveryStart, deliveryEnd);
-  assert.match(worker, /const LEAD_NOTIFICATION_HOLD_MS = 7000/);
   assert.ok(delivery.indexOf('await cacheLeadSnapshot(payload)') < delivery.indexOf('await broadcastLeadSnapshot(payload, timing)'));
-  assert.ok(delivery.indexOf('await broadcastLeadSnapshot(payload, timing)') < delivery.indexOf('setTimeout(resolve, LEAD_NOTIFICATION_HOLD_MS)'));
-  assert.ok(delivery.indexOf('setTimeout(resolve, LEAD_NOTIFICATION_HOLD_MS)') < delivery.indexOf('await showLeadNotification(payload, timing'));
+  assert.ok(delivery.indexOf('await broadcastLeadSnapshot(payload, timing)') < delivery.indexOf('await showLeadNotification(payload, timing'));
+  assert.doesNotMatch(delivery, /setTimeout\(|LEAD_NOTIFICATION_HOLD_MS/);
 });
 
 test('app writes a readable single-line delivery trace without lead business data', () => {

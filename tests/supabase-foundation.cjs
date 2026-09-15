@@ -25,8 +25,12 @@ const safeAgentRetirement = fs.readFileSync(path.join(migrations, fs.readdirSync
 const backgroundNotifications = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_operational_background_notifications.sql'))), 'utf8');
 const realtimeReloadSignals = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_realtime_state_reload_signals.sql'))), 'utf8');
 const notificationReadiness = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_canonical_notification_readiness.sql'))), 'utf8');
+const realtimeAssignmentSnapshots = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_realtime_assignment_snapshot_and_sheet_reporting.sql'))), 'utf8');
+const retryOnlyDispatch = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_unblock_retry_only_dispatch.sql'))), 'utf8');
 const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+const reportExporter = fs.readFileSync(path.join(root, 'supabase', 'functions', 'export-sheet-report', 'index.ts'), 'utf8');
+const appsScript = fs.readFileSync(path.join(root, 'google-apps-script', 'Code.gs'), 'utf8');
 
 test('Supabase foundation keeps one active lead and assignment per agent', () => {
   assert.match(sql, /create unique index one_active_lead_per_agent[\s\S]*queue_state = 'active'/);
@@ -45,6 +49,14 @@ test('Supabase dispatcher preserves eligibility, readiness, expiry and five-minu
   assert.match(sql, /ascending_position \* 2 - 1/);
   assert.match(sql, /pick_latest_next := not v_state\.pick_latest_next/);
   assert.match(sql, /project_dispatch_state/);
+});
+
+test('retry-only dispatcher advances only after the current retry round is exhausted', () => {
+  assert.match(retryOnlyDispatch, /not exists \([\s\S]*fresh\.pass_count = 0/);
+  assert.match(retryOnlyDispatch, /retry\.retry_after_cycle <= v_state\.queue_cycle/);
+  assert.match(retryOnlyDispatch, /previous\.retry_cycle = v_state\.queue_cycle/);
+  assert.match(retryOnlyDispatch, /greatest\([\s\S]*v_state\.queue_cycle \+ 1[\s\S]*v_next_retry_cycle/);
+  assert.match(retryOnlyDispatch, /dispatch_available_leads_current_cycle\(p_now\)/);
 });
 
 test('Supabase ingestion is idempotent by source identity and payload fingerprint', () => {
@@ -167,6 +179,10 @@ test('Supabase agent signup remains pending until an authenticated admin approve
   assert.match(manageAgent, /admin_update_agent/);
   assert.match(manageAgent, /updateUserById\(userId, \{ email: target\.email \}\)/);
   assert.match(app, /action: "update_details"/);
+  const addAgentBody = app.slice(app.indexOf('async function addAgent('), app.indexOf('\nasync function approveAgent('));
+  assert.doesNotMatch(addAgentBody, /body: \{ action: "approve", userId: signup\.data\.userId \}/);
+  assert.match(manageAgent, /select\("id"\)\.maybeSingle\(\)/);
+  assert.match(manageAgent, /Status ejen sudah berubah/);
 });
 
 test('Supabase agent rejection deletes the Auth user and cascades canonical profile state', () => {
@@ -209,7 +225,33 @@ test('Supabase Realtime broadcasts canonical operational changes to private user
   assert.match(realtime, /'user:'\|\|v_user_id/);
   assert.match(realtime, /'admin:operations'/);
   assert.match(app, /channel\(topic, \{ config: \{ private: true \} \}\)/);
-  assert.match(app, /\.on\("broadcast", \{ event: "\*" \}, queueRemoteReload\)/);
+  assert.match(app, /\.on\("broadcast", \{ event: "\*" \}, handleRemoteBroadcast\)/);
+});
+
+test('an assigned lead is delivered as a canonical private snapshot before background reconciliation', () => {
+  assert.match(realtimeAssignmentSnapshots, /function leadlaju_private\.broadcast_assignment_snapshot/);
+  assert.match(realtimeAssignmentSnapshots, /new\.status <> 'new' or new\.queue_state <> 'active'/);
+  assert.match(realtimeAssignmentSnapshots, /'leadSnapshot', to_jsonb\(new\)/);
+  assert.match(realtimeAssignmentSnapshots, /'assignment_snapshot'/);
+  assert.match(realtimeAssignmentSnapshots, /'user:' \|\| new\.assigned_agent_id::text/);
+  assert.match(realtimeAssignmentSnapshots, /leads_assignment_snapshot_broadcast/);
+  const start = app.indexOf('function handleRemoteBroadcast');
+  const end = app.indexOf('\nfunction queueRemoteReload', start);
+  const body = app.slice(start, end);
+  assert.match(body, /message\?\.event !== "assignment_snapshot"/);
+  assert.match(body, /message\?\.payload\?\.leadSnapshot/);
+  assert.match(body, /acceptAssignmentSnapshot\(leadSnapshot\)/);
+  assert.match(body, /\.finally\(queueRemoteReload\)/);
+});
+
+test('a pre-snapshot remote dashboard response cannot erase a locally committed assignment', () => {
+  const start = app.indexOf('async function loadRemoteState');
+  const end = app.indexOf('\nasync function subscribeToRemoteDatabase', start);
+  const body = app.slice(start, end);
+  assert.match(body, /const remoteLoadGeneration = authoritativeStateGeneration/);
+  assert.match(body, /const locallyCommittedLeads = state\.leads\.slice\(\)/);
+  assert.match(body, /wasLeadCommittedAfterSyncStarted\(localLead, remoteLoadGeneration\)/);
+  assert.match(body, /remoteLeads\.push\(localLead\)/);
 });
 
 test('Supabase Realtime refreshes shared team and project state without broadcasting profile PII', () => {
@@ -294,4 +336,21 @@ test('Sheet recovery sweep ingests missing leads only and never imports operatio
   assert.match(sheetSweep, /admin\.rpc\("ingest_lead"/);
   assert.doesNotMatch(sheetSweep, /assigned_agent|assignment_revision|status_revision|queue_state|lead_ready/);
   assert.match(sheetSweep, /malaysiaTimestamp/);
+});
+
+test('Supabase exports a protected one-way reporting snapshot without writing operational state back to the Leads input tab', () => {
+  assert.match(realtimeAssignmentSnapshots, /function public\.get_sheet_reporting_snapshot\(\)/);
+  assert.match(realtimeAssignmentSnapshots, /grant execute on function public\.get_sheet_reporting_snapshot\(\) to service_role/);
+  assert.match(realtimeAssignmentSnapshots, /'leadlaju-export-sheet-report', '\* \* \* \* \*'/);
+  assert.match(realtimeAssignmentSnapshots, /leadlaju_report_export_secret/);
+  assert.match(reportExporter, /admin\.rpc\("get_sheet_reporting_snapshot"\)/);
+  assert.match(reportExporter, /action: "replace_reporting_snapshot"/);
+  assert.match(reportExporter, /reportToken/);
+  assert.match(reportExporter, /report_export_runs/);
+  assert.match(appsScript, /const REPORTING_SHEET_NAME = "LeadLaju Reporting"/);
+  assert.match(appsScript, /replaceReportingSnapshot_/);
+  assert.match(appsScript, /REPORT_EXPORT_SECRET_PROPERTY/);
+  assert.match(appsScript, /protectReportingSheet_/);
+  assert.doesNotMatch(appsScript.slice(appsScript.indexOf('function replaceReportingSnapshot_'), appsScript.indexOf('function appendReminder_')), /getSheetByName\(SHEET_NAME\)|getOrCreateSheet_\(spreadsheet, SHEET_NAME\)/);
+  assert.doesNotMatch(realtimeAssignmentSnapshots, /password|push_subscriptions|action_requests/i);
 });
