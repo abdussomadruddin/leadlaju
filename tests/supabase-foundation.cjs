@@ -317,9 +317,20 @@ test('all refresh entry points use Supabase state while remote mode is active', 
 });
 
 test('production runtime config enables Supabase without requiring a query flag', () => {
-  assert.match(app, /get\("backend"\) === "sheet"/);
+  assert.doesNotMatch(app, /get\("backend"\) === "sheet"/);
   assert.doesNotMatch(app, /get\("backend"\) !== "supabase"/);
   assert.match(app, /config\.backend !== "supabase"/);
+});
+
+test('all production devices invalidate the old app shell and cannot fall back to Sheet operations', () => {
+  const worker = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
+  assert.match(worker, /leadlaju-pwa-v20260915-supabase-realtime-v73/);
+  assert.match(worker, /clients\.map\(\(client\) => client\.navigate\(client\.url\)/);
+  assert.match(html, /app\.js\?v=20260915-supabase-realtime-v73/);
+  assert.match(app, /register\("\/sw\.js\?v=20260915-supabase-realtime-v73"\)/);
+  assert.doesNotMatch(app, /get\("backend"\) === "sheet"/);
+  assert.match(app, /remoteDatabaseRequired = window\.location\.protocol !== "file:"/);
+  assert.match(app, /if \(remoteDatabaseRequired\)[\s\S]*Operasi Google Sheet lama tidak akan digunakan/);
 });
 
 test('production UI identifies Supabase as operational realtime and Sheet as input only', () => {

@@ -131,6 +131,7 @@ let editingAppointmentId = null;
 let pendingAppointmentRequestId = null;
 let remoteDatabaseClient = null;
 let remoteDatabaseMode = false;
+let remoteDatabaseRequired = false;
 let remoteRealtimeChannels = [];
 let remoteReloadTimer = null;
 let claimingLeadId = null;
@@ -545,7 +546,6 @@ async function flushContactOutbox() {
 }
 
 async function loadRemoteDatabaseConfig() {
-  if (new URLSearchParams(window.location.search).get("backend") === "sheet") return null;
   try {
     const response = await fetch("/api/runtime-config", { cache: "no-store" });
     if (!response.ok) return null;
@@ -561,6 +561,7 @@ async function loadRemoteDatabaseConfig() {
 async function initRemoteDatabase() {
   remoteDatabaseClient = null;
   remoteDatabaseMode = false;
+  remoteDatabaseRequired = window.location.protocol !== "file:" && !new URLSearchParams(window.location.search).has("demo");
   const config = await loadRemoteDatabaseConfig();
   if (!config) return null;
   try {
@@ -2028,7 +2029,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js")
+      .register("/sw.js?v=20260915-supabase-realtime-v73")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -6464,6 +6465,12 @@ async function bootstrap() {
       await remoteDatabaseClient.auth.signOut();
     }
     showLogin();
+    return;
+  }
+
+  if (remoteDatabaseRequired) {
+    showLogin();
+    showToast("Supabase belum tersambung", "Cuba refresh. Operasi Google Sheet lama tidak akan digunakan.", "error");
     return;
   }
 
