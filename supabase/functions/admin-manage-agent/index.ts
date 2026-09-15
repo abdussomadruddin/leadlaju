@@ -132,12 +132,13 @@ Deno.serve(async (request) => {
       const { count } = await admin.from("agent_project_eligibility")
         .select("agent_id", { count: "exact", head: true }).eq("agent_id", userId);
       if (!count) return response({ ok: false, error: "Pilih sekurang-kurangnya satu projek." }, 409);
-      const { error } = await admin.from("profiles").update({
+      const { data: approvedProfile, error } = await admin.from("profiles").update({
         approval_status: "approved",
         active: true,
         updated_at: new Date().toISOString(),
-      }).eq("id", userId).eq("approval_status", "pending");
+      }).eq("id", userId).eq("approval_status", "pending").select("id").maybeSingle();
       if (error) throw error;
+      if (!approvedProfile) return response({ ok: false, error: "Status ejen sudah berubah. Sila sync semula." }, 409);
       const updated = await admin.auth.admin.updateUserById(userId, {
         app_metadata: { role: "agent", approval_status: "approved" },
       });

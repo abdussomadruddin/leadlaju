@@ -279,6 +279,19 @@ test('agent approval waits for authoritative confirmation and protects the pendi
   assert.match(body, /finally[\s\S]*pendingAgentApprovals\.delete\(agentId\)[\s\S]*setGlobalLoading\(false\)/);
 });
 
+test('Supabase-created agent remains pending and a stale noncanonical approval card is removed', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const addStart = source.indexOf('async function addAgent(');
+  const addBody = source.slice(addStart, source.indexOf('\nasync function approveAgent(', addStart));
+  const approveStart = source.indexOf('async function approveAgent(');
+  const approveBody = source.slice(approveStart, source.indexOf('\nasync function saveProject(', approveStart));
+  assert.match(addBody, /action: "signup_request"/);
+  assert.doesNotMatch(addBody, /body: \{ action: "approve", userId: signup\.data\.userId \}/);
+  assert.match(addBody, /sedang menunggu approval admin/);
+  assert.match(approveBody, /const isMissingCanonicalAgent = remoteDatabaseMode/);
+  assert.match(approveBody, /state\.agents = state\.agents\.filter\(\(item\) => item\.id !== agentId\)/);
+});
+
 test('successful agent sync removes an absent rejected agent on every device immediately', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const start = source.indexOf('async function syncAgentsFromSheet(');

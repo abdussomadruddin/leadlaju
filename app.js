@@ -683,13 +683,28 @@ async function subscribeToRemoteDatabase() {
   if (isAdmin()) topics.push("admin:operations");
   topics.forEach((topic) => {
     const channel = remoteDatabaseClient.channel(topic, { config: { private: true } })
-      .on("broadcast", { event: "*" }, queueRemoteReload)
+      .on("broadcast", { event: "*" }, handleRemoteBroadcast)
       .subscribe((status) => {
         if (status === "SUBSCRIBED") queueRemoteReload();
       });
     remoteRealtimeChannels.push(channel);
   });
   return remoteRealtimeChannels;
+}
+
+function handleRemoteBroadcast(message) {
+  if (message?.event !== "assignment_snapshot") {
+    queueRemoteReload();
+    return;
+  }
+  const leadSnapshot = message?.payload?.leadSnapshot;
+  if (!leadSnapshot) {
+    queueRemoteReload();
+    return;
+  }
+  acceptAssignmentSnapshot(leadSnapshot)
+    .catch((error) => console.warn("Realtime assignment snapshot failed", error))
+    .finally(queueRemoteReload);
 }
 
 function queueRemoteReload() {
