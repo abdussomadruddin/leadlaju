@@ -3,6 +3,7 @@ import webpush from "npm:web-push@3.6.7";
 
 type ClaimedRow = {
   outbox_id: number;
+  notification_type: string;
   payload: Record<string, unknown>;
   endpoint: string | null;
   p256dh: string | null;
@@ -45,6 +46,42 @@ Deno.serve(async (request) => {
   let failed = 0;
   for (const [outboxId, rows] of groups) {
     const first = rows[0];
+    if (first.notification_type !== "new_lead") {
+      const notification = JSON.stringify({
+        title: String(first.payload?.title || "LeadLaju notification"),
+        body: String(first.payload?.body || "Ada update baru dalam LeadLaju."),
+        tag: String(first.payload?.tag || `leadlaju-${outboxId}`),
+        renotify: first.payload?.renotify !== false,
+        requireInteraction: first.payload?.requireInteraction !== false,
+        icon: "/assets/icon-192.png",
+        badge: "/assets/badge-96.png",
+        url: String(first.payload?.url || "/"),
+        view: first.payload?.view || null,
+        reminderType: first.payload?.reminderType || null,
+        potentialCount: Number(first.payload?.potentialCount) || 0,
+      });
+      let delivered = 0;
+      const deliveryErrors: string[] = [];
+      for (const row of rows) {
+        if (!row.endpoint || !row.p256dh || !row.auth_secret) continue;
+        try {
+          await webpush.sendNotification({ endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth_secret } }, notification, { TTL: 300, urgency: "high" });
+          delivered += 1;
+          await admin.from("push_subscriptions").update({ last_success_at: new Date().toISOString(), failure_count: 0, updated_at: new Date().toISOString() }).eq("id", row.subscription_id);
+        } catch (cause) {
+          const statusCode = Number((cause as { statusCode?: number })?.statusCode) || 0;
+          deliveryErrors.push(`${statusCode || "push"}`);
+          const patch: Record<string, unknown> = { last_failure_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+          if (statusCode === 404 || statusCode === 410) patch.active = false;
+          await admin.from("push_subscriptions").update(patch).eq("id", row.subscription_id);
+        }
+      }
+      const noSubscription = rows.every((row) => !row.endpoint);
+      const success = delivered > 0 || noSubscription;
+      await admin.rpc("finish_notification_outbox", { p_outbox_id: outboxId, p_success: success, p_error: success ? null : `Push failed: ${deliveryErrors.join(",")}` });
+      if (success) sent += 1; else failed += 1;
+      continue;
+    }
     const leadId = String(first.payload?.lead_id || "");
     const revision = Number(first.payload?.assignment_revision) || 0;
     const { data: lead, error: leadError } = await admin.from("leads")

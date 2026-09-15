@@ -84,6 +84,23 @@ Deno.serve(async (request) => {
         throw eligibilityError;
       }
       await admin.from("agent_availability").insert({ agent_id: userId, lead_ready: false, notification_ready: false });
+      const { data: admins } = await admin.from("profiles").select("id")
+        .eq("role", "admin").eq("active", true).eq("approval_status", "approved");
+      if (admins?.length) {
+        await admin.from("notification_outbox").insert(admins.map((item) => ({
+          user_id: item.id,
+          notification_type: "agent_signup",
+          dedupe_key: `agent_signup:${userId}:${item.id}`,
+          payload: {
+            title: "Permohonan ejen baharu",
+            body: `${name} menunggu approval.`,
+            tag: `leadlaju-agent-signup-${userId}`,
+            view: "agents",
+            url: "/?view=agents",
+            requireInteraction: true,
+          },
+        })));
+      }
       return response({ ok: true, userId, approval_status: "pending", active: false });
     }
 

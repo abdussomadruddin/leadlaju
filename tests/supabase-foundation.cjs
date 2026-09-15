@@ -22,6 +22,7 @@ const notificationClaims = fs.readFileSync(path.join(migrations, fs.readdirSync(
 const expirySchedule = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_schedule_assignment_expiry.sql'))), 'utf8');
 const pendingReconciliation = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_reconcile_stale_pending_assignments.sql'))), 'utf8');
 const safeAgentRetirement = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_retire_agent_safely.sql'))), 'utf8');
+const backgroundNotifications = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_operational_background_notifications.sql'))), 'utf8');
 const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
 
 test('Supabase foundation keeps one active lead and assignment per agent', () => {
@@ -201,6 +202,18 @@ test('notification worker claims outbox rows atomically and fans out to every ac
   assert.match(notificationWorker, /leadSnapshot/);
   assert.match(notificationWorker, /statusCode === 404 \|\| statusCode === 410/);
   assert.doesNotMatch(notificationWorker, /VAPID_PRIVATE_KEY\) \|\| ["'][^"']+["']/);
+});
+
+test('Supabase replaces Apps Script background reminder and signup push operations', () => {
+  assert.match(backgroundNotifications, /select p\.id,'admin_follow_up'/);
+  assert.match(backgroundNotifications, /appointment_reminder/);
+  assert.match(backgroundNotifications, /potential_reminder/);
+  assert.match(backgroundNotifications, /'leadlaju-operational-reminders','\* \* \* \* \*'/);
+  assert.match(backgroundNotifications, /notification_outbox_dedupe_key_unique/);
+  assert.match(notificationWorker, /first\.notification_type !== "new_lead"/);
+  assert.match(notificationWorker, /reminderType: first\.payload\?\.reminderType/);
+  assert.match(manageAgent, /notification_type: "agent_signup"/);
+  assert.match(manageAgent, /dedupe_key: `agent_signup:/);
 });
 
 test('Supabase operational UI mutations branch away from Google Sheet writes', () => {
