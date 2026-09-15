@@ -132,6 +132,7 @@ let pendingAppointmentRequestId = null;
 let remoteDatabaseClient = null;
 let remoteDatabaseMode = false;
 let remoteDatabaseRequired = false;
+const REMOTE_REQUEST_TIMEOUT_MS = 12000;
 let remoteRealtimeChannels = [];
 let remoteReloadTimer = null;
 let claimingLeadId = null;
@@ -565,7 +566,13 @@ async function initRemoteDatabase() {
   const config = await loadRemoteDatabaseConfig();
   if (!config) return null;
   try {
-    const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.116.0");
+    const { createClient } = await Promise.race([
+      import("https://esm.sh/@supabase/supabase-js@2.116.0"),
+      new Promise((_, reject) => window.setTimeout(
+        () => reject(new Error("Supabase client initialization timed out")),
+        REMOTE_REQUEST_TIMEOUT_MS,
+      )),
+    ]);
     remoteDatabaseClient = createClient(config.supabaseUrl, config.supabasePublishableKey, {
       auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
     });
@@ -640,7 +647,13 @@ async function loadRemoteState(userId) {
   const previousLeadKeys = new Set(state.leads.map(leadNotificationKey));
   const shouldDetectNewLeads = false;
   try {
-    const { data: snapshot, error } = await remoteDatabaseClient.rpc("get_dashboard_state");
+    const { data: snapshot, error } = await Promise.race([
+      remoteDatabaseClient.rpc("get_dashboard_state"),
+      new Promise((_, reject) => window.setTimeout(
+        () => reject(new Error("Supabase dashboard request timed out")),
+        REMOTE_REQUEST_TIMEOUT_MS,
+      )),
+    ]);
     if (error) throw error;
     const profiles = (snapshot?.profiles || []).map(mapProfile);
     const currentUser = profiles.find((agent) => agent.id === userId);
@@ -2029,7 +2042,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20260915-supabase-realtime-v73")
+      .register("/sw.js?v=20260915-supabase-realtime-v74")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });

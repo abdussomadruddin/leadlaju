@@ -1,11 +1,11 @@
-const CACHE_NAME = "leadlaju-pwa-v20260915-supabase-realtime-v73";
+const CACHE_NAME = "leadlaju-pwa-v20260915-supabase-realtime-v74";
 const LEAD_HANDOFF_CACHE = "leadlaju-notification-snapshots";
 const LEAD_HANDOFF_SCHEMA_VERSION = 1;
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20260915-supabase-realtime-v73",
-  "/app.js?v=20260915-supabase-realtime-v73",
+  "/styles.css?v=20260915-supabase-realtime-v74",
+  "/app.js?v=20260915-supabase-realtime-v74",
   "/manifest.webmanifest?v=20260625-pwa-notifications",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",
@@ -50,9 +50,7 @@ self.addEventListener("activate", (event) => {
     caches
       .keys()
       .then((keys) => Promise.all(keys.filter((key) => ![CACHE_NAME, LEAD_HANDOFF_CACHE].includes(key)).map((key) => caches.delete(key))))
-      .then(() => self.clients.claim())
-      .then(() => self.clients.matchAll({ type: "window", includeUncontrolled: true }))
-      .then((clients) => Promise.all(clients.map((client) => client.navigate(client.url).catch(() => null)))),
+      .then(() => self.clients.claim()),
   );
 });
 
