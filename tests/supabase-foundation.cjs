@@ -24,6 +24,7 @@ const pendingReconciliation = fs.readFileSync(path.join(migrations, fs.readdirSy
 const safeAgentRetirement = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_retire_agent_safely.sql'))), 'utf8');
 const backgroundNotifications = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_operational_background_notifications.sql'))), 'utf8');
 const realtimeReloadSignals = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_realtime_state_reload_signals.sql'))), 'utf8');
+const notificationReadiness = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_canonical_notification_readiness.sql'))), 'utf8');
 const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
 
 test('Supabase foundation keeps one active lead and assignment per agent', () => {
@@ -126,6 +127,16 @@ test('push subscription identity is endpoint-unique and safely rebound to the au
   assert.match(operations, /function public\.register_push_subscription/);
   assert.match(operations, /on conflict\(endpoint\) do update set user_id=excluded\.user_id/);
   assert.match(operations, /where endpoint=trim\(p_endpoint\) and user_id=v_user/);
+});
+
+test('agent notification readiness is derived from active server subscriptions', () => {
+  assert.match(notificationReadiness, /select exists \([\s\S]*public\.push_subscriptions[\s\S]*user_id = v_user and active/);
+  assert.match(notificationReadiness, /if p_ready and not v_notification_ready/);
+  assert.match(notificationReadiness, /An active push subscription is required/);
+  assert.match(notificationReadiness, /lead_ready = lead_ready and v_notification_ready/);
+  assert.match(notificationReadiness, /v_previous_user <> v_user/);
+  assert.match(notificationReadiness, /where user_id = v_previous_user and active/);
+  assert.doesNotMatch(notificationReadiness, /notification_ready = p_notification_ready/);
 });
 
 test('Sheet migration preserves passwords only through Supabase Auth and never profiles', () => {
