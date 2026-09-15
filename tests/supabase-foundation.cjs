@@ -26,6 +26,7 @@ const backgroundNotifications = fs.readFileSync(path.join(migrations, fs.readdir
 const realtimeReloadSignals = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_realtime_state_reload_signals.sql'))), 'utf8');
 const notificationReadiness = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_canonical_notification_readiness.sql'))), 'utf8');
 const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 
 test('Supabase foundation keeps one active lead and assignment per agent', () => {
   assert.match(sql, /create unique index one_active_lead_per_agent[\s\S]*queue_state = 'active'/);
@@ -277,6 +278,14 @@ test('production runtime config enables Supabase without requiring a query flag'
   assert.match(app, /get\("backend"\) === "sheet"/);
   assert.doesNotMatch(app, /get\("backend"\) !== "supabase"/);
   assert.match(app, /config\.backend !== "supabase"/);
+});
+
+test('production UI identifies Supabase as operational realtime and Sheet as input only', () => {
+  assert.match(app, /remoteDatabaseMode[\s\S]*?"Supabase realtime"/);
+  assert.match(html, /Supabase realtime/);
+  assert.match(html, /Google Sheets Input/);
+  assert.match(html, /Google Sheet digunakan untuk kemasukan lead sahaja/);
+  assert.doesNotMatch(html, /Google Sheet ialah database utama/);
 });
 
 test('Sheet recovery sweep ingests missing leads only and never imports operational state', () => {

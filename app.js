@@ -5045,7 +5045,9 @@ function renderIntegration() {
   elements.sidebarSyncStatus.textContent = integration.connected
     ? `Sync ${integration.lastSyncAt ? relativeTime(integration.lastSyncAt) : "aktif"}`
     : "Sedia menerima lead";
-  elements.liveSyncLabel.textContent = integration.connected ? "Google Sheet live" : "Google Sheet belum sync";
+  elements.liveSyncLabel.textContent = remoteDatabaseMode
+    ? "Supabase realtime"
+    : integration.connected ? "Google Sheet live" : "Google Sheet belum sync";
   elements.connectionResult.classList.remove("error");
   elements.connectionResult.innerHTML = `
     <span class="status-dot"></span>
@@ -5096,7 +5098,7 @@ const viewTitles = {
   agents: "Pengurusan Ejen",
   projects: "Projek",
   "lead-monitor": "Monitor Pergerakan Lead",
-  integration: "Google Sheets Sync",
+  integration: "Google Sheets Input",
 };
 
 function switchView(viewName) {
