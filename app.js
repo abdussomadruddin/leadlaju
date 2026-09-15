@@ -5330,12 +5330,18 @@ async function approveAgent(agentId) {
     renderAll();
     showToast("Ejen approved", `${confirmedAgent.name} kini aktif dan dipaparkan dalam dashboard.`, "success");
   } catch (error) {
-    const isMissingCanonicalAgent = remoteDatabaseMode && /agent not found|invalid agent/i.test(String(error?.message || ""));
+    // An Edge Function can return a generic non-2xx error even when its body
+    // says that a stale pending card no longer has a canonical profile. Reload
+    // before retaining that card in the admin dashboard.
+    let canonicalReloaded = false;
+    if (remoteDatabaseMode) {
+      canonicalReloaded = await loadRemoteState(state.currentUserId);
+    }
+    const isMissingCanonicalAgent = remoteDatabaseMode && canonicalReloaded && !getAgent(agentId);
     if (isMissingCanonicalAgent) {
       authoritativelyDeletedAgentIds.add(agentId);
       state.agents = state.agents.filter((item) => item.id !== agentId);
       saveState();
-      await loadRemoteState(state.currentUserId);
     }
     const currentAgent = getAgent(agentId);
     if (currentAgent) currentAgent.active = false;

@@ -108,6 +108,21 @@ test('force offline action revokes stale agent sessions', () => {
   assert.match(source, /!sessionStartedAt \|\| sessionStartedAt < parseLeadTimestamp_\(presenceNotBefore\)\.getTime\(\)/);
 });
 
+test('approval failure reloads canonical Supabase state before retaining a pending card', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const start = source.indexOf('async function approveAgent(');
+  const body = source.slice(start, source.indexOf('\nasync function saveProject', start));
+  assert.match(body, /canonicalReloaded = await loadRemoteState\(state\.currentUserId\)/);
+  assert.match(body, /canonicalReloaded && !getAgent\(agentId\)/);
+  assert.match(body, /authoritativelyDeletedAgentIds\.add\(agentId\)/);
+});
+
+test('approval conflicts return a readable application response instead of a non-2xx Edge Function error', () => {
+  const source = fs.readFileSync('supabase/functions/admin-manage-agent/index.ts', 'utf8');
+  assert.match(source, /if \(!approvedProfile\) return response\(\{ ok: false, error: "Status ejen sudah berubah\. Sila sync semula\." \}\);/);
+  assert.doesNotMatch(source, /Status ejen sudah berubah\. Sila sync semula\." \}, 409/);
+});
+
 test('client queue activation is read-only', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const start = source.indexOf('function activateQueuedLeads(');
