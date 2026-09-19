@@ -273,6 +273,8 @@ const elements = {
   activityList: document.querySelector("#activity-list"),
   teamList: document.querySelector("#team-list"),
   onlineCount: document.querySelector("#online-count"),
+  leadReadyList: document.querySelector("#lead-ready-list"),
+  leadReadyCount: document.querySelector("#lead-ready-count"),
   agentLeadControls: document.querySelector("#agent-lead-controls"),
   agentLeadStatus: document.querySelector("#agent-lead-status"),
   agentLeadStatusMessage: document.querySelector("#agent-lead-status-message"),
@@ -3168,7 +3170,9 @@ async function setAgentLeadAvailability(ready) {
     }
 
     user.leadReady = Boolean(result?.lead_ready ?? ready);
-    user.online = user.leadReady && Notification.permission === "granted";
+    if (!(typeof remoteDatabaseMode !== "undefined" && remoteDatabaseMode)) {
+      user.online = user.leadReady && Notification.permission === "granted";
+    }
     saveState();
     renderAll();
     statusRendered = true;
@@ -4447,23 +4451,54 @@ function renderActivities() {
 }
 
 function renderTeam() {
-  const activeAgents = state.agents.filter((agent) => agent.role === "agent" && agent.online);
+  const agents = state.agents.filter((agent) => agent.role === "agent" && agent.active !== false);
+  const activeAgents = agents.filter((agent) => agent.online);
+  const leadReadyAgents = agents.filter((agent) => agent.leadReady);
+  const notificationBell = (agent) => {
+    const enabled = Boolean(agent.notificationEnabled);
+    const label = enabled ? "Notifikasi aktif" : "Notifikasi belum aktif";
+    return `
+      <span class="member-notification${enabled ? " enabled" : ""}" title="${label}" aria-label="${label}">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+          <path d="M10 21h4" />
+        </svg>
+      </span>`;
+  };
+
   elements.onlineCount.textContent = `${activeAgents.length} online`;
   elements.teamList.innerHTML = activeAgents.length
     ? activeAgents
     .map(
-      (agent, index) => `
+      (agent) => `
         <div class="team-member">
           <span class="member-avatar">${initials(agent.name)}</span>
           <span>
             <strong>${escapeHtml(agent.name)}</strong>
-            <small>GET LEAD aktif · Giliran #${index + 1}</small>
+            <small>Sedang aktif</small>
           </span>
-          <span class="member-state" title="Online dan sedia menerima lead"></span>
+          ${notificationBell(agent)}
         </div>`,
     )
     .join("")
-    : '<div class="table-empty">Tiada ejen sedang sedia menerima lead.</div>';
+    : '<div class="table-empty">Tiada ejen sedang aktif.</div>';
+
+  elements.leadReadyCount.textContent = `${leadReadyAgents.length} dalam giliran`;
+  elements.leadReadyList.innerHTML = leadReadyAgents.length
+    ? leadReadyAgents
+      .map(
+        (agent, index) => `
+          <div class="team-member">
+            <span class="member-avatar">${initials(agent.name)}</span>
+            <span>
+              <strong>${escapeHtml(agent.name)}</strong>
+              <small>Giliran #${index + 1}</small>
+            </span>
+            <span class="member-state${agent.online ? "" : " offline"}" title="${agent.online ? "Online" : "Tidak aktif"}"></span>
+          </div>`,
+      )
+      .join("")
+    : '<div class="table-empty">Tiada ejen dalam giliran dapat lead.</div>';
 }
 
 const leadNoteDrafts = new Map();

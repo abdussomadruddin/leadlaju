@@ -1850,6 +1850,12 @@ svg {
   margin-top: 23px;
 }
 
+.team-panels {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+
 .panel,
 .table-card {
   border: 1px solid var(--line);
@@ -1987,6 +1993,31 @@ svg {
 
 .member-state.offline {
   background: var(--ink-300);
+}
+
+.member-notification {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--red);
+  background: rgba(239, 83, 80, 0.1);
+}
+
+.member-notification.enabled {
+  color: var(--green);
+  background: var(--green-soft);
+}
+
+.member-notification svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.9;
 }
 
 .table-card {

@@ -711,6 +711,29 @@ test('agents explicitly start and stop lead availability from the dashboard', ()
   assert.match(html, /id="lead-availability-modal"/);
 });
 
+test('dashboard separates active presence from the lead distribution queue', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('styles.css', 'utf8');
+  const renderTeamStart = source.indexOf('function renderTeam()');
+  const renderTeamBody = source.slice(renderTeamStart, source.indexOf('\nconst leadNoteDrafts', renderTeamStart));
+  const availabilityStart = source.indexOf('async function setAgentLeadAvailability(');
+  const availabilityBody = source.slice(availabilityStart, source.indexOf('\nfunction enforceAgentNotificationAccess', availabilityStart));
+
+  assert.match(html, /<h3>Pasukan Aktif<\/h3>/);
+  assert.match(html, /id="team-list"/);
+  assert.match(html, /<h3>Pasukan Giliran Dapat Lead<\/h3>/);
+  assert.match(html, /id="lead-ready-list"/);
+  assert.match(html, /id="lead-ready-count"/);
+  assert.match(renderTeamBody, /agents\.filter\(\(agent\) => agent\.online\)/);
+  assert.match(renderTeamBody, /agents\.filter\(\(agent\) => agent\.leadReady\)/);
+  assert.match(renderTeamBody, /member-notification\$\{enabled \? " enabled" : ""\}/);
+  assert.match(renderTeamBody, /Notifikasi aktif/);
+  assert.match(renderTeamBody, /Notifikasi belum aktif/);
+  assert.match(css, /\.member-notification\.enabled/);
+  assert.match(availabilityBody, /if \(!\(typeof remoteDatabaseMode !== "undefined" && remoteDatabaseMode\)\)/);
+});
+
 test('dashboard polling uses a one-second interval while unrelated timers remain unchanged', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const html = fs.readFileSync('index.html', 'utf8');
