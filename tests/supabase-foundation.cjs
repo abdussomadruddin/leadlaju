@@ -28,6 +28,7 @@ const removeGoogleIntegrations = fs.readFileSync(path.join(migrations, fs.readdi
 const retryOnlyDispatch = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_unblock_retry_only_dispatch.sql'))), 'utf8');
 const adminLeadReadiness = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_admin_agent_lead_readiness.sql'))), 'utf8');
 const adminAllLeadReadiness = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_admin_all_agent_lead_readiness.sql'))), 'utf8');
+const pushReadyBulkQueue = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_allow_push_ready_agents_in_bulk_queue.sql'))), 'utf8');
 const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const runtimeConfig = fs.readFileSync(path.join(root, 'api', 'runtime-config.js'), 'utf8');
@@ -180,6 +181,16 @@ test('admins can start or stop the distribution queue for all eligible agents sa
   assert.match(html, /id="get-lead-all-agents-button"/);
   assert.match(html, /id="stop-lead-all-agents-button"/);
   assert.match(app, /rpc\("admin_set_all_agent_lead_readiness"/);
+});
+
+test('bulk GET LEAD accepts push-ready agents without an already-open app session', () => {
+  assert.match(pushReadyBulkQueue, /function public\.admin_set_all_agent_lead_readiness/);
+  assert.match(pushReadyBulkQueue, /now\(\) \+ interval '60 minutes'/);
+  assert.doesNotMatch(pushReadyBulkQueue, /av\.presence_lease_until > now\(\)/);
+  assert.match(pushReadyBulkQueue, /public\.push_subscriptions ps/);
+  assert.match(pushReadyBulkQueue, /av\.forced_offline_at is null or av\.last_seen_at > av\.forced_offline_at/);
+  assert.match(pushReadyBulkQueue, /perform leadlaju_private\.dispatch_available_leads\(now\(\)\)/);
+  assert.match(app, /ejen dengan notifikasi aktif dimasukkan ke giliran/);
 });
 
 test('legacy Sheet snapshot migrator is removed after cutover', () => {

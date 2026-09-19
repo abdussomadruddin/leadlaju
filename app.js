@@ -6091,7 +6091,7 @@ async function setAdminAgentLeadAvailability(agentId, ready) {
 
 async function setAdminAllAgentLeadAvailability(ready) {
   if (!guardLifecycleMutation() || !isAdmin() || !remoteDatabaseMode) return false;
-  const actionLabel = ready ? "masukkan semua ejen yang sedia ke giliran GET LEAD" : "hentikan agihan lead untuk semua ejen";
+  const actionLabel = ready ? "masukkan semua ejen yang mempunyai notifikasi aktif ke giliran GET LEAD" : "hentikan agihan lead untuk semua ejen";
   if (!window.confirm(`${actionLabel.charAt(0).toUpperCase()}${actionLabel.slice(1)}?`)) return false;
 
   const button = ready ? elements.getLeadAllAgentsButton : elements.stopLeadAllAgentsButton;
@@ -6108,7 +6108,7 @@ async function setAdminAllAgentLeadAvailability(ready) {
     showToast(
       ready ? "GET LEAD ALL AGENT diaktifkan" : "STOP LEAD ALL AGENT diaktifkan",
       ready
-        ? `${updated} ejen online dan sedia notifikasi dimasukkan ke giliran.`
+        ? `${updated} ejen dengan notifikasi aktif dimasukkan ke giliran.`
         : `${updated} ejen dikeluarkan daripada giliran lead.`,
       "success",
     );
