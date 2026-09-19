@@ -25,9 +25,9 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260919-admin-new-v81" />
+    <link rel="stylesheet" href="styles.css?v=20260919-pabbly-v82" />
     <script src="vendor/exceljs.min.js?v=4.4.0" defer></script>
-    <script src="app.js?v=20260919-admin-new-v81" defer></script>
+    <script src="app.js?v=20260919-pabbly-v82" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -271,6 +271,13 @@
               <path d="M5 21h14a2 2 0 0 0 2-2v-3H3v3a2 2 0 0 0 2 2Z" />
             </svg>
             Import Lead
+          </button>
+          <button class="nav-item admin-only" data-view="integrations" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1.2 1.2" />
+              <path d="M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1.2-1.2" />
+            </svg>
+            Integration
           </button>
         </nav>
 
@@ -686,6 +693,51 @@
               </div>
             </section>
           </div>
+        </section>
+
+        <section class="view admin-only-view" id="integrations-view">
+          <div class="content-heading integration-heading">
+            <div>
+              <span class="section-kicker">Pabbly Connect</span>
+              <h2>Integration</h2>
+              <p>Sambungkan Meta Lead Ads atau TikTok Lead Generation terus ke Supabase.</p>
+            </div>
+            <button class="secondary-button" id="refresh-integrations" type="button">Refresh status</button>
+          </div>
+
+          <section class="panel integration-endpoint-panel">
+            <div>
+              <span class="section-kicker">API endpoint</span>
+              <h3>Lead ingestion</h3>
+            </div>
+            <div class="integration-copy-row">
+              <code id="integration-endpoint">https://zvplvrtqvsfrftnjfdsh.supabase.co/functions/v1/ingest-lead</code>
+              <button class="icon-button" id="copy-integration-endpoint" type="button" aria-label="Salin endpoint" title="Salin endpoint">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+              </button>
+            </div>
+            <div class="integration-projects" id="integration-projects"></div>
+          </section>
+
+          <div class="integration-grid" id="integration-connectors">
+            <p class="empty-state">Memuatkan integration...</p>
+          </div>
+
+          <section class="panel integration-setup-panel">
+            <div class="panel-heading">
+              <div>
+                <span class="section-kicker">Tetapan Pabbly</span>
+                <h3>Execute API Request</h3>
+              </div>
+            </div>
+            <div class="integration-settings-grid">
+              <span><small>Method</small><strong>POST</strong></span>
+              <span><small>Payload</small><strong>JSON</strong></span>
+              <span><small>Authentication</small><strong>No Auth</strong></span>
+              <span><small>Header</small><strong>X-LeadLaju-Key</strong></span>
+            </div>
+            <p class="integration-note">Map ID lead asal platform kepada <code>source_lead_id</code>. Gunakan nama projek aktif tepat seperti yang dipaparkan di atas.</p>
+          </section>
         </section>
       </main>
     </div>

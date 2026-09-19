@@ -64,7 +64,8 @@ test('Supabase ingestion is idempotent by source identity and payload fingerprin
   assert.match(sql, /leads_ingestion_fingerprint_unique/);
   assert.match(sql, /leads_ingestion_fingerprint_unique[\s\S]*where source_lead_id is null/);
   assert.match(sql, /on conflict do nothing returning id into v_lead_id/);
-  assert.match(ingest, /X-Ingestion-Key/);
+  assert.doesNotMatch(ingest, /X-Ingestion-Key/);
+  assert.match(ingest, /const ingestionKey = `\$\{canonical\.source_system\}:\$\{canonical\.source_lead_id\}`/);
   assert.match(ingest, /payloadHash/);
 });
 
@@ -315,11 +316,11 @@ test('production runtime config enables Supabase without requiring a query flag'
 
 test('all production devices invalidate the old app shell for the direct Supabase importer', () => {
   const worker = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
-  assert.match(worker, /leadlaju-pwa-v20260919-admin-new-v81/);
+  assert.match(worker, /leadlaju-pwa-v20260919-pabbly-v82/);
   assert.doesNotMatch(worker, /client\.navigate\(/);
-  assert.match(html, /app\.js\?v=20260919-admin-new-v81/);
+  assert.match(html, /app\.js\?v=20260919-pabbly-v82/);
   assert.match(html, /vendor\/exceljs\.min\.js\?v=4\.4\.0/);
-  assert.match(app, /register\("\/sw\.js\?v=20260919-admin-new-v81"\)/);
+  assert.match(app, /register\("\/sw\.js\?v=20260919-pabbly-v82"\)/);
   assert.doesNotMatch(app, /get\("backend"\) === "sheet"/);
   assert.match(app, /remoteDatabaseRequired = window\.location\.protocol !== "file:"/);
   assert.match(app, /if \(remoteDatabaseRequired\)[\s\S]*Operasi server lama tidak akan digunakan/);

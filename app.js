@@ -26,6 +26,11 @@ const FOLLOW_UP_REMINDER_SLOTS = [
 const FOLLOW_UP_REMINDER_WINDOW_MINUTES = 10;
 const WEB_PUSH_PUBLIC_KEY =
   "BJRcHLhmZgPSdid007nVHluQhJY4MD3IlC-t0--hq2eWToRTovU_k5GZsEmmbJK596VHrj2N5ZMdUpzJX64F5R0";
+const PABBLY_INGEST_ENDPOINT = "https://zvplvrtqvsfrftnjfdsh.supabase.co/functions/v1/ingest-lead";
+const INTEGRATION_PROVIDERS = [
+  { id: "meta_ads", label: "Meta Ads", source: "Meta Ads" },
+  { id: "tiktok_ads", label: "TikTok Ads", source: "TikTok Ads" },
+];
 const DEFAULT_GOOGLE_SHEET_ENDPOINT = "";
 const LEAD_STATUS_OPTIONS = [
   { value: "new", label: "New" },
@@ -183,6 +188,9 @@ let lifecycleIntroTimer = null;
 let lifecycleHideTimer = null;
 let lifecycleSyncPromise = null;
 let pendingLeadImportRows = [];
+let integrationStatus = [];
+const integrationRawKeys = new Map();
+const integrationSecretTimers = new Map();
 
 const elements = {
   sidebar: document.querySelector("#sidebar"),
@@ -350,6 +358,11 @@ const elements = {
   clearLeadImport: document.querySelector("#clear-lead-import"),
   downloadSampleCsv: document.querySelector("#download-sample-csv"),
   downloadSampleXlsx: document.querySelector("#download-sample-xlsx"),
+  integrationConnectors: document.querySelector("#integration-connectors"),
+  integrationEndpoint: document.querySelector("#integration-endpoint"),
+  integrationProjects: document.querySelector("#integration-projects"),
+  refreshIntegrations: document.querySelector("#refresh-integrations"),
+  copyIntegrationEndpoint: document.querySelector("#copy-integration-endpoint"),
   liveSyncLabel: document.querySelector("#live-sync-label"),
   resetCodeFields: document.querySelector("#reset-code-fields"),
   toast: document.querySelector("#toast"),
@@ -1249,6 +1262,9 @@ function logout() {
   const wasRemote = remoteDatabaseMode;
   remoteRealtimeChannels.forEach((channel) => remoteDatabaseClient?.removeChannel(channel));
   remoteRealtimeChannels = [];
+  integrationRawKeys.clear();
+  integrationSecretTimers.forEach((timer) => window.clearTimeout(timer));
+  integrationSecretTimers.clear();
   showLogin();
   const cleanup = cleanUpPushAfterLogout();
   if (remoteDatabaseClient && wasRemote) cleanup.finally(() => remoteDatabaseClient.auth.signOut().catch(() => {}));
@@ -2057,7 +2073,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-    .register("/sw.js?v=20260919-admin-new-v81")
+    .register("/sw.js?v=20260919-pabbly-v82")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -5259,7 +5275,7 @@ function renderUser() {
   document.querySelectorAll(".admin-only").forEach((item) => {
     item.style.display = isAdmin() ? "flex" : "none";
   });
-  if (!isAdmin() && ["agents", "projects", "lead-monitor", "import-leads"].includes(activeView)) {
+  if (!isAdmin() && ["agents", "projects", "lead-monitor", "import-leads", "integrations"].includes(activeView)) {
     switchView("dashboard");
   }
 }
@@ -5406,6 +5422,156 @@ function enforceSingleActiveLead() {
   return overflow;
 }
 
+function renderIntegrationProjects() {
+  if (!elements.integrationProjects) return;
+  const projects = state.projects.filter((project) => project.active);
+  elements.integrationProjects.innerHTML = projects.length
+    ? `<span>Nama projek aktif:</span>${projects.map((project) => `<code>${escapeHtml(project.name)}</code>`).join("")}`
+    : '<span class="integration-warning">Tiada projek aktif. Lead Pabbly akan ditolak sehingga projek diaktifkan.</span>';
+}
+
+function formatIntegrationTime(value) {
+  if (!value) return "Belum pernah";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? "Belum pernah" : formatDateTime(parsed.getTime());
+}
+
+function integrationResultLabel(result) {
+  return ({ inserted: "Lead baharu diterima", duplicate: "Duplicate diabaikan", failed: "Penghantaran gagal" })[result] || "Belum diuji";
+}
+
+function renderIntegrationConnectors() {
+  if (!elements.integrationConnectors) return;
+  const statusByProvider = new Map(integrationStatus.map((item) => [item.provider, item]));
+  elements.integrationConnectors.innerHTML = INTEGRATION_PROVIDERS.map((provider) => {
+    const integration = statusByProvider.get(provider.id) || {};
+    const key = integration.key || null;
+    const rawKey = integrationRawKeys.get(provider.id) || "";
+    const resultClass = key?.last_result === "failed" ? "error" : key?.last_result ? "success" : "neutral";
+    const payload = JSON.stringify({
+      source_system: provider.id,
+      source_lead_id: `{{${provider.label} Lead ID}}`,
+      name: "{{Full Name}}",
+      phone: "{{Phone Number}}",
+      email: "{{Email}}",
+      city: "{{City}}",
+      project: state.projects.find((project) => project.active)?.name || "Nama projek aktif",
+      source: provider.source,
+      created_at: "{{Created Time}}",
+    }, null, 2);
+    return `
+      <article class="panel integration-card" data-provider="${provider.id}">
+        <div class="integration-card-heading">
+          <span class="integration-provider-mark ${provider.id}">${provider.id === "meta_ads" ? "M" : "T"}</span>
+          <span><small>Connector</small><h3>${provider.label}</h3></span>
+          <span class="integration-status ${key ? "active" : "inactive"}">${key ? "Aktif" : "Belum disambung"}</span>
+        </div>
+        <div class="integration-key-meta">
+          <span><small>Dicipta</small><strong>${key ? formatIntegrationTime(key.created_at) : "-"}</strong></span>
+          <span><small>Digunakan</small><strong>${key ? formatIntegrationTime(key.last_used_at) : "-"}</strong></span>
+          <span class="${resultClass}"><small>Status terakhir</small><strong>${integrationResultLabel(key?.last_result)}</strong></span>
+        </div>
+        ${key?.last_error ? `<p class="integration-error">${escapeHtml(key.last_error)}</p>` : ""}
+        ${rawKey ? `
+          <div class="integration-secret" role="status">
+            <span><small>API key baharu, dipaparkan sementara</small><code>${escapeHtml(rawKey)}</code></span>
+            <button class="icon-button" data-integration-copy-key="${provider.id}" type="button" aria-label="Salin API key" title="Salin API key">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+            </button>
+          </div>` : ""}
+        <div class="integration-card-actions">
+          <button class="primary-button" data-integration-rotate="${provider.id}" type="button">${key ? "Rotate API key" : "Jana API key"}</button>
+          <button class="secondary-button danger" data-integration-revoke="${provider.id}" type="button" ${key ? "" : "disabled"}>Revoke</button>
+        </div>
+        <details class="integration-payload">
+          <summary>Payload JSON ${provider.label}</summary>
+          <pre><code>${escapeHtml(payload)}</code></pre>
+          <button class="secondary-button compact" data-integration-copy-payload="${provider.id}" type="button">Salin payload</button>
+        </details>
+      </article>`;
+  }).join("");
+}
+
+async function loadIntegrationStatus() {
+  if (!isAdmin() || !remoteDatabaseMode || !remoteDatabaseClient || !elements.integrationConnectors) return;
+  elements.refreshIntegrations.disabled = true;
+  try {
+    const { data, error } = await remoteDatabaseClient.functions.invoke("admin-manage-integration", {
+      body: { action: "list" },
+    });
+    if (error || !data?.ok) throw error || new Error(data?.error || "Status integration tidak tersedia.");
+    integrationStatus = Array.isArray(data.integrations) ? data.integrations : [];
+    renderIntegrationConnectors();
+    renderIntegrationProjects();
+  } catch (error) {
+    elements.integrationConnectors.innerHTML = `<p class="empty-state">${escapeHtml(error?.message || "Status integration gagal dimuatkan.")}</p>`;
+  } finally {
+    elements.refreshIntegrations.disabled = false;
+  }
+}
+
+async function copyIntegrationText(value, label) {
+  try {
+    await navigator.clipboard.writeText(value);
+    showToast("Berjaya disalin", label, "success");
+  } catch {
+    showToast("Tidak dapat disalin", "Pilih dan salin nilai ini secara manual.", "error");
+  }
+}
+
+async function rotateIntegrationKey(provider) {
+  if (!isAdmin() || !INTEGRATION_PROVIDERS.some((item) => item.id === provider)) return;
+  const current = integrationStatus.find((item) => item.provider === provider)?.key;
+  if (current && !confirm("Rotate API key ini? Key lama akan berhenti berfungsi serta-merta.")) return;
+  try {
+    const { data, error } = await remoteDatabaseClient.functions.invoke("admin-manage-integration", {
+      body: { action: "rotate", provider },
+    });
+    if (error || !data?.ok || !data.apiKey) throw error || new Error(data?.error || "API key tidak dapat dijana.");
+    integrationRawKeys.set(provider, data.apiKey);
+    window.clearTimeout(integrationSecretTimers.get(provider));
+    integrationSecretTimers.set(provider, window.setTimeout(() => {
+      integrationRawKeys.delete(provider);
+      renderIntegrationConnectors();
+    }, 60000));
+    await loadIntegrationStatus();
+    showToast("API key tersedia", "Salin ke Pabbly sekarang. Key ini akan disembunyikan selepas 60 saat.", "success");
+  } catch (error) {
+    showToast("API key gagal dijana", error?.message || "Cuba semula.", "error");
+  }
+}
+
+async function revokeIntegrationKey(provider) {
+  if (!isAdmin() || !confirm("Revoke API key ini? Pabbly akan berhenti menghantar lead sehingga key baharu dipasang.")) return;
+  try {
+    const { data, error } = await remoteDatabaseClient.functions.invoke("admin-manage-integration", {
+      body: { action: "revoke", provider },
+    });
+    if (error || !data?.ok) throw error || new Error(data?.error || "API key tidak dapat direvoke.");
+    integrationRawKeys.delete(provider);
+    await loadIntegrationStatus();
+    showToast("API key direvoke", "Connector ini tidak lagi menerima request.", "success");
+  } catch (error) {
+    showToast("Revoke gagal", error?.message || "Cuba semula.", "error");
+  }
+}
+
+function integrationPayload(provider) {
+  const item = INTEGRATION_PROVIDERS.find((entry) => entry.id === provider);
+  if (!item) return "";
+  return JSON.stringify({
+    source_system: item.id,
+    source_lead_id: `{{${item.label} Lead ID}}`,
+    name: "{{Full Name}}",
+    phone: "{{Phone Number}}",
+    email: "{{Email}}",
+    city: "{{City}}",
+    project: state.projects.find((project) => project.active)?.name || "Nama projek aktif",
+    source: item.source,
+    created_at: "{{Created Time}}",
+  }, null, 2);
+}
+
 function renderAll() {
   enforceSingleActiveLead();
   syncExpiryAssignmentTimer();
@@ -5419,6 +5585,7 @@ function renderAll() {
   renderAppointments();
   renderAgents();
   renderProjects();
+  renderIntegrationProjects();
   renderLeadMonitor();
   updateLifecycleMutationGate();
 }
@@ -5430,10 +5597,11 @@ const viewTitles = {
   projects: "Projek",
   "lead-monitor": "Monitor Pergerakan Lead",
   "import-leads": "Import Lead",
+  integrations: "Integration",
 };
 
 function switchView(viewName) {
-  if (["agents", "projects", "lead-monitor", "import-leads"].includes(viewName) && !isAdmin()) return;
+  if (["agents", "projects", "lead-monitor", "import-leads", "integrations"].includes(viewName) && !isAdmin()) return;
   activeView = viewName;
   document.querySelectorAll(".view").forEach((view) => view.classList.remove("active"));
   document.querySelector(`#${viewName}-view`)?.classList.add("active");
@@ -5449,6 +5617,7 @@ function switchView(viewName) {
         }).format(new Date())
       : "LeadLaju";
   renderUser();
+  if (viewName === "integrations") loadIntegrationStatus();
   setMobileSidebarOpen(false);
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -6438,6 +6607,33 @@ document.querySelectorAll("[data-view]").forEach((button) => {
 
 document.querySelectorAll("[data-view-link]").forEach((button) => {
   button.addEventListener("click", () => switchView(button.dataset.viewLink));
+});
+
+elements.refreshIntegrations?.addEventListener("click", loadIntegrationStatus);
+elements.copyIntegrationEndpoint?.addEventListener("click", () => {
+  copyIntegrationText(PABBLY_INGEST_ENDPOINT, "Endpoint ingestion Pabbly telah disalin.");
+});
+elements.integrationConnectors?.addEventListener("click", (event) => {
+  const rotateButton = event.target.closest("[data-integration-rotate]");
+  if (rotateButton) {
+    rotateIntegrationKey(rotateButton.dataset.integrationRotate);
+    return;
+  }
+  const revokeButton = event.target.closest("[data-integration-revoke]");
+  if (revokeButton) {
+    revokeIntegrationKey(revokeButton.dataset.integrationRevoke);
+    return;
+  }
+  const keyButton = event.target.closest("[data-integration-copy-key]");
+  if (keyButton) {
+    const rawKey = integrationRawKeys.get(keyButton.dataset.integrationCopyKey);
+    if (rawKey) copyIntegrationText(rawKey, "API key telah disalin.");
+    return;
+  }
+  const payloadButton = event.target.closest("[data-integration-copy-payload]");
+  if (payloadButton) {
+    copyIntegrationText(integrationPayload(payloadButton.dataset.integrationCopyPayload), "Payload JSON telah disalin.");
+  }
 });
 
 elements.manualLeadButtons.forEach((button) => button.addEventListener("click", openManualLeadModal));
