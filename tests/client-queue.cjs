@@ -734,6 +734,9 @@ test('admin imports new leads from CSV or Excel directly into Supabase', () => {
   assert.match(source, /data\.result === "duplicate"/);
   assert.match(source, /crypto\.subtle\.digest\("SHA-256"/);
   assert.match(source, /async function downloadLeadSampleXlsx\(\)/);
+  assert.match(source, /const LEAD_IMPORT_HEADERS = \["name", "phone", "email", "city", "project"\]/);
+  assert.match(source, /source: "Manual Lead"/);
+  assert.match(source, /status: "new"/);
   assert.match(css, /\.lead-import-layout/);
 });
 

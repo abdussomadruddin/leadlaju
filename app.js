@@ -2057,7 +2057,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-    .register("/sw.js?v=20260919-sidebar-footer-v77")
+    .register("/sw.js?v=20260919-import-fields-v78")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -2822,15 +2822,11 @@ async function addManualLead(event) {
   renderAll();
 }
 
-const LEAD_IMPORT_HEADERS = [
-  "source_lead_id", "name", "phone", "email", "project", "source", "city", "notes", "created_at",
-];
+const LEAD_IMPORT_HEADERS = ["name", "phone", "email", "city", "project"];
 
 function leadImportHeader(value) {
   const normalized = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
   const aliases = {
-    id: "source_lead_id",
-    lead_id: "source_lead_id",
     nama: "name",
     nama_lead: "name",
     telefon: "phone",
@@ -2838,11 +2834,7 @@ function leadImportHeader(value) {
     nombor_telefon: "phone",
     emel: "email",
     projek: "project",
-    sumber: "source",
     bandar: "city",
-    nota: "notes",
-    tarikh: "created_at",
-    tarikh_masa: "created_at",
   };
   return aliases[normalized] || normalized;
 }
@@ -2913,7 +2905,7 @@ async function readLeadImportRows(file) {
 function normalizeLeadImportRows(table) {
   if (table.length < 2) throw new Error("Fail mesti mempunyai tajuk kolum dan sekurang-kurangnya satu lead.");
   const headers = table[0].map(leadImportHeader);
-  const required = ["name", "phone", "project"];
+  const required = LEAD_IMPORT_HEADERS;
   const missing = required.filter((header) => !headers.includes(header));
   if (missing.length) throw new Error(`Kolum wajib tiada: ${missing.join(", ")}.`);
   if (table.length - 1 > 1000) throw new Error("Maksimum 1,000 baris bagi setiap import.");
@@ -2928,23 +2920,13 @@ function normalizeLeadImportRows(table) {
     if (!normalizePhone(raw.phone)) errors.push("telefon tiada");
     const canonicalProject = projects.get(String(raw.project || "").toLowerCase());
     if (!canonicalProject) errors.push("projek tidak aktif/tidak wujud");
-    let createdAt = "";
-    if (raw.created_at) {
-      const parsed = new Date(raw.created_at);
-      if (Number.isNaN(parsed.getTime())) errors.push("tarikh tidak sah");
-      else createdAt = parsed.toISOString();
-    }
     return {
       rowNumber: index + 2,
-      sourceLeadId: raw.source_lead_id || "",
       name: raw.name || "",
       phone: normalizePhone(raw.phone),
       email: raw.email || "",
       project: canonicalProject || raw.project || "",
-      source: normalizeLeadSource(raw.source || "Manual Lead"),
       city: raw.city || "",
-      notes: raw.notes || "",
-      createdAt,
       errors,
     };
   });
@@ -2965,9 +2947,9 @@ function renderLeadImportPreview() {
       <tr class="${row.errors.length ? "import-row-error" : ""}">
         <td><strong>${escapeHtml(row.name || `Baris ${row.rowNumber}`)}</strong>${row.errors.length ? `<small>${escapeHtml(row.errors.join(" · "))}</small>` : ""}</td>
         <td>${escapeHtml(row.phone)}</td>
+        <td>${escapeHtml(row.email)}</td>
+        <td>${escapeHtml(row.city)}</td>
         <td>${escapeHtml(row.project)}</td>
-        <td>${escapeHtml(row.source)}</td>
-        <td>${row.errors.length ? "Perlu dibaiki" : "New"}</td>
       </tr>`).join("")
     : '<tr><td colspan="5" class="table-empty">Preview akan muncul selepas fail dipilih.</td></tr>';
 }
@@ -2996,8 +2978,7 @@ function resetLeadImport(clearFile = true) {
 }
 
 async function importedLeadId(row) {
-  if (row.sourceLeadId) return String(row.sourceLeadId);
-  const canonical = [row.name, row.phone, row.email, row.project, row.source, row.city, row.notes]
+  const canonical = [row.name, row.phone, row.email, row.city, row.project]
     .map((value) => String(value || "").trim().toLowerCase()).join("|");
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical));
   const hex = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -3021,10 +3002,10 @@ async function uploadImportedLeads() {
       phone: row.phone,
       email: row.email,
       project: row.project,
-      source: row.source,
+      source: "Manual Lead",
       city: row.city,
-      notes: row.notes,
-      created_at: row.createdAt || new Date().toISOString(),
+      notes: "",
+      created_at: new Date().toISOString(),
       status: "new",
     };
     const { data, error } = await remoteDatabaseClient.rpc("admin_ingest_manual_lead", { p_lead: leadInput });
@@ -3058,7 +3039,7 @@ function downloadFile(blob, filename) {
 function leadSampleRows() {
   return [
     LEAD_IMPORT_HEADERS,
-    ["sample-001", "Nama Lead", "60123456789", "lead@example.com", state.projects.find((project) => project.active)?.name || "Nama Projek", "Manual Lead", "Kuala Lumpur", "", new Date().toISOString()],
+    ["Nama Lead", "60123456789", "lead@example.com", "Kuala Lumpur", state.projects.find((project) => project.active)?.name || "Nama Projek"],
   ];
 }
 
