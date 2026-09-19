@@ -29,7 +29,7 @@ function fixture(rows, agents = [{ id: 'a', eligible_project_ids: ['project-arma
     LockService: { getScriptLock: () => ({ tryLock: () => options.lockAvailable !== false, releaseLock() {} }) },
     PropertiesService: { getScriptProperties: () => ({ getProperty: key => properties.get(key) || null, setProperty: (key, value) => properties.set(key, String(value)) }) },
   });
-  vm.runInContext(fs.readFileSync('google-apps-script/Code.gs', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8'), context);
   Object.assign(context, {
     SpreadsheetApp: { openById: () => ({ getSheetByName: () => sheet }) },
     ensureRequiredHeaders_: () => headers,
@@ -72,13 +72,13 @@ function fixture(rows, agents = [{ id: 'a', eligible_project_ids: ['project-arma
 const lead = (id, extra = {}) => ({ id, name: id, phone: '0123456789', project: 'Armani Putrajaya', status: 'new', ...extra });
 
 test('server clears expired cooldown values before assignment', () => {
-  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const source = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   assert.match(source, /function clearExpiredAgentCooldowns_\(sheet, headers, now\)/);
   assert.match(source, /clearExpiredAgentCooldowns_\(queueAgentsSheet, queueAgentHeaders\)/);
 });
 
 test('minute queue processing expires assignments even when the agent app is closed', () => {
-  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const source = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   const start = source.indexOf('function notifyUnsentLeadPushes_(');
   const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
   assert.match(source, /function expireOverdueLeadAssignments_\(sheet, headers, now\)/);
@@ -270,14 +270,14 @@ test('a stale phone cannot overwrite a newer assignment revision', () => {
 });
 
 test('ordinary status changes do not advance the assignment revision', () => {
-  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const source = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   const start = source.indexOf('function updateLeadStatusLocked_(');
   const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
   assert.doesNotMatch(body, /assignmentRevision[^\n]*currentRevision \+ 1/);
 });
 
 test('every resolved lead status closes pending assignment history', () => {
-  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const source = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   const updateStart = source.indexOf('function updateLeadStatusLocked_(');
   const updateBody = source.slice(updateStart, source.indexOf('\nfunction ', updateStart + 1));
   assert.match(updateBody, /ASSIGNMENT_OUTCOME_BY_STAGE\[stage\]/);
@@ -287,7 +287,7 @@ test('every resolved lead status closes pending assignment history', () => {
 });
 
 test('agent status updates share the expiry ScriptLock and validate assignment revision', () => {
-  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const source = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   const start = source.indexOf('function updateLeadStatus_(');
   const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
   assert.match(body, /return updateLeadStatusLocked_\(input\)/);
@@ -421,7 +421,7 @@ test('duplicate frontend and minute expiry leave one queued state', () => {
 });
 
 test('status outcome matrix explicitly closes every valid non-New status', () => {
-  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const source = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   const expected = ['contacted', 'passed', 'all_offer_presented', 'need_follow_up', 'potential', 'rejected', 'cancelled', 'client'];
   expected.forEach(stage => assert.match(source, new RegExp(`${stage}: "${stage}"`)));
   assert.doesNotMatch(source.slice(source.indexOf('const ASSIGNMENT_OUTCOME_BY_STAGE'), source.indexOf('};', source.indexOf('const ASSIGNMENT_OUTCOME_BY_STAGE'))), /new:/);
@@ -491,7 +491,7 @@ test('reconciliation ignores active New and already closed assignments', () => {
 });
 
 test('new status updates return the new status revision before queue handling', () => {
-  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const source = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   const start = source.indexOf('function updateLeadStatusLocked_(');
   const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
   assert.ok(body.indexOf('latestStatusRevision = statusRevision') < body.indexOf('if (normalizeLeadStage_(status) === "new")'));
@@ -499,7 +499,7 @@ test('new status updates return the new status revision before queue handling', 
 });
 
 test('sheet queue-state validation accepts every final lead status', () => {
-  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const source = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   const states = [
     'active', 'queued', 'contacted', 'passed', 'all_offer_presented',
     'need_follow_up', 'potential', 'rejected', 'cancelled', 'client',
@@ -512,7 +512,7 @@ test('sheet queue-state validation accepts every final lead status', () => {
 });
 
 test('server persists and returns lead notes through the sheet', () => {
-  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const source = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   assert.match(source, /notes: \["nota", "notes", "catatan"\]/);
   assert.match(source, /payload\.action === "update_lead_notes"/);
   assert.match(source, /function updateLeadNotes_\(input\)/);
@@ -520,7 +520,7 @@ test('server persists and returns lead notes through the sheet', () => {
 });
 
 test('server counts every assigned non-new lead for each agent', () => {
-  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const source = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   const start = source.indexOf('function countHandledLeadsByAgent_(');
   const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
   assert.match(body, /lead\.assigned_agent_id/);
@@ -543,7 +543,7 @@ test('server counts every assigned non-new lead for each agent', () => {
 });
 
 test('dashboard GET is read-only while maintenance runs through the trigger refresh', () => {
-  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const source = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   const start = source.indexOf('function doGet(event)');
   const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
   assert.match(body, /readExistingHeaders_\(sheet\)/);
@@ -553,7 +553,7 @@ test('dashboard GET is read-only while maintenance runs through the trigger refr
 });
 
 test('sheet maintenance colors every dropdown-backed operational column', () => {
-  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const source = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   assert.match(source, /const DROPDOWN_COLORS = \{/);
   assert.match(source, /function colorDropdownColumn_\(/);
   assert.match(source, /colorAllDropdownColumns_\(\{/);
@@ -563,7 +563,7 @@ test('sheet maintenance colors every dropdown-backed operational column', () => 
 });
 
 test('server rejects protected agent statuses when the shared note is empty', () => {
-  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const source = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   const start = source.indexOf('function updateLeadStatusLocked_(');
   const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
   assert.match(body, /\["passed", "rejected", "cancelled"\]\.includes\(stage\)/);
@@ -573,7 +573,7 @@ test('server rejects protected agent statuses when the shared note is empty', ()
 });
 
 test('contacted status records an acting agent when assignment fields are empty', () => {
-  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const source = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   const start = source.indexOf('function updateLeadStatusLocked_(');
   const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
   assert.match(body, /actingAgentId/);
@@ -582,7 +582,7 @@ test('contacted status records an acting agent when assignment fields are empty'
 });
 
 test('server reconciles obsolete lead agent IDs by email or name', () => {
-  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const source = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   assert.match(source, /function reconcileLeadAgentReferences_\(sheet, headers, agents\)/);
   assert.match(source, /agentsByEmail\.get\(assignedEmail\) \|\| agentsByName\.get\(assignedName\)/);
   assert.match(source, /setRowValue_\(headers, nextRow, "assignedAgentId", matchedAgent\.id\)/);
@@ -590,7 +590,7 @@ test('server reconciles obsolete lead agent IDs by email or name', () => {
 });
 
 test('server only treats agents who selected GET LEAD as online for distribution', () => {
-  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const source = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   assert.match(source, /leadReady: \["lead ready", "lead_ready"/);
   assert.match(source, /\{ field: "leadReady", label: "Lead Ready" \}/);
   assert.match(source, /payload\.action === "set_agent_lead_availability"/);

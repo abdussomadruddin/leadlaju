@@ -28,7 +28,8 @@ const removeGoogleIntegrations = fs.readFileSync(path.join(migrations, fs.readdi
 const retryOnlyDispatch = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_unblock_retry_only_dispatch.sql'))), 'utf8');
 const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
-const appsScript = fs.readFileSync(path.join(root, 'google-apps-script', 'Code.gs'), 'utf8');
+const runtimeConfig = fs.readFileSync(path.join(root, 'api', 'runtime-config.js'), 'utf8');
+const appsScript = fs.readFileSync(path.join(root, 'tests', 'fixtures', 'legacy-google-apps-script.txt'), 'utf8');
 
 test('Supabase foundation keeps one active lead and assignment per agent', () => {
   assert.match(sql, /create unique index one_active_lead_per_agent[\s\S]*queue_state = 'active'/);
@@ -360,6 +361,10 @@ test('production UI exposes Supabase realtime and no Google Sheet integration su
   assert.match(html, /Supabase realtime/);
   assert.match(html, /Import Lead/);
   assert.doesNotMatch(html, /Google Sheets Input|Google Apps Script|script\.google\.com/);
+  assert.equal(fs.existsSync(path.join(root, 'google-apps-script')), false);
+  assert.equal(fs.existsSync(path.join(root, 'supabase', 'functions', 'export-sheet-report')), false);
+  assert.equal(fs.existsSync(path.join(root, 'supabase', 'functions', 'sweep-sheet-input')), false);
+  assert.doesNotMatch(runtimeConfig, /google_sheet|script\.google\.com/);
 });
 
 test('Google Sheet sweep and reporting schedules are removed from Supabase', () => {

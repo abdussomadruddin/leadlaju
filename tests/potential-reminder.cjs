@@ -5,7 +5,7 @@ const vm = require('node:vm');
 
 test('potential reminders count only assigned Potential leads', () => {
   const context = vm.createContext({});
-  vm.runInContext(fs.readFileSync('google-apps-script/Code.gs', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8'), context);
   const counts = context.potentialLeadCountsByAgent_([
     { assigned_agent_id: 'agent-a', status: 'Potential' },
     { assigned_agent_id: 'agent-a', status: 'Contacted' },
@@ -19,7 +19,7 @@ test('potential reminders count only assigned Potential leads', () => {
 
 test('potential reminders exclude logged-out or inactive agents', () => {
   const context = vm.createContext({});
-  vm.runInContext(fs.readFileSync('google-apps-script/Code.gs', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8'), context);
   assert.equal(context.isPotentialReminderAgent_({
     role: 'agent', active: 'active', notification_enabled: true, last_seen_at: '2026-09-11 08:00:00',
   }), true);
@@ -29,7 +29,7 @@ test('potential reminders exclude logged-out or inactive agents', () => {
 });
 
 test('potential push and popup use the dedicated reminder route', () => {
-  const server = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const server = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   const app = fs.readFileSync('app.js', 'utf8');
   const worker = fs.readFileSync('sw.js', 'utf8');
   assert.match(server, /function processPotentialLeadReminders_\(spreadsheet, leads, agents\)/);

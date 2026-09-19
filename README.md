@@ -1,9 +1,9 @@
 # LeadLaju
 
 LeadLaju ialah web app untuk pasukan ejen hartanah menerima lead daripada
-Google Sheets, menghubungi lead dalam masa lima minit, dan memindahkan lead
-secara automatik kepada ejen seterusnya apabila masa tamat. Google Sheet ialah
-database utama untuk lead dan ejen.
+import CSV/XLSX atau kemasukan manual, menghubungi lead dalam masa lima minit,
+dan memindahkan lead secara automatik kepada ejen seterusnya apabila masa tamat.
+Supabase ialah satu-satunya sumber data operasi.
 
 ## Jalankan aplikasi
 
@@ -24,12 +24,11 @@ Dashboard hanya boleh dibuka selepas login. Sesi disimpan pada peranti selama
 - Ejen demo: `aina@leadlaju.my` / `Agent123!`
 
 Admin boleh mendaftarkan ejen dan menukar kata laluan mereka melalui menu
-**Pengurusan Ejen**. Perubahan ejen akan diselaraskan ke tab Agents dalam
-Google Sheet.
+**Pengurusan Ejen**. Semua perubahan disimpan terus dalam Supabase.
 
 ## Aliran utama
 
-1. Lead baru dikesan daripada Google Sheet atau butang manual lead.
+1. Lead baru dimasukkan melalui tab **Import Lead** atau butang manual lead.
 2. Jika banyak lead masuk serentak, dashboard mengagihkan satu active lead
    kepada setiap ejen aktif mengikut round-robin.
 3. Lead selebihnya disimpan dalam queue sehingga ada slot ejen kosong.
@@ -40,30 +39,13 @@ Google Sheet.
 7. Selepas `CALL NOW`, nombor telefon dibuka dan lead masuk ke **Log Lead**.
 8. Jika masa tamat, lead dipindahkan kepada ejen aktif seterusnya dan mendapat
    tempoh lima minit yang baru.
-9. Admin boleh daftar ejen, aktif atau nyahaktifkan ejen, dan sambungkan Google
-   Apps Script Web App URL.
+9. Admin boleh daftar ejen, aktif atau nyahaktifkan ejen, serta import fail lead.
 
-## Sambungan Google Sheets
+## Import Lead
 
-1. Pastikan Google Sheet mempunyai tab lead dan tab `Agents`.
-2. Untuk lead, gunakan tajuk `name`, `phone`, `email`, `project`, `source`,
-   `status`, `created_at`, dan `id` pada baris pertama. Nilai `source` yang
-   disokong ialah `Manual Lead`, `Tiktok Ads`, dan `Meta Ads`.
-   Kolum `created_at` atau `Tarikh & Masa` boleh diisi format
-   `YYYY-MM-DD HH:mm:ss` waktu Malaysia, atau Unix timestamp dalam saat seperti
-   `1780964631`.
-3. Untuk ejen, Apps Script akan sediakan tajuk `ID`, `Nama`, `No Phone`,
-   `Emel`, `Role`, `Status`, `Leads Handled`, `Tarikh Daftar`, dan `Password`.
-4. Buka **Extensions > Apps Script** dalam Google Sheet.
-5. Salin kandungan `google-apps-script/Code.gs`.
-6. Pilih **Deploy > New deployment > Web app**.
-7. Tetapkan akses kepada **Anyone**, deploy, kemudian salin Web App URL.
-8. Log masuk sebagai pengguna Admin dalam LeadLaju, buka **Google Sheets**,
-   tampal URL tersebut dan tekan **Simpan & sambung**.
+Gunakan tab **Import Lead** untuk memuat naik fail CSV atau XLSX. Kolum yang
+diperlukan ialah `name`, `phone`, `email`, `city`, dan `project`. Sistem mengisi
+ID, sumber `Manual Lead`, status, revision, dan masa secara automatik.
 
-Meta Lead Ads atau TikTok Lead Generation boleh memasukkan baris ke Sheet
-melalui alat automasi pilihan anda. LeadLaju akan mengesan baris baru mengikut
-selang masa yang dipilih.
-
-Dashboard menyimpan salinan sementara dalam `localStorage` untuk prestasi dan
-sesi login, tetapi Google Sheet ialah sumber data utama.
+Dashboard menggunakan Supabase Auth, Database, Realtime, Edge Functions dan
+Web Push. Tiada Google Sheet atau Google Apps Script diperlukan.

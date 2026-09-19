@@ -1,4 +1,5 @@
-const SPREADSHEET_ID = "1ySHeB12lL2y4AxqpSx8dDniyujSaz2-9hoRzPlCv6TM";
+// Inert characterization fixture only. This file is not deployable and has no live Google ID.
+const SPREADSHEET_ID = "legacy-test-fixture-only";
 const SHEET_NAME = "Sheet1";
 const AGENTS_SHEET_NAME = "Agents";
 const PROJECTS_SHEET_NAME = "Projects";

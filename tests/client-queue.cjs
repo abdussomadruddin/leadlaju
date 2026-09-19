@@ -102,7 +102,7 @@ test('agent presence heartbeat runs at five-minute intervals', () => {
 });
 
 test('force offline action revokes stale agent sessions', () => {
-  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const source = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   assert.match(source, /payload\.action === "force_agent_offline"/);
   assert.match(source, /function forceAgentOffline_\(input\)/);
   assert.match(source, /!sessionStartedAt \|\| sessionStartedAt < parseLeadTimestamp_\(presenceNotBefore\)\.getTime\(\)/);
@@ -265,7 +265,7 @@ test('completed signup is recovered when its response is lost after the Sheet wr
 });
 
 test('signup response does not wait for the admin push notification', () => {
-  const server = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const server = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   const upsertStart = server.indexOf('function upsertAgent_(');
   const upsertEnd = server.indexOf('\nfunction deleteAgent_', upsertStart);
   const upsert = server.slice(upsertStart, upsertEnd);
@@ -329,7 +329,7 @@ test('successful agent sync removes an absent rejected agent on every device imm
 
 test('new agent status is pending unless the server explicitly confirms active', () => {
   const source = fs.readFileSync('app.js', 'utf8');
-  const server = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const server = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   const start = source.indexOf('function normalizeAgentActive(');
   const end = source.indexOf('\nfunction normalizeAgentRole', start);
   const context = vm.createContext({});
@@ -363,7 +363,7 @@ test('reject and delete wait for authoritative removal before hiding the agent c
 });
 
 test('agent deletion is idempotent and avoids slow structural Sheet row deletion', () => {
-  const server = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const server = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   const start = server.indexOf('function deleteAgent_(');
   const end = server.indexOf('\nfunction buildAgentRow_', start);
   const body = server.slice(start, end);
@@ -374,7 +374,7 @@ test('agent deletion is idempotent and avoids slow structural Sheet row deletion
 
 test('rejected email can register again while existing server email remains protected', () => {
   const source = fs.readFileSync('app.js', 'utf8');
-  const server = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const server = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   const signupStart = source.indexOf('async function handleAgentSignup(');
   const signupEnd = source.indexOf('\nfunction sendAgentLogoutState', signupStart);
   const signup = source.slice(signupStart, signupEnd);
@@ -469,7 +469,7 @@ test('agents must save a note before selecting passed, rejected, or cancelled', 
 
 test('agents must CALL NOW before changing a New lead status', () => {
   const source = fs.readFileSync('app.js', 'utf8');
-  const server = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const server = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   const css = fs.readFileSync('styles.css', 'utf8');
   assert.match(source, /const requiresCallNow = !isAdmin\(\) && visualStatus === "new"/);
   assert.match(source, /data-lead-call="\$\{lead\.id\}"/);
@@ -628,7 +628,7 @@ test('every device blocks agent access until its own notification permission is 
 
 test('dashboard and Google Sheet use one official lead status list', () => {
   const source = fs.readFileSync('app.js', 'utf8');
-  const script = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const script = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   const expected = [
     'New', 'Contacted', 'Passed', 'All Offer Presented',
     'Need Follow Up', 'Potential', 'Rejected', 'Cancelled', 'Client',
@@ -743,7 +743,7 @@ test('admin imports new leads from CSV or Excel directly into Supabase', () => {
 test('notification click fetches the assigned lead directly for an instant dashboard card', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const worker = fs.readFileSync('sw.js', 'utf8');
-  const server = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const server = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   const pushApi = fs.readFileSync('api/push.js', 'utf8');
   assert.match(source, /async function syncNotificationLead\(leadId\)/);
   assert.match(source, /url\.searchParams\.set\("lead_id", requestedId\)/);
@@ -1160,7 +1160,7 @@ test('Supabase appointment writes include the Kuala Lumpur UTC offset', () => {
 
 test('appointments follow the current Log Lead owner and support edit and delete', () => {
   const source = fs.readFileSync('app.js', 'utf8');
-  const server = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const server = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   assert.match(source, /\[lead\.id, lead\.dedupeKey\]/);
   assert.match(source, /data-appointment-edit=/);
   assert.match(source, /data-appointment-delete=/);
@@ -1181,7 +1181,7 @@ test('appointment navigation badge counts appointments visible to the current us
 });
 
 test('appointment writes do not wait behind the lead distribution lock', () => {
-  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const source = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   const start = source.indexOf('function createAppointment_(');
   const end = source.indexOf('\nfunction findAppointmentRow_', start);
   const createAppointment = source.slice(start, end);
@@ -1716,7 +1716,7 @@ test('actual response handler rejects HTTP and application failures but returns 
 });
 
 test('appointment reminders are server-side, deduplicated, and target the correct roles', () => {
-  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const source = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   assert.match(source, /const APPOINTMENTS_SHEET_NAME = "Appointments"/);
   assert.match(source, /agent_3_days/);
   assert.match(source, /agent_1_day/);

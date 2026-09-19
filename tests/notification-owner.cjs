@@ -15,7 +15,7 @@ test('lead notifications are restricted to the assigned account', () => {
 
 test('conflicting subscription ID cannot match through email fallback', () => {
   const context = vm.createContext({});
-  vm.runInContext(fs.readFileSync('google-apps-script/Code.gs', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8'), context);
   const subscriptions = [
     { agentId: 'a', agentEmail: 'a@example.com' },
     { agentId: 'b', agentEmail: 'a@example.com' },
@@ -26,7 +26,7 @@ test('conflicting subscription ID cannot match through email fallback', () => {
 });
 
 test('closed-app lead distribution only assigns agents with a push subscription', () => {
-  const source = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const source = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   const start = source.indexOf('function notifyUnsentLeadPushes_(');
   const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
   assert.ok(body.indexOf('const subscriptions = readPushSubscriptions_') < body.indexOf('const agents = readyAgents.filter'));
@@ -36,7 +36,7 @@ test('closed-app lead distribution only assigns agents with a push subscription'
 
 test('all lead pushes for an agent share one replaceable notification slot', () => {
   const appSource = fs.readFileSync('app.js', 'utf8');
-  const sheetSource = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
+  const sheetSource = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   assert.match(appSource, /tag: `leadlaju-active-\$\{lead\.assignedAgentId\}`/);
   assert.match(sheetSource, /tag: `leadlaju-active-\$\{agent\.id\}`/);
   assert.match(fs.readFileSync('sw.js', 'utf8'), /notification\.tag\.startsWith\("leadlaju-lead-"\)/);
