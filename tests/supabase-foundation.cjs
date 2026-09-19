@@ -27,6 +27,7 @@ const realtimeAssignmentSnapshots = fs.readFileSync(path.join(migrations, fs.rea
 const removeGoogleIntegrations = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_remove_google_sheet_integrations.sql'))), 'utf8');
 const retryOnlyDispatch = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_unblock_retry_only_dispatch.sql'))), 'utf8');
 const adminLeadReadiness = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_admin_agent_lead_readiness.sql'))), 'utf8');
+const adminAllLeadReadiness = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_admin_all_agent_lead_readiness.sql'))), 'utf8');
 const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const runtimeConfig = fs.readFileSync(path.join(root, 'api', 'runtime-config.js'), 'utf8');
@@ -165,6 +166,20 @@ test('admins can control only an online, push-ready agent distribution queue wit
   assert.match(app, /data-agent-lead-availability="stop"/);
   assert.match(app, /data-agent-lead-availability="get"/);
   assert.match(app, /rpc\("admin_set_agent_lead_readiness"/);
+});
+
+test('admins can start or stop the distribution queue for all eligible agents safely', () => {
+  assert.match(adminAllLeadReadiness, /function public\.admin_set_all_agent_lead_readiness/);
+  assert.match(adminAllLeadReadiness, /leadlaju_private\.is_admin\(auth\.uid\(\)\)/);
+  assert.match(adminAllLeadReadiness, /av\.presence_lease_until > now\(\)/);
+  assert.match(adminAllLeadReadiness, /public\.push_subscriptions ps/);
+  assert.match(adminAllLeadReadiness, /not av\.lead_ready/);
+  assert.match(adminAllLeadReadiness, /set lead_ready = false/);
+  assert.match(adminAllLeadReadiness, /perform leadlaju_private\.dispatch_available_leads\(now\(\)\)/);
+  assert.match(adminAllLeadReadiness, /grant execute on function public\.admin_set_all_agent_lead_readiness\(boolean\) to authenticated/);
+  assert.match(html, /id="get-lead-all-agents-button"/);
+  assert.match(html, /id="stop-lead-all-agents-button"/);
+  assert.match(app, /rpc\("admin_set_all_agent_lead_readiness"/);
 });
 
 test('legacy Sheet snapshot migrator is removed after cutover', () => {

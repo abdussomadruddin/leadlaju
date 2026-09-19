@@ -582,7 +582,11 @@
               <h2>Pengurusan Ejen</h2>
               <p>Daftar pasukan dan tentukan siapa yang menerima giliran lead.</p>
             </div>
-            <button class="primary-button compact" id="add-agent-button" type="button">+ Daftar ejen</button>
+            <div class="agent-management-actions">
+              <button class="secondary-button compact agent-ready-all" id="get-lead-all-agents-button" type="button">GET LEAD ALL AGENT</button>
+              <button class="secondary-button compact danger" id="stop-lead-all-agents-button" type="button">STOP LEAD ALL AGENT</button>
+              <button class="primary-button compact" id="add-agent-button" type="button">+ Daftar ejen</button>
+            </div>
           </div>
           <div class="agents-grid" id="agents-grid"></div>
         </section>

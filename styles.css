@@ -1141,6 +1141,19 @@ svg {
   justify-content: flex-end;
 }
 
+.agent-management-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.agent-ready-all {
+  color: #087a4b;
+  border-color: #b9ecd5;
+  background: #e8f8f0;
+}
+
 .agent-reminder-alert {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;

@@ -332,6 +332,8 @@ const elements = {
   projectForm: document.querySelector("#project-form"),
   projectName: document.querySelector("#project-name"),
   addAgentButton: document.querySelector("#add-agent-button"),
+  getLeadAllAgentsButton: document.querySelector("#get-lead-all-agents-button"),
+  stopLeadAllAgentsButton: document.querySelector("#stop-lead-all-agents-button"),
   agentModal: document.querySelector("#agent-modal"),
   agentForm: document.querySelector("#agent-form"),
   agentModalKicker: document.querySelector("#agent-modal-kicker"),
@@ -6087,6 +6089,39 @@ async function setAdminAgentLeadAvailability(agentId, ready) {
   }
 }
 
+async function setAdminAllAgentLeadAvailability(ready) {
+  if (!guardLifecycleMutation() || !isAdmin() || !remoteDatabaseMode) return false;
+  const actionLabel = ready ? "masukkan semua ejen yang sedia ke giliran GET LEAD" : "hentikan agihan lead untuk semua ejen";
+  if (!window.confirm(`${actionLabel.charAt(0).toUpperCase()}${actionLabel.slice(1)}?`)) return false;
+
+  const button = ready ? elements.getLeadAllAgentsButton : elements.stopLeadAllAgentsButton;
+  button.disabled = true;
+  setGlobalLoading(true, ready ? "Mengaktifkan giliran semua ejen..." : "Menghentikan agihan semua ejen...");
+  try {
+    const { data, error } = await remoteDatabaseClient.rpc("admin_set_all_agent_lead_readiness", {
+      p_ready: ready,
+    });
+    if (error || !data?.ok) throw error || new Error(data?.error || "Status giliran tidak dapat dikemas kini.");
+
+    await loadRemoteState(state.currentUserId);
+    const updated = Number(data.updated || 0);
+    showToast(
+      ready ? "GET LEAD ALL AGENT diaktifkan" : "STOP LEAD ALL AGENT diaktifkan",
+      ready
+        ? `${updated} ejen online dan sedia notifikasi dimasukkan ke giliran.`
+        : `${updated} ejen dikeluarkan daripada giliran lead.`,
+      "success",
+    );
+    return true;
+  } catch (error) {
+    showToast("Status giliran semua ejen gagal", error?.message || "Cuba lagi.", "error");
+    return false;
+  } finally {
+    button.disabled = false;
+    setGlobalLoading(false);
+  }
+}
+
 function openAgentPasswordModal(agentId) {
   const agent = getAgent(agentId);
   if (!agent) return;
@@ -6806,6 +6841,8 @@ elements.manualLeadPhone.addEventListener("input", () => {
   elements.manualLeadError.textContent = "";
 });
 elements.addAgentButton.addEventListener("click", () => openAgentModal());
+elements.getLeadAllAgentsButton?.addEventListener("click", () => setAdminAllAgentLeadAvailability(true));
+elements.stopLeadAllAgentsButton?.addEventListener("click", () => setAdminAllAgentLeadAvailability(false));
 elements.agentForm.addEventListener("submit", addAgent);
 elements.projectForm?.addEventListener("submit", addProject);
 elements.agentPasswordForm.addEventListener("submit", updateAgentPassword);
