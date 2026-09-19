@@ -313,11 +313,11 @@ test('production runtime config enables Supabase without requiring a query flag'
 
 test('all production devices invalidate the old app shell for the direct Supabase importer', () => {
   const worker = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
-  assert.match(worker, /leadlaju-pwa-v20260919-import-leads-v76/);
+  assert.match(worker, /leadlaju-pwa-v20260919-sidebar-footer-v77/);
   assert.doesNotMatch(worker, /client\.navigate\(/);
-  assert.match(html, /app\.js\?v=20260919-import-leads-v76/);
+  assert.match(html, /app\.js\?v=20260919-sidebar-footer-v77/);
   assert.match(html, /vendor\/exceljs\.min\.js\?v=4\.4\.0/);
-  assert.match(app, /register\("\/sw\.js\?v=20260919-import-leads-v76"\)/);
+  assert.match(app, /register\("\/sw\.js\?v=20260919-sidebar-footer-v77"\)/);
   assert.doesNotMatch(app, /get\("backend"\) === "sheet"/);
   assert.match(app, /remoteDatabaseRequired = window\.location\.protocol !== "file:"/);
   assert.match(app, /if \(remoteDatabaseRequired\)[\s\S]*Operasi Google Sheet lama tidak akan digunakan/);
