@@ -1154,6 +1154,13 @@ test('appointment tracker is synced from the server and scoped to assigned leads
   assert.match(html, /id="appointment-modal"/);
 });
 
+test('Supabase appointment writes include the Kuala Lumpur UTC offset', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  assert.match(source, /function malaysiaAppointmentTimestamp\(value\)/);
+  assert.match(source, /return `\$\{localValue\}:00\+08:00`;/);
+  assert.match(source, /scheduled_at: remoteDatabaseMode\s*\? malaysiaAppointmentTimestamp\(elements\.appointmentScheduledAt\.value\)/);
+});
+
 test('appointments follow the current Log Lead owner and support edit and delete', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const server = fs.readFileSync('google-apps-script/Code.gs', 'utf8');

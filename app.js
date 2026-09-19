@@ -4623,6 +4623,12 @@ function appointmentDateTimeLocalValue(value) {
   return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
 }
 
+function malaysiaAppointmentTimestamp(value) {
+  const localValue = String(value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(localValue)) return "";
+  return `${localValue}:00+08:00`;
+}
+
 function findLeadForAppointment(appointment) {
   if (!appointment) return null;
   const appointmentLeadId = String(appointment.leadId || "").trim();
@@ -4751,7 +4757,9 @@ async function saveAppointment(event) {
     request_id: pendingAppointmentRequestId,
     lead_id: remoteDatabaseMode ? lead.id : (lead.dedupeKey || lead.id),
     type: elements.appointmentType.value,
-    scheduled_at: elements.appointmentScheduledAt.value,
+    scheduled_at: remoteDatabaseMode
+      ? malaysiaAppointmentTimestamp(elements.appointmentScheduledAt.value)
+      : elements.appointmentScheduledAt.value,
     location: elements.appointmentLocation.value.trim(),
     notes: elements.appointmentNotes.value.trim(),
   });
