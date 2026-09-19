@@ -26,8 +26,7 @@ const FOLLOW_UP_REMINDER_SLOTS = [
 const FOLLOW_UP_REMINDER_WINDOW_MINUTES = 10;
 const WEB_PUSH_PUBLIC_KEY =
   "BJRcHLhmZgPSdid007nVHluQhJY4MD3IlC-t0--hq2eWToRTovU_k5GZsEmmbJK596VHrj2N5ZMdUpzJX64F5R0";
-const DEFAULT_GOOGLE_SHEET_ENDPOINT =
-  "https://script.google.com/macros/s/AKfycbyXEPXT-m6YETnvOZEy0CxF82CMmMGDmgpVmDIv-a7XTEdJp92mYkOQhaBSRTPnNH7K/exec";
+const DEFAULT_GOOGLE_SHEET_ENDPOINT = "";
 const LEAD_STATUS_OPTIONS = [
   { value: "new", label: "New" },
   { value: "contacted", label: "Contacted" },
@@ -183,6 +182,7 @@ let runtimeWasHidden = false;
 let lifecycleIntroTimer = null;
 let lifecycleHideTimer = null;
 let lifecycleSyncPromise = null;
+let pendingLeadImportRows = [];
 
 const elements = {
   sidebar: document.querySelector("#sidebar"),
@@ -341,14 +341,15 @@ const elements = {
   agentNewPassword: document.querySelector("#agent-new-password"),
   agentConfirmPassword: document.querySelector("#agent-confirm-password"),
   agentPasswordError: document.querySelector("#agent-password-error"),
-  integrationForm: document.querySelector("#integration-form"),
-  saveIntegrationButton: document.querySelector("#save-integration-button"),
-  sheetEndpoint: document.querySelector("#sheet-endpoint"),
-  pollInterval: document.querySelector("#poll-interval"),
-  syncNowButton: document.querySelector("#sync-now-button"),
-  connectionResult: document.querySelector("#connection-result"),
-  sidebarSyncText: document.querySelector("#sidebar-sync-text"),
-  sidebarSyncStatus: document.querySelector("#sidebar-sync-status"),
+  leadImportFile: document.querySelector("#lead-import-file"),
+  leadImportStatus: document.querySelector("#lead-import-status"),
+  leadImportSummary: document.querySelector("#lead-import-summary"),
+  leadImportPreview: document.querySelector("#lead-import-preview"),
+  leadImportCount: document.querySelector("#lead-import-count"),
+  uploadLeadsButton: document.querySelector("#upload-leads-button"),
+  clearLeadImport: document.querySelector("#clear-lead-import"),
+  downloadSampleCsv: document.querySelector("#download-sample-csv"),
+  downloadSampleXlsx: document.querySelector("#download-sample-xlsx"),
   liveSyncLabel: document.querySelector("#live-sync-label"),
   resetCodeFields: document.querySelector("#reset-code-fields"),
   toast: document.querySelector("#toast"),
@@ -1354,7 +1355,7 @@ async function requestPasswordReset(event) {
   elements.resetVerifyForm.hidden = false;
   elements.resetCodeMessage.textContent = emailSent
     ? `Kod verifikasi telah dihantar ke ${agent.email}.`
-    : `Google Apps Script emel belum disambungkan. Gunakan kod demo di bawah untuk menguji reset.`;
+    : `Servis emel belum tersedia. Gunakan kod demo di bawah untuk menguji reset.`;
   elements.demoResetCode.hidden = emailSent;
   elements.demoResetCodeValue.textContent = code;
   elements.resetRequestError.textContent = "";
@@ -1858,7 +1859,7 @@ function getNotificationStartUrl(viewName = "") {
 function getRequestedStartView() {
   const params = new URLSearchParams(window.location.search);
   const requestedView = params.get("view") || window.location.hash.replace(/^#/, "");
-  return ["dashboard", "leads", "appointments", "agents", "projects", "integration"].includes(requestedView) ? requestedView : "dashboard";
+  return ["dashboard", "leads", "appointments", "agents", "projects", "lead-monitor", "import-leads"].includes(requestedView) ? requestedView : "dashboard";
 }
 
 async function syncNotificationLead(leadId) {
@@ -2056,7 +2057,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20260915-supabase-realtime-v75")
+      .register("/sw.js?v=20260919-import-leads-v76")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -2819,6 +2820,270 @@ async function addManualLead(event) {
   closeModal(elements.manualLeadModal);
   showToast("Manual lead disimpan", remoteDatabaseMode ? "Supabase dan dashboard telah diselaraskan." : "Google Sheet dan dashboard telah diselaraskan.", "success");
   renderAll();
+}
+
+const LEAD_IMPORT_HEADERS = [
+  "source_lead_id", "name", "phone", "email", "project", "source", "city", "notes", "created_at",
+];
+
+function leadImportHeader(value) {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  const aliases = {
+    id: "source_lead_id",
+    lead_id: "source_lead_id",
+    nama: "name",
+    nama_lead: "name",
+    telefon: "phone",
+    no_telefon: "phone",
+    nombor_telefon: "phone",
+    emel: "email",
+    projek: "project",
+    sumber: "source",
+    bandar: "city",
+    nota: "notes",
+    tarikh: "created_at",
+    tarikh_masa: "created_at",
+  };
+  return aliases[normalized] || normalized;
+}
+
+function parseCsvTable(text) {
+  const rows = [];
+  let row = [];
+  let value = "";
+  let quoted = false;
+  const source = String(text || "").replace(/^\uFEFF/, "");
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (character === '"') {
+      if (quoted && source[index + 1] === '"') {
+        value += '"';
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (character === "," && !quoted) {
+      row.push(value);
+      value = "";
+    } else if ((character === "\n" || character === "\r") && !quoted) {
+      if (character === "\r" && source[index + 1] === "\n") index += 1;
+      row.push(value);
+      if (row.some((cell) => String(cell).trim())) rows.push(row);
+      row = [];
+      value = "";
+    } else {
+      value += character;
+    }
+  }
+  row.push(value);
+  if (row.some((cell) => String(cell).trim())) rows.push(row);
+  return rows;
+}
+
+function excelImportValue(value) {
+  if (value instanceof Date) return value.toISOString();
+  if (value && typeof value === "object") {
+    if (value.result !== undefined) return excelImportValue(value.result);
+    if (value.text !== undefined) return String(value.text);
+    if (Array.isArray(value.richText)) return value.richText.map((part) => part.text || "").join("");
+  }
+  return value == null ? "" : String(value);
+}
+
+async function readLeadImportRows(file) {
+  const extension = String(file.name || "").split(".").pop().toLowerCase();
+  if (extension === "csv") return parseCsvTable(await file.text());
+  if (extension !== "xlsx") throw new Error("Gunakan fail .csv atau .xlsx sahaja.");
+  if (!window.ExcelJS) throw new Error("Pembaca fail Excel belum tersedia. Refresh dan cuba semula.");
+  const workbook = new window.ExcelJS.Workbook();
+  await workbook.xlsx.load(await file.arrayBuffer());
+  const worksheet = workbook.worksheets[0];
+  if (!worksheet) return [];
+  const rows = [];
+  worksheet.eachRow({ includeEmpty: false }, (sheetRow) => {
+    const values = [];
+    for (let column = 1; column <= sheetRow.cellCount; column += 1) {
+      values.push(excelImportValue(sheetRow.getCell(column).value));
+    }
+    rows.push(values);
+  });
+  return rows;
+}
+
+function normalizeLeadImportRows(table) {
+  if (table.length < 2) throw new Error("Fail mesti mempunyai tajuk kolum dan sekurang-kurangnya satu lead.");
+  const headers = table[0].map(leadImportHeader);
+  const required = ["name", "phone", "project"];
+  const missing = required.filter((header) => !headers.includes(header));
+  if (missing.length) throw new Error(`Kolum wajib tiada: ${missing.join(", ")}.`);
+  if (table.length - 1 > 1000) throw new Error("Maksimum 1,000 baris bagi setiap import.");
+
+  const projects = new Map(state.projects
+    .filter((project) => project.active)
+    .map((project) => [project.name.trim().toLowerCase(), project.name]));
+  return table.slice(1).map((cells, index) => {
+    const raw = Object.fromEntries(headers.map((header, column) => [header, excelImportValue(cells[column]).trim()]));
+    const errors = [];
+    if (!raw.name) errors.push("nama tiada");
+    if (!normalizePhone(raw.phone)) errors.push("telefon tiada");
+    const canonicalProject = projects.get(String(raw.project || "").toLowerCase());
+    if (!canonicalProject) errors.push("projek tidak aktif/tidak wujud");
+    let createdAt = "";
+    if (raw.created_at) {
+      const parsed = new Date(raw.created_at);
+      if (Number.isNaN(parsed.getTime())) errors.push("tarikh tidak sah");
+      else createdAt = parsed.toISOString();
+    }
+    return {
+      rowNumber: index + 2,
+      sourceLeadId: raw.source_lead_id || "",
+      name: raw.name || "",
+      phone: normalizePhone(raw.phone),
+      email: raw.email || "",
+      project: canonicalProject || raw.project || "",
+      source: normalizeLeadSource(raw.source || "Manual Lead"),
+      city: raw.city || "",
+      notes: raw.notes || "",
+      createdAt,
+      errors,
+    };
+  });
+}
+
+function renderLeadImportPreview() {
+  const invalid = pendingLeadImportRows.filter((row) => row.errors.length).length;
+  elements.leadImportCount.textContent = `${pendingLeadImportRows.length} baris`;
+  elements.leadImportSummary.hidden = pendingLeadImportRows.length === 0;
+  elements.leadImportSummary.classList.toggle("has-errors", invalid > 0);
+  elements.leadImportSummary.textContent = pendingLeadImportRows.length
+    ? invalid ? `${invalid} baris perlu dibaiki sebelum upload.` : `${pendingLeadImportRows.length} lead sedia untuk diupload.`
+    : "";
+  elements.uploadLeadsButton.disabled = !pendingLeadImportRows.length || invalid > 0;
+  elements.clearLeadImport.disabled = !pendingLeadImportRows.length;
+  elements.leadImportPreview.innerHTML = pendingLeadImportRows.length
+    ? pendingLeadImportRows.slice(0, 100).map((row) => `
+      <tr class="${row.errors.length ? "import-row-error" : ""}">
+        <td><strong>${escapeHtml(row.name || `Baris ${row.rowNumber}`)}</strong>${row.errors.length ? `<small>${escapeHtml(row.errors.join(" · "))}</small>` : ""}</td>
+        <td>${escapeHtml(row.phone)}</td>
+        <td>${escapeHtml(row.project)}</td>
+        <td>${escapeHtml(row.source)}</td>
+        <td>${row.errors.length ? "Perlu dibaiki" : "New"}</td>
+      </tr>`).join("")
+    : '<tr><td colspan="5" class="table-empty">Preview akan muncul selepas fail dipilih.</td></tr>';
+}
+
+async function handleLeadImportFile(event) {
+  const file = event.target.files?.[0];
+  resetLeadImport(false);
+  if (!file) return;
+  elements.leadImportStatus.textContent = `Membaca ${file.name}...`;
+  try {
+    pendingLeadImportRows = normalizeLeadImportRows(await readLeadImportRows(file));
+    elements.leadImportStatus.textContent = `${file.name} berjaya dibaca.`;
+  } catch (error) {
+    elements.leadImportStatus.textContent = error.message || "Fail tidak dapat dibaca.";
+    elements.leadImportStatus.classList.add("error");
+  }
+  renderLeadImportPreview();
+}
+
+function resetLeadImport(clearFile = true) {
+  pendingLeadImportRows = [];
+  if (clearFile && elements.leadImportFile) elements.leadImportFile.value = "";
+  elements.leadImportStatus.classList.remove("error");
+  elements.leadImportStatus.textContent = "Belum ada fail dipilih.";
+  renderLeadImportPreview();
+}
+
+async function importedLeadId(row) {
+  if (row.sourceLeadId) return String(row.sourceLeadId);
+  const canonical = [row.name, row.phone, row.email, row.project, row.source, row.city, row.notes]
+    .map((value) => String(value || "").trim().toLowerCase()).join("|");
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical));
+  const hex = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `upload-${hex.slice(0, 32)}`;
+}
+
+async function uploadImportedLeads() {
+  if (!isAdmin() || !remoteDatabaseMode || !remoteDatabaseClient || !pendingLeadImportRows.length) return;
+  elements.uploadLeadsButton.disabled = true;
+  elements.clearLeadImport.disabled = true;
+  elements.uploadLeadsButton.classList.add("is-loading");
+  let inserted = 0;
+  let duplicates = 0;
+  const failures = [];
+  for (let index = 0; index < pendingLeadImportRows.length; index += 1) {
+    const row = pendingLeadImportRows[index];
+    elements.leadImportStatus.textContent = `Mengupload ${index + 1} daripada ${pendingLeadImportRows.length}...`;
+    const leadInput = {
+      id: await importedLeadId(row),
+      name: row.name,
+      phone: row.phone,
+      email: row.email,
+      project: row.project,
+      source: row.source,
+      city: row.city,
+      notes: row.notes,
+      created_at: row.createdAt || new Date().toISOString(),
+      status: "new",
+    };
+    const { data, error } = await remoteDatabaseClient.rpc("admin_ingest_manual_lead", { p_lead: leadInput });
+    if (error || !data?.ok) failures.push({ row, message: error?.message || data?.error || "Upload gagal" });
+    else if (data.result === "duplicate") duplicates += 1;
+    else inserted += 1;
+  }
+  elements.uploadLeadsButton.classList.remove("is-loading");
+  if (failures.length) {
+    pendingLeadImportRows = failures.map(({ row, message }) => ({ ...row, errors: [message] }));
+    elements.leadImportStatus.textContent = `${inserted} berjaya, ${duplicates} duplicate, ${failures.length} gagal.`;
+    elements.leadImportStatus.classList.add("error");
+    renderLeadImportPreview();
+  } else {
+    await loadRemoteState(state.currentUserId);
+    resetLeadImport();
+    elements.leadImportStatus.textContent = `${inserted} lead baharu berjaya diupload${duplicates ? `, ${duplicates} duplicate diabaikan` : ""}.`;
+    showToast("Import selesai", `${inserted} lead baharu telah masuk ke Supabase.`, "success");
+  }
+}
+
+function downloadFile(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function leadSampleRows() {
+  return [
+    LEAD_IMPORT_HEADERS,
+    ["sample-001", "Nama Lead", "60123456789", "lead@example.com", state.projects.find((project) => project.active)?.name || "Nama Projek", "Manual Lead", "Kuala Lumpur", "", new Date().toISOString()],
+  ];
+}
+
+function csvCell(value) {
+  const text = String(value ?? "");
+  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function downloadLeadSampleCsv() {
+  const csv = leadSampleRows().map((row) => row.map(csvCell).join(",")).join("\r\n");
+  downloadFile(new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" }), "leadlaju-sample-leads.csv");
+}
+
+async function downloadLeadSampleXlsx() {
+  if (!window.ExcelJS) {
+    showToast("Excel belum tersedia", "Refresh halaman dan cuba semula.", "error");
+    return;
+  }
+  const workbook = new window.ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet("New Leads");
+  worksheet.addRows(leadSampleRows());
+  worksheet.getRow(1).font = { bold: true };
+  worksheet.columns.forEach((column) => { column.width = 20; });
+  const buffer = await workbook.xlsx.writeBuffer();
+  downloadFile(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), "leadlaju-sample-leads.xlsx");
 }
 
 async function pushManualLeadToSheet(leadInput) {
@@ -5009,10 +5274,7 @@ function renderUser() {
   document.querySelectorAll(".admin-only").forEach((item) => {
     item.style.display = isAdmin() ? "flex" : "none";
   });
-  document.querySelectorAll(".admin-only-sync-card").forEach((item) => {
-    item.hidden = !isAdmin();
-  });
-  if (!isAdmin() && ["agents", "projects", "lead-monitor", "integration"].includes(activeView)) {
+  if (!isAdmin() && ["agents", "projects", "lead-monitor", "import-leads"].includes(activeView)) {
     switchView("dashboard");
   }
 }
@@ -5143,28 +5405,6 @@ function renderLeadMonitor() {
   </div>`;
 }
 
-function renderIntegration() {
-  state.integration = normalizeIntegration(state.integration);
-  const integration = state.integration;
-  elements.sheetEndpoint.value = integration.endpoint || DEFAULT_GOOGLE_SHEET_ENDPOINT;
-  elements.pollInterval.value = String(integration.interval);
-  elements.sidebarSyncText.textContent = integration.connected ? "Disambungkan" : "Belum disambungkan";
-  elements.sidebarSyncStatus.textContent = integration.connected
-    ? `Sync ${integration.lastSyncAt ? relativeTime(integration.lastSyncAt) : "aktif"}`
-    : "Sedia menerima lead";
-  elements.liveSyncLabel.textContent = remoteDatabaseMode
-    ? "Supabase realtime"
-    : integration.connected ? "Google Sheet live" : "Google Sheet belum sync";
-  elements.connectionResult.classList.remove("error");
-  elements.connectionResult.innerHTML = `
-    <span class="status-dot"></span>
-    <span>${
-      integration.connected
-        ? `Disambungkan${integration.lastSyncAt ? ` • sync ${relativeTime(integration.lastSyncAt)}` : ""}`
-        : "Belum disambungkan. Masukkan Google Apps Script Web App URL untuk aktifkan sync."
-    }</span>`;
-}
-
 function enforceSingleActiveLead() {
   const occupied = new Set();
   const overflow = [];
@@ -5195,7 +5435,6 @@ function renderAll() {
   renderAgents();
   renderProjects();
   renderLeadMonitor();
-  renderIntegration();
   updateLifecycleMutationGate();
 }
 
@@ -5205,11 +5444,11 @@ const viewTitles = {
   agents: "Pengurusan Ejen",
   projects: "Projek",
   "lead-monitor": "Monitor Pergerakan Lead",
-  integration: "Google Sheets Input",
+  "import-leads": "Import Lead",
 };
 
 function switchView(viewName) {
-  if (["agents", "projects", "lead-monitor", "integration"].includes(viewName) && !isAdmin()) return;
+  if (["agents", "projects", "lead-monitor", "import-leads"].includes(viewName) && !isAdmin()) return;
   activeView = viewName;
   document.querySelectorAll(".view").forEach((view) => view.classList.remove("active"));
   document.querySelector(`#${viewName}-view`)?.classList.add("active");
@@ -5981,7 +6220,7 @@ async function syncGoogleSheet(options = {}) {
   const syncStartedAt = Date.now();
   const endpoint = getSheetEndpoint();
   if (!endpoint) {
-    showToast("URL diperlukan", "Masukkan Google Apps Script Web App URL.", "error");
+    showToast("Sambungan diperlukan", "Supabase belum tersedia.", "error");
     return false;
   }
   if (syncInProgress) return false;
@@ -6056,7 +6295,7 @@ async function syncGoogleSheet(options = {}) {
     removedLeads.forEach((lead) => authoritativeLeadGenerations.delete(authoritativeLeadKey(lead)));
     const activatedQueuedLeads = [];
     // A scheduled read must never write agent totals back to the server. Runtime
-    // counts and queue ownership are authoritative in Google Apps Script.
+    // Counts and queue ownership remain authoritative on the canonical server.
     const handledSync = { updated: 0, pushed: 0 };
 
     cleanupLocallyExpiredAssignments();
@@ -6196,19 +6435,6 @@ async function runIntegrationSync(button, loadingLabel, successTitle) {
     setIntegrationButtonLoading(button, false, loadingLabel);
     setGlobalLoading(false);
   }
-}
-
-async function saveIntegration(event) {
-  event.preventDefault();
-  state.integration.endpoint = elements.sheetEndpoint.value.trim() || DEFAULT_GOOGLE_SHEET_ENDPOINT;
-  state.integration.interval = DEFAULT_SYNC_INTERVAL_SECONDS;
-  state.integration.connected = true;
-  saveState();
-  await runIntegrationSync(elements.saveIntegrationButton, "Menyimpan & menyambung...", "Sambungan disimpan");
-}
-
-async function syncNow() {
-  await runIntegrationSync(elements.syncNowButton, "Sedang sync...", "Sync selesai");
 }
 
 document.querySelectorAll("[data-view]").forEach((button) => {
@@ -6355,8 +6581,11 @@ elements.agentForm.addEventListener("submit", addAgent);
 elements.projectForm?.addEventListener("submit", addProject);
 elements.agentPasswordForm.addEventListener("submit", updateAgentPassword);
 elements.contactForm.addEventListener("submit", updateContact);
-elements.integrationForm.addEventListener("submit", saveIntegration);
-elements.syncNowButton.addEventListener("click", syncNow);
+elements.leadImportFile?.addEventListener("change", handleLeadImportFile);
+elements.uploadLeadsButton?.addEventListener("click", uploadImportedLeads);
+elements.clearLeadImport?.addEventListener("click", resetLeadImport);
+elements.downloadSampleCsv?.addEventListener("click", downloadLeadSampleCsv);
+elements.downloadSampleXlsx?.addEventListener("click", downloadLeadSampleXlsx);
 elements.closePotentialReminder?.addEventListener("click", () => closeModal(elements.potentialReminderModal));
 elements.closeLeadAvailability?.addEventListener("click", () => closeModal(elements.leadAvailabilityModal));
 elements.refreshButton?.addEventListener("click", () => {

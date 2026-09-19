@@ -25,8 +25,9 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260915-supabase-realtime-v75" />
-    <script src="app.js?v=20260915-supabase-realtime-v75" defer></script>
+    <link rel="stylesheet" href="styles.css?v=20260919-import-leads-v76" />
+    <script src="vendor/exceljs.min.js?v=4.4.0" defer></script>
+    <script src="app.js?v=20260919-import-leads-v76" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -263,34 +264,15 @@
             Monitor Lead
             <span class="nav-count nav-count-alert" id="nav-monitor-count" hidden>0</span>
           </button>
-          <button class="nav-item admin-only" data-view="integration" type="button">
+          <button class="nav-item admin-only" data-view="import-leads" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M12 3v12" />
               <path d="m8 11 4 4 4-4" />
               <path d="M5 21h14a2 2 0 0 0 2-2v-3H3v3a2 2 0 0 0 2 2Z" />
             </svg>
-            Google Sheets Input
+            Import Lead
           </button>
         </nav>
-
-        <div class="sync-card admin-only-sync-card" hidden>
-          <div class="sync-card-top">
-            <span class="sheet-icon">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M6 2h8l4 4v16H6V2Z" />
-                <path d="M14 2v5h5M9 11h6M9 15h6M9 19h6" />
-              </svg>
-            </span>
-            <span>
-              <strong>Google Sheets Input</strong>
-              <small id="sidebar-sync-text">Belum disambungkan</small>
-            </span>
-          </div>
-          <div class="sync-status">
-            <span class="status-dot"></span>
-            <span id="sidebar-sync-status">Sedia menerima lead</span>
-          </div>
-        </div>
 
         <div class="sidebar-user">
           <span class="avatar" id="sidebar-avatar">NA</span>
@@ -643,77 +625,64 @@
           </div>
         </section>
 
-        <section class="view admin-only-view" id="integration-view">
+        <section class="view admin-only-view" id="import-leads-view">
           <div class="content-heading">
             <div>
-              <span class="section-kicker">Integrasi</span>
-              <h2>Google Sheets Input</h2>
-              <p>Sambungkan sheet yang menerima lead daripada Meta atau TikTok.</p>
+              <span class="section-kicker">Input pukal</span>
+              <h2>Import Lead</h2>
+              <p>Muat naik lead baharu terus ke Supabase menggunakan fail CSV atau Excel.</p>
             </div>
           </div>
 
-          <div class="integration-grid">
-            <section class="panel integration-form-card">
-              <div class="integration-brand">
-                <span class="large-sheet-icon">
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M6 2h8l4 4v16H6V2Z" />
-                    <path d="M14 2v5h5M9 11h6M9 15h6M9 19h6" />
-                  </svg>
-                </span>
+          <div class="lead-import-layout">
+            <section class="panel lead-import-panel">
+              <div class="lead-import-actions">
                 <div>
-                  <h3>Sambungan Sheet</h3>
-                  <p>App menyemak lead baru melalui Google Apps Script.</p>
+                  <span class="section-kicker">1. Sediakan fail</span>
+                  <h3>Muat turun template</h3>
+                  <p>Isi satu lead pada setiap baris tanpa mengubah nama kolum.</p>
+                </div>
+                <div class="form-actions">
+                  <button class="secondary-button" id="download-sample-csv" type="button">Download CSV</button>
+                  <button class="secondary-button" id="download-sample-xlsx" type="button">Download Excel</button>
                 </div>
               </div>
-              <form id="integration-form">
-                <label for="sheet-endpoint">Web App URL</label>
-                <input
-                  id="sheet-endpoint"
-                  type="url"
-                  placeholder="https://script.google.com/macros/s/.../exec"
-                />
-                <label for="poll-interval">Semak setiap</label>
-                <select id="poll-interval">
-                  <option value="1">1 saat</option>
-                </select>
-                <div class="form-actions">
-                  <button class="primary-button" id="save-integration-button" type="submit">Simpan & sambung</button>
-                  <button class="secondary-button" id="sync-now-button" type="button">Sync sekarang</button>
-                </div>
-              </form>
-              <div class="connection-result" id="connection-result">
-                <span class="status-dot"></span>
-                <span>Belum disambungkan. Masukkan Google Apps Script Web App URL untuk aktifkan sync.</span>
+
+              <label class="lead-file-drop" for="lead-import-file">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 16V4m0 0L7 9m5-5 5 5" />
+                  <path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" />
+                </svg>
+                <strong>Pilih fail CSV atau Excel</strong>
+                <small>Maksimum 1,000 baris bagi setiap import.</small>
+                <input id="lead-import-file" type="file" accept=".csv,.xlsx" />
+              </label>
+
+              <div class="lead-import-status" id="lead-import-status" aria-live="polite">Belum ada fail dipilih.</div>
+              <div class="lead-import-summary" id="lead-import-summary" hidden></div>
+              <div class="form-actions lead-import-submit-actions">
+                <button class="primary-button" id="upload-leads-button" type="button" disabled>Upload lead ke Supabase</button>
+                <button class="secondary-button" id="clear-lead-import" type="button" disabled>Clear</button>
               </div>
             </section>
 
-            <section class="panel setup-guide">
-              <span class="section-kicker">Format diperlukan</span>
-              <h3>Kolum Google Sheet</h3>
-              <p>
-                Google Sheet digunakan untuk kemasukan lead sahaja. Selepas ingestion, semua operasi menggunakan Supabase
-                ke dashboard. Susunan kolum tidak penting.
-              </p>
-              <div class="column-list">
-                <span><b>name</b><small>Nama lead</small></span>
-                <span><b>phone</b><small>Nombor telefon</small></span>
-                <span><b>email</b><small>Emel lead</small></span>
-                <span><b>project</b><small>Nama projek</small></span>
-                <span><b>source</b><small>Manual Lead / Tiktok Ads / Meta Ads</small></span>
-                <span><b>status</b><small>New / Contacted / Passed / All Offer Presented / Need Follow Up / Potential / Rejected / Cancelled / Client</small></span>
-                <span><b>created_at</b><small>Tarikh & masa</small></span>
-                <span><b>id</b><small>ID unik lead</small></span>
+            <section class="panel lead-import-preview-panel">
+              <div class="panel-heading">
+                <div>
+                  <span class="section-kicker">2. Semak data</span>
+                  <h3>Preview Lead</h3>
+                </div>
+                <span class="queue-label" id="lead-import-count">0 baris</span>
               </div>
-              <div class="guide-note">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <circle cx="12" cy="12" r="9" />
-                  <path d="M12 10v6M12 7h.01" />
-                </svg>
-                <p>
-                  Fail <strong>google-apps-script/Code.gs</strong> akan sediakan tab <strong>Agents</strong>
-                  dengan kolum ID, Nama, No Phone, Emel, Role, Status, Leads Handled, Tarikh Daftar dan Password.
-                </p>
+              <div class="table-wrap lead-import-table-wrap">
+                <table>
+                  <thead>
+                    <tr><th>Nama</th><th>Telefon</th><th>Projek</th><th>Sumber</th><th>Status</th></tr>
+                  </thead>
+                  <tbody id="lead-import-preview">
+                    <tr><td colspan="5" class="table-empty">Preview akan muncul selepas fail dipilih.</td></tr>
+                  </tbody>
+                </table>
               </div>
             </section>
           </div>

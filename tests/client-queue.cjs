@@ -227,19 +227,13 @@ test('lead status and agent filter options show live counts', () => {
 test('agent signup requires and syncs active project choices', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const html = fs.readFileSync('index.html', 'utf8');
-  const server = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
   assert.match(html, /id="signup-project-checkboxes"/);
   assert.match(source, /input\[name="signup-project"\]:checked/);
   assert.match(source, /setSignupError\("Pilih sekurang-kurangnya satu projek\."\)/);
   assert.match(source, /signupProjectSyncTimer = window\.setInterval\(syncSignupProjects/);
   assert.match(source, /eligible_project_ids: eligibleProjectIds/);
-  assert.match(source, /await submitAgentSignupToSheet\(signupAgent\)/);
-  assert.match(source, /fetch\("\/api\/agent-signup"/);
-  assert.match(fs.readFileSync('api/agent-signup.js', 'utf8'), /\["signup_agent", "approve_agent"\]\.includes\(payload\.action\)/);
-  assert.match(server, /agent\.role !== "admin" && !agent\.eligibleProjectIds\.length/);
-  assert.match(server, /Pilihan projek tidak sah atau projek sudah dinyahaktifkan/);
-  assert.match(server, /function sendNewAgentSignupPush_\(spreadsheet, agent\)/);
-  assert.match(server, /adminOnly: true/);
+  assert.match(source, /action: "signup_request"/);
+  assert.match(source, /remoteDatabaseClient\.functions\.invoke\("admin-manage-agent"/);
 });
 
 test('agent signup stays loading until a complete persisted agent is confirmed', () => {
@@ -281,19 +275,11 @@ test('signup response does not wait for the admin push notification', () => {
   assert.match(server, /agent_signup_notifications: agentSignupNotifications/);
 });
 
-test('agent signup proxy and Apps Script reject or roll back partial agent rows', () => {
+test('legacy agent signup proxy is disabled after Supabase cutover', () => {
   const proxy = fs.readFileSync('api/agent-signup.js', 'utf8');
-  const server = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
-  assert.match(proxy, /agent\.id &&[\s\S]*agent\.name &&[\s\S]*agent\.phone &&[\s\S]*agent\.email &&[\s\S]*agent\.password/);
-  assert.match(proxy, /Array\.isArray\(agent\.eligible_project_ids\)/);
-  assert.match(server, /if \(!agent\.id \|\| !agent\.name \|\| !agent\.phone \|\| !agent\.email \|\| !agent\.password\)/);
-  assert.match(server, /SpreadsheetApp\.flush\(\)/);
-  assert.match(server, /const persistedAgent = readAgents_\(sheet, headers\)\.find/);
-  assert.match(server, /if \(!complete\)[\s\S]*clearContent\(\)/);
-  assert.match(server, /function agentRowHasIdentity_\(headers, row\)/);
-  assert.match(server, /if \(!agentRowHasIdentity_\(headers, row\)\) return \[row\[handledIndex\]\]/);
-  assert.match(server, /if \(!agentRowHasIdentity_\(headers, value\)\) return/);
-  assert.match(server, /clearIdentitylessAgentDerivedValues_\(agentsSheet, agentHeaders\)/);
+  assert.match(proxy, /status\(410\)/);
+  assert.match(proxy, /Legacy endpoint disabled\. Use Supabase\./);
+  assert.doesNotMatch(proxy, /script\.google\.com|GOOGLE_SHEET_ENDPOINT/);
 });
 
 test('agent approval waits for authoritative confirmation and protects the pending card from stale sync', () => {
@@ -344,7 +330,6 @@ test('successful agent sync removes an absent rejected agent on every device imm
 test('new agent status is pending unless the server explicitly confirms active', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const server = fs.readFileSync('google-apps-script/Code.gs', 'utf8');
-  const proxy = fs.readFileSync('api/agent-signup.js', 'utf8');
   const start = source.indexOf('function normalizeAgentActive(');
   const end = source.indexOf('\nfunction normalizeAgentRole', start);
   const context = vm.createContext({});
@@ -354,14 +339,12 @@ test('new agent status is pending unless the server explicitly confirms active',
   assert.equal(context.normalizeAgentActive('pending'), false);
   assert.equal(context.normalizeAgentActive('inactive'), false);
   assert.equal(context.normalizeAgentActive('active'), true);
-  assert.match(proxy, /active: payload\.action === "approve_agent" \? "active" : "inactive"/);
   assert.match(server, /payload\.action === "signup_agent"[\s\S]*active: "inactive"/);
   assert.match(server, /payload\.action === "approve_agent"[\s\S]*active: "active"/);
 });
 
 test('reject and delete wait for authoritative removal before hiding the agent card', () => {
   const source = fs.readFileSync('app.js', 'utf8');
-  const proxy = fs.readFileSync('api/agent-signup.js', 'utf8');
   const start = source.indexOf('async function deleteAgentWithLoading(');
   const end = source.indexOf('\nasync function toggleAgent', start);
   const body = source.slice(start, end);
@@ -377,7 +360,6 @@ test('reject and delete wait for authoritative removal before hiding the agent c
   assert.match(body, /authoritativelyDeletedAgentIds\.add\(agent\.id\)/);
   assert.doesNotMatch(body, /syncGoogleSheetFresh/);
   assert.match(body, /finally[\s\S]*pendingAgentDeletions\.delete\(agent\.id\)[\s\S]*setGlobalLoading\(false\)/);
-  assert.match(proxy, /const deletingAgent = payload\.action === "delete_agent"/);
 });
 
 test('agent deletion is idempotent and avoids slow structural Sheet row deletion', () => {
@@ -440,21 +422,14 @@ test('edit lead modal receives the server-confirmed status revision', () => {
   assert.match(statusWriter, /assignment_revision: Number\(lead\.assignmentRevision\) \|\| 0/);
 });
 
-test('lead status updates use the same-origin confirmation proxy', () => {
+test('legacy lead status proxy is disabled after Supabase cutover', () => {
   const proxy = fs.readFileSync('api/lead-status.js', 'utf8');
-  assert.match(proxy, /payload\.action === "update_lead_status"/);
-  assert.match(proxy, /payload\.action === "set_agent_lead_availability"/);
-  assert.match(proxy, /payload\.action === "expire_lead"/);
-  assert.match(proxy, /"create_appointment"/);
-  assert.match(proxy, /"update_appointment_status"/);
-  assert.match(proxy, /"update_appointment"/);
-  assert.match(proxy, /"reschedule_appointment"/);
-  assert.match(proxy, /"delete_appointment"/);
-  assert.match(proxy, /await fetch\(GOOGLE_SHEET_ENDPOINT/);
-  assert.match(proxy, /response\.status\(result\?\.ok \? 200 : 409\)/);
+  assert.match(proxy, /status\(410\)/);
+  assert.match(proxy, /Legacy endpoint disabled\. Use Supabase\./);
+  assert.doesNotMatch(proxy, /script\.google\.com|GOOGLE_SHEET_ENDPOINT/);
 });
 
-test('expiry requests reach the Google Apps Script proxy with their canonical assignment revision', async () => {
+test('legacy expiry proxy performs no upstream request', async () => {
   const handler = require('../api/lead-status.js');
   const originalFetch = global.fetch;
   const calls = [];
@@ -478,13 +453,9 @@ test('expiry requests reach the Google Apps Script proxy with their canonical as
   } finally {
     global.fetch = originalFetch;
   }
-  assert.equal(response.statusCode, 200);
-  assert.deepEqual(response.payload, { ok: true, expired: 1 });
-  assert.equal(calls.length, 1);
-  assert.deepEqual(JSON.parse(calls[0].options.body), {
-    action: 'expire_lead',
-    lead: { id: 'lead-123', assignment_revision: 7 },
-  });
+  assert.equal(response.statusCode, 410);
+  assert.deepEqual(response.payload, { ok: false, error: 'Legacy endpoint disabled. Use Supabase.' });
+  assert.equal(calls.length, 0);
 });
 
 test('agents must save a note before selecting passed, rejected, or cancelled', () => {
@@ -748,20 +719,22 @@ test('dashboard polling uses a one-second interval while unrelated timers remain
   assert.match(css, /\.netflix-loader/);
 });
 
-test('Sheet controls are fixed at one second and always show manual sync feedback', () => {
+test('admin imports new leads from CSV or Excel directly into Supabase', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const html = fs.readFileSync('index.html', 'utf8');
   const css = fs.readFileSync('styles.css', 'utf8');
-  assert.match(html, /<option value="1">1 saat<\/option>/);
-  assert.doesNotMatch(html, /<option value="2">2 saat<\/option>/);
-  assert.doesNotMatch(html, /<option value="5">5 saat<\/option>/);
-  assert.match(html, /id="save-integration-button"/);
-  assert.match(source, /function waitForCurrentSync\(\)/);
-  assert.match(source, /await waitForCurrentSync\(\)/);
-  assert.match(source, /runIntegrationSync\(elements\.saveIntegrationButton/);
-  assert.match(source, /elements\.syncNowButton\.addEventListener\("click", syncNow\)/);
-  assert.match(source, /Disambungkan\. Sync baru sahaja\./);
-  assert.match(css, /\.form-actions button\.is-loading::before/);
+  assert.match(html, /data-view="import-leads"/);
+  assert.match(html, /id="lead-import-file"[^>]*accept="\.csv,\.xlsx"/);
+  assert.match(html, /id="download-sample-csv"/);
+  assert.match(html, /id="download-sample-xlsx"/);
+  assert.match(source, /async function readLeadImportRows\(file\)/);
+  assert.match(source, /function normalizeLeadImportRows\(table\)/);
+  assert.match(source, /table\.length - 1 > 1000/);
+  assert.match(source, /remoteDatabaseClient\.rpc\("admin_ingest_manual_lead"/);
+  assert.match(source, /data\.result === "duplicate"/);
+  assert.match(source, /crypto\.subtle\.digest\("SHA-256"/);
+  assert.match(source, /async function downloadLeadSampleXlsx\(\)/);
+  assert.match(css, /\.lead-import-layout/);
 });
 
 test('notification click fetches the assigned lead directly for an instant dashboard card', () => {
@@ -1129,14 +1102,12 @@ test('agent logout safely detaches the Supabase availability thenable', () => {
   assert.match(source, /\}\)\)\.catch\(\(\) => \{\}\);/);
 });
 
-test('agent sidebar hides the Google Sheet connection card', () => {
+test('legacy Google Sheet connection card is removed from the sidebar', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const html = fs.readFileSync('index.html', 'utf8');
-  const css = fs.readFileSync('styles.css', 'utf8');
-  assert.match(html, /class="sync-card admin-only-sync-card" hidden/);
-  assert.match(source, /document\.querySelectorAll\("\.admin-only-sync-card"\)/);
-  assert.match(source, /item\.hidden = !isAdmin\(\)/);
-  assert.match(css, /\.sync-card\[hidden\] \+ \.sidebar-user/);
+  assert.doesNotMatch(html, /Google Sheets Input|sheet-endpoint|save-integration-button|sync-now-button/);
+  assert.match(html, /Import Lead/);
+  assert.doesNotMatch(source, /https:\/\/script\.google\.com/);
 });
 
 test('mobile sidebar closes on content tap or left swipe and opens on right swipe', () => {
@@ -1777,5 +1748,5 @@ test('admin lead monitor exposes live assignment diagnostics and agent filters',
   assert.match(source, /"missing-runtime"/);
   assert.match(source, /"queued-assigned"/);
   assert.match(source, /elements\.navMonitorCount\.textContent = issues\.length/);
-  assert.match(source, /renderLeadMonitor\(\);\s*renderIntegration\(\)/);
+  assert.match(source, /renderLeadMonitor\(\);\s*updateLifecycleMutationGate\(\)/);
 });

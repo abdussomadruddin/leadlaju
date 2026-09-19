@@ -14,10 +14,8 @@ const operations = fs.readFileSync(path.join(migrations, operationsMigrationName
 const realtimeMigrationName = fs.readdirSync(migrations).find((name) => name.endsWith('_realtime_operational_channels.sql'));
 const realtime = fs.readFileSync(path.join(migrations, realtimeMigrationName), 'utf8');
 const ingest = fs.readFileSync(path.join(root, 'supabase', 'functions', 'ingest-lead', 'index.ts'), 'utf8');
-const migrate = fs.readFileSync(path.join(root, 'supabase', 'functions', 'migrate-sheet-snapshot', 'index.ts'), 'utf8');
 const manageAgent = fs.readFileSync(path.join(root, 'supabase', 'functions', 'admin-manage-agent', 'index.ts'), 'utf8');
 const notificationWorker = fs.readFileSync(path.join(root, 'supabase', 'functions', 'process-notification-outbox', 'index.ts'), 'utf8');
-const sheetSweep = fs.readFileSync(path.join(root, 'supabase', 'functions', 'sweep-sheet-input', 'index.ts'), 'utf8');
 const notificationClaims = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_notification_worker_claims.sql'))), 'utf8');
 const expirySchedule = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_schedule_assignment_expiry.sql'))), 'utf8');
 const pendingReconciliation = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_reconcile_stale_pending_assignments.sql'))), 'utf8');
@@ -26,10 +24,10 @@ const backgroundNotifications = fs.readFileSync(path.join(migrations, fs.readdir
 const realtimeReloadSignals = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_realtime_state_reload_signals.sql'))), 'utf8');
 const notificationReadiness = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_canonical_notification_readiness.sql'))), 'utf8');
 const realtimeAssignmentSnapshots = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_realtime_assignment_snapshot_and_sheet_reporting.sql'))), 'utf8');
+const removeGoogleIntegrations = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_remove_google_sheet_integrations.sql'))), 'utf8');
 const retryOnlyDispatch = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_unblock_retry_only_dispatch.sql'))), 'utf8');
 const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
-const reportExporter = fs.readFileSync(path.join(root, 'supabase', 'functions', 'export-sheet-report', 'index.ts'), 'utf8');
 const appsScript = fs.readFileSync(path.join(root, 'google-apps-script', 'Code.gs'), 'utf8');
 
 test('Supabase foundation keeps one active lead and assignment per agent', () => {
@@ -152,17 +150,8 @@ test('agent notification readiness is derived from active server subscriptions',
   assert.doesNotMatch(notificationReadiness, /notification_ready = p_notification_ready/);
 });
 
-test('Sheet migration preserves passwords only through Supabase Auth and never profiles', () => {
-  assert.match(migrate, /auth\.admin\.createUser/);
-  assert.match(migrate, /password: text\(item\.password\)/);
-  assert.doesNotMatch(migrate, /from\("profiles"\)[\s\S]{0,500}password/);
-  assert.match(migrate, /source_agent_id/);
-  assert.equal((migrate.match(/auth\.admin\.listUsers/g) || []).length, 1);
-  assert.match(migrate, /assignmentRows\.slice\(offset, offset \+ 200\)/);
-  assert.match(migrate, /Math\.max\(Number\(item\.assignment_revision\) \|\| 0, history\.length\)/);
-  assert.match(migrate, /if \(!isLatest\) return "missed"/);
-  assert.match(migrate, /leadStatus === "new" && runtimeState === "active"/);
-  assert.match(migrate, /malaysiaLocal[\s\S]*\+08:00/);
+test('legacy Sheet snapshot migrator is removed after cutover', () => {
+  assert.equal(fs.existsSync(path.join(root, 'supabase', 'functions', 'migrate-sheet-snapshot', 'index.ts')), false);
 });
 
 test('Supabase agent signup remains pending until an authenticated admin approves it', () => {
@@ -322,12 +311,13 @@ test('production runtime config enables Supabase without requiring a query flag'
   assert.match(app, /config\.backend !== "supabase"/);
 });
 
-test('all production devices invalidate the old app shell and cannot fall back to Sheet operations', () => {
+test('all production devices invalidate the old app shell for the direct Supabase importer', () => {
   const worker = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
-  assert.match(worker, /leadlaju-pwa-v20260915-supabase-realtime-v75/);
+  assert.match(worker, /leadlaju-pwa-v20260919-import-leads-v76/);
   assert.doesNotMatch(worker, /client\.navigate\(/);
-  assert.match(html, /app\.js\?v=20260915-supabase-realtime-v75/);
-  assert.match(app, /register\("\/sw\.js\?v=20260915-supabase-realtime-v75"\)/);
+  assert.match(html, /app\.js\?v=20260919-import-leads-v76/);
+  assert.match(html, /vendor\/exceljs\.min\.js\?v=4\.4\.0/);
+  assert.match(app, /register\("\/sw\.js\?v=20260919-import-leads-v76"\)/);
   assert.doesNotMatch(app, /get\("backend"\) === "sheet"/);
   assert.match(app, /remoteDatabaseRequired = window\.location\.protocol !== "file:"/);
   assert.match(app, /if \(remoteDatabaseRequired\)[\s\S]*Operasi Google Sheet lama tidak akan digunakan/);
@@ -335,35 +325,16 @@ test('all production devices invalidate the old app shell and cannot fall back t
   assert.match(app, /Supabase client initialization timed out/);
 });
 
-test('production UI identifies Supabase as operational realtime and Sheet as input only', () => {
-  assert.match(app, /remoteDatabaseMode[\s\S]*?"Supabase realtime"/);
+test('production UI exposes Supabase realtime and no Google Sheet integration surface', () => {
   assert.match(html, /Supabase realtime/);
-  assert.match(html, /Google Sheets Input/);
-  assert.match(html, /Google Sheet digunakan untuk kemasukan lead sahaja/);
-  assert.doesNotMatch(html, /Google Sheet ialah database utama/);
+  assert.match(html, /Import Lead/);
+  assert.doesNotMatch(html, /Google Sheets Input|Google Apps Script|script\.google\.com/);
 });
 
-test('Sheet recovery sweep ingests missing leads only and never imports operational state', () => {
-  assert.match(sheetSweep, /\.in\("source_lead_id", sourceIds\.slice/);
-  assert.match(sheetSweep, /if \(!sourceId \|\| existing\.has\(sourceId\)\) continue/);
-  assert.match(sheetSweep, /admin\.rpc\("ingest_lead"/);
-  assert.doesNotMatch(sheetSweep, /assigned_agent|assignment_revision|status_revision|queue_state|lead_ready/);
-  assert.match(sheetSweep, /malaysiaTimestamp/);
-});
-
-test('Supabase exports a protected one-way reporting snapshot without writing operational state back to the Leads input tab', () => {
-  assert.match(realtimeAssignmentSnapshots, /function public\.get_sheet_reporting_snapshot\(\)/);
-  assert.match(realtimeAssignmentSnapshots, /grant execute on function public\.get_sheet_reporting_snapshot\(\) to service_role/);
-  assert.match(realtimeAssignmentSnapshots, /'leadlaju-export-sheet-report', '\* \* \* \* \*'/);
-  assert.match(realtimeAssignmentSnapshots, /leadlaju_report_export_secret/);
-  assert.match(reportExporter, /admin\.rpc\("get_sheet_reporting_snapshot"\)/);
-  assert.match(reportExporter, /action: "replace_reporting_snapshot"/);
-  assert.match(reportExporter, /reportToken/);
-  assert.match(reportExporter, /report_export_runs/);
-  assert.match(appsScript, /const REPORTING_SHEET_NAME = "LeadLaju Reporting"/);
-  assert.match(appsScript, /replaceReportingSnapshot_/);
-  assert.match(appsScript, /REPORT_EXPORT_SECRET_PROPERTY/);
-  assert.match(appsScript, /protectReportingSheet_/);
-  assert.doesNotMatch(appsScript.slice(appsScript.indexOf('function replaceReportingSnapshot_'), appsScript.indexOf('function appendReminder_')), /getSheetByName\(SHEET_NAME\)|getOrCreateSheet_\(spreadsheet, SHEET_NAME\)/);
-  assert.doesNotMatch(realtimeAssignmentSnapshots, /password|push_subscriptions|action_requests/i);
+test('Google Sheet sweep and reporting schedules are removed from Supabase', () => {
+  assert.match(removeGoogleIntegrations, /leadlaju-sweep-sheet-input/);
+  assert.match(removeGoogleIntegrations, /leadlaju-export-sheet-report/);
+  assert.match(removeGoogleIntegrations, /cron\.unschedule/);
+  assert.match(removeGoogleIntegrations, /drop function if exists public\.get_sheet_reporting_snapshot/);
+  assert.match(removeGoogleIntegrations, /drop table if exists public\.report_export_runs/);
 });
