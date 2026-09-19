@@ -29,6 +29,7 @@ const retryOnlyDispatch = fs.readFileSync(path.join(migrations, fs.readdirSync(m
 const adminLeadReadiness = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_admin_agent_lead_readiness.sql'))), 'utf8');
 const adminAllLeadReadiness = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_admin_all_agent_lead_readiness.sql'))), 'utf8');
 const pushReadyBulkQueue = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_allow_push_ready_agents_in_bulk_queue.sql'))), 'utf8');
+const phoneOnlyEligibility = fs.readFileSync(path.join(migrations, fs.readdirSync(migrations).find((name) => name.endsWith('_phone_only_lead_eligibility.sql'))), 'utf8');
 const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const runtimeConfig = fs.readFileSync(path.join(root, 'api', 'runtime-config.js'), 'utf8');
@@ -191,6 +192,19 @@ test('bulk GET LEAD accepts push-ready agents without an already-open app sessio
   assert.match(pushReadyBulkQueue, /av\.forced_offline_at is null or av\.last_seen_at > av\.forced_offline_at/);
   assert.match(pushReadyBulkQueue, /perform leadlaju_private\.dispatch_available_leads\(now\(\)\)/);
   assert.match(app, /ejen dengan notifikasi aktif dimasukkan ke giliran/);
+});
+
+test('only active phone push subscriptions can make an agent eligible for a lead', () => {
+  assert.match(phoneOnlyEligibility, /function leadlaju_private\.has_phone_push_subscription/);
+  assert.match(phoneOnlyEligibility, /like '%iphone%'/);
+  assert.match(phoneOnlyEligibility, /like '%android%'/);
+  assert.match(phoneOnlyEligibility, /like '%mobile%'/);
+  assert.match(phoneOnlyEligibility, /An active phone push subscription is required/);
+  assert.match(phoneOnlyEligibility, /Agent phone notifications are not ready/);
+  assert.match(phoneOnlyEligibility, /lead_ready = av\.lead_ready and readiness\.phone_ready/);
+  assert.match(phoneOnlyEligibility, /leadlaju_private\.has_phone_push_subscription\(av\.agent_id\)/);
+  assert.match(app, /function isPhonePushDevice\(\)/);
+  assert.match(app, /GET LEAD hanya di telefon/);
 });
 
 test('legacy Sheet snapshot migrator is removed after cutover', () => {

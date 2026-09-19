@@ -2106,6 +2106,11 @@ function isPushSupported() {
   );
 }
 
+function isPhonePushDevice() {
+  const userAgent = navigator.userAgent || "";
+  return /iPhone/i.test(userAgent) || (/Android/i.test(userAgent) && /Mobile/i.test(userAgent));
+}
+
 async function syncPushSubscription(force = false) {
   if (!isPushSupported() || Notification.permission !== "granted") return false;
   const user = getCurrentUser();
@@ -3389,6 +3394,10 @@ async function setAgentLeadAvailability(ready) {
   if (!guardLifecycleMutation()) return false;
   const user = getCurrentUser();
   if (!user?.id || user.role !== "agent") return false;
+  if (ready && !isPhonePushDevice()) {
+    showToast("GET LEAD hanya di telefon", "Aktifkan loceng LeadLaju pada iPhone atau Android untuk masuk giliran lead.", "error");
+    return false;
+  }
   if (ready && (!("Notification" in window) || Notification.permission !== "granted")) {
     enforceAgentNotificationAccess();
     showToast("Aktifkan loceng dahulu", "Benarkan notifikasi sebelum menekan GET LEAD.", "error");
