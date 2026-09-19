@@ -4453,7 +4453,7 @@ function renderActivities() {
 function renderTeam() {
   const agents = state.agents.filter((agent) => agent.role === "agent" && agent.active !== false);
   const activeAgents = agents.filter((agent) => agent.online);
-  const leadReadyAgents = agents.filter((agent) => agent.leadReady);
+  const leadReadyAgents = agents.filter((agent) => agent.leadReady && agent.online);
   const notificationBell = (agent) => {
     const enabled = Boolean(agent.notificationEnabled);
     const label = enabled ? "Notifikasi aktif" : "Notifikasi belum aktif";

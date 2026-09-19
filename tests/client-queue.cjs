@@ -726,7 +726,7 @@ test('dashboard separates active presence from the lead distribution queue', () 
   assert.match(html, /id="lead-ready-list"/);
   assert.match(html, /id="lead-ready-count"/);
   assert.match(renderTeamBody, /agents\.filter\(\(agent\) => agent\.online\)/);
-  assert.match(renderTeamBody, /agents\.filter\(\(agent\) => agent\.leadReady\)/);
+  assert.match(renderTeamBody, /agents\.filter\(\(agent\) => agent\.leadReady && agent\.online\)/);
   assert.match(renderTeamBody, /member-notification\$\{enabled \? " enabled" : ""\}/);
   assert.match(renderTeamBody, /Notifikasi aktif/);
   assert.match(renderTeamBody, /Notifikasi belum aktif/);
