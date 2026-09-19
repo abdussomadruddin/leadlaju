@@ -5160,6 +5160,13 @@ function renderAgents() {
         const projectNames = normalizeProjectIds(agent.eligibleProjectIds)
           .map((projectId) => state.projects.find((project) => project.id === projectId)?.name)
           .filter(Boolean);
+        const leadAvailabilityAction = agent.role === "agent" && agent.active && agent.approvalStatus === "approved"
+          ? agent.leadReady
+            ? `<button class="agent-lead-availability stop" type="button" data-agent-lead-availability="stop" data-agent-id="${agent.id}">STOP LEAD</button>`
+            : agent.online && agent.notificationEnabled
+              ? `<button class="agent-lead-availability get" type="button" data-agent-lead-availability="get" data-agent-id="${agent.id}">GET LEAD</button>`
+              : ""
+          : "";
         const actionButtons = isPendingAgent
           ? `
             <button class="edit-agent" type="button" data-agent-edit="${agent.id}">Edit details</button>
@@ -5168,7 +5175,7 @@ function renderAgents() {
           : `
             <button class="edit-agent" type="button" data-agent-edit="${agent.id}">Edit details</button>
             <button class="edit-password" type="button" data-agent-password="${agent.id}">Edit password</button>
-            ${agent.role === "agent" && agent.online ? `<button class="force-offline" type="button" data-agent-force-offline="${agent.id}">Force offline</button>` : ""}
+            ${leadAvailabilityAction}
             ${
               agent.id !== state.currentUserId
                 ? `<button class="remove-agent" type="button" data-agent-remove="${agent.id}" aria-label="Buang ${escapeHtml(agent.name)}">×</button>`
@@ -6049,6 +6056,37 @@ async function forceAgentOffline(agentId) {
   showToast("Ejen dipaksa offline", `${agent.name} perlu login semula dan aktifkan loceng.`);
 }
 
+async function setAdminAgentLeadAvailability(agentId, ready) {
+  if (!guardLifecycleMutation() || !isAdmin() || !remoteDatabaseMode) return false;
+  const agent = getAgent(agentId);
+  if (!agent || agent.role !== "agent") return false;
+
+  const actionLabel = ready ? "masukkan ke giliran GET LEAD" : "keluarkan daripada giliran lead";
+  if (!window.confirm(`${actionLabel.charAt(0).toUpperCase()}${actionLabel.slice(1)} untuk ${agent.name}?`)) return false;
+
+  setGlobalLoading(true, ready ? "Memasukkan ejen ke giliran..." : "Menghentikan agihan lead...");
+  try {
+    const { data, error } = await remoteDatabaseClient.rpc("admin_set_agent_lead_readiness", {
+      p_agent_id: agent.id,
+      p_ready: ready,
+    });
+    if (error || !data?.ok) throw error || new Error(data?.error || "Status giliran tidak dapat dikemas kini.");
+
+    await loadRemoteState(state.currentUserId);
+    showToast(
+      ready ? "GET LEAD diaktifkan" : "STOP LEAD diaktifkan",
+      ready ? `${agent.name} kini berada dalam giliran agihan.` : `${agent.name} tidak lagi menerima lead baharu.`,
+      "success",
+    );
+    return true;
+  } catch (error) {
+    showToast("Status giliran gagal dikemas kini", error?.message || "Cuba lagi.", "error");
+    return false;
+  } finally {
+    setGlobalLoading(false);
+  }
+}
+
 function openAgentPasswordModal(agentId) {
   const agent = getAgent(agentId);
   if (!agent) return;
@@ -6895,6 +6933,7 @@ elements.agentsGrid.addEventListener("click", (event) => {
   const remove = event.target.closest("[data-agent-remove]");
   const password = event.target.closest("[data-agent-password]");
   const forceOffline = event.target.closest("[data-agent-force-offline]");
+  const leadAvailability = event.target.closest("[data-agent-lead-availability]");
   const edit = event.target.closest("[data-agent-edit]");
   if (toggle) toggleAgent(toggle.dataset.agentToggle);
   if (approve) approveAgent(approve.dataset.agentApprove);
@@ -6902,6 +6941,12 @@ elements.agentsGrid.addEventListener("click", (event) => {
   if (remove) removeAgent(remove.dataset.agentRemove);
   if (password) openAgentPasswordModal(password.dataset.agentPassword);
   if (forceOffline) forceAgentOffline(forceOffline.dataset.agentForceOffline);
+  if (leadAvailability) {
+    setAdminAgentLeadAvailability(
+      leadAvailability.dataset.agentId,
+      leadAvailability.dataset.agentLeadAvailability === "get",
+    );
+  }
   if (edit) openAgentModal(edit.dataset.agentEdit);
 });
 
