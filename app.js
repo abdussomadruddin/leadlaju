@@ -2057,7 +2057,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-    .register("/sw.js?v=20260919-delete-controls-v80")
+    .register("/sw.js?v=20260919-admin-new-v81")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -6100,14 +6100,20 @@ async function updateLeadStatusFromLog(leadId, nextStatus, field = null) {
     saveState();
     renderAll();
     if (remoteDatabaseMode) {
-      const { data, error } = await remoteDatabaseClient.rpc("update_lead_status", {
+      const revisionParams = {
         p_action_id: crypto.randomUUID(),
         p_lead_id: lead.id,
-        p_status: normalizedStatus,
         p_expected_assignment_revision: Number(previousLead.assignmentRevision) || 0,
         p_expected_status_revision: Number(previousLead.statusRevision) || 0,
-      });
+      };
+      const { data, error } = isAdmin() && normalizedStatus === "new"
+        ? await remoteDatabaseClient.rpc("admin_reset_lead_to_new", revisionParams)
+        : await remoteDatabaseClient.rpc("update_lead_status", {
+          ...revisionParams,
+          p_status: normalizedStatus,
+        });
       if (error || !data?.ok) throw error || new Error(data?.error || "Status ditolak oleh server.");
+      lead.assignmentRevision = Number(data.assignment_revision) || lead.assignmentRevision;
       lead.statusRevision = Number(data.status_revision) || lead.statusRevision;
       queueRemoteReload();
     } else {

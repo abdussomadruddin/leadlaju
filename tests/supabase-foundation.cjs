@@ -314,11 +314,11 @@ test('production runtime config enables Supabase without requiring a query flag'
 
 test('all production devices invalidate the old app shell for the direct Supabase importer', () => {
   const worker = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
-  assert.match(worker, /leadlaju-pwa-v20260919-delete-controls-v80/);
+  assert.match(worker, /leadlaju-pwa-v20260919-admin-new-v81/);
   assert.doesNotMatch(worker, /client\.navigate\(/);
-  assert.match(html, /app\.js\?v=20260919-delete-controls-v80/);
+  assert.match(html, /app\.js\?v=20260919-admin-new-v81/);
   assert.match(html, /vendor\/exceljs\.min\.js\?v=4\.4\.0/);
-  assert.match(app, /register\("\/sw\.js\?v=20260919-delete-controls-v80"\)/);
+  assert.match(app, /register\("\/sw\.js\?v=20260919-admin-new-v81"\)/);
   assert.doesNotMatch(app, /get\("backend"\) === "sheet"/);
   assert.match(app, /remoteDatabaseRequired = window\.location\.protocol !== "file:"/);
   assert.match(app, /if \(remoteDatabaseRequired\)[\s\S]*Operasi server lama tidak akan digunakan/);
@@ -342,6 +342,18 @@ test('admin appointment deletion handles rescheduled appointment chains safely',
   assert.match(migration, /'ok', v_deleted = 1/);
   assert.match(app, /remoteDatabaseClient\.rpc\("admin_delete_appointment"/);
   assert.match(app, /Number\(data\?\.deleted\) !== 1/);
+});
+
+test('admin can canonically reset a resolved lead to New for redistribution', () => {
+  const migration = fs.readFileSync(path.join(root, 'supabase/migrations/20260919070000_admin_reset_lead_to_new.sql'), 'utf8');
+  assert.match(migration, /leadlaju_private\.is_admin\(v_user\)/);
+  assert.match(migration, /v_lead\.assignment_revision <> p_expected_assignment_revision/);
+  assert.match(migration, /v_lead\.status_revision <> p_expected_status_revision/);
+  assert.match(migration, /status = 'new',[\s\S]*queue_state = 'queued'/);
+  assert.match(migration, /assigned_agent_id = null[\s\S]*expires_at = null/);
+  assert.match(migration, /assignment_revision = assignment_revision \+ 1/);
+  assert.match(migration, /perform leadlaju_private\.dispatch_available_leads\(now\(\)\)/);
+  assert.match(app, /isAdmin\(\) && normalizedStatus === "new"[\s\S]*admin_reset_lead_to_new/);
 });
 
 test('production UI exposes Supabase realtime and no Google Sheet integration surface', () => {
