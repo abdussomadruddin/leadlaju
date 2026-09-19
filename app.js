@@ -2057,7 +2057,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-    .register("/sw.js?v=20260919-import-fields-v78")
+    .register("/sw.js?v=20260919-delete-controls-v80")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -2677,7 +2677,7 @@ async function addLead(input, options = {}) {
     try {
       await persistLead(existingLead);
     } catch (error) {
-      showToast("Lead tidak dapat dikemas kini", "Semak sambungan Google Sheet dan cuba lagi.", "error");
+      showToast("Lead tidak dapat dikemas kini", "Semak sambungan Supabase dan cuba lagi.", "error");
       console.error(error);
       return false;
     }
@@ -2730,7 +2730,7 @@ async function addLead(input, options = {}) {
   } catch (error) {
     state.leads = state.leads.filter((item) => item.id !== lead.id);
     saveState();
-    showToast("Lead tidak dapat disimpan", "Semak sambungan Google Sheet dan cuba lagi.", "error");
+    showToast("Lead tidak dapat disimpan", "Semak sambungan Supabase dan cuba lagi.", "error");
     console.error(error);
     return false;
   }
@@ -2807,18 +2807,18 @@ async function addManualLead(event) {
   } else {
     const pushedToSheet = await pushManualLeadToSheet(leadInput);
     if (!pushedToSheet) {
-      elements.manualLeadError.textContent = "Google Sheet belum dapat dikemas kini. Semak Web App URL.";
+      elements.manualLeadError.textContent = "Supabase belum dapat dikemas kini. Cuba lagi.";
       return;
     }
     const result = await addLead(leadInput, { silent: true, updateExisting: true, notify: true, queueIfBlocked: true });
     if (!result) {
-      elements.manualLeadError.textContent = "Lead sudah masuk Google Sheet, tetapi dashboard belum dapat sync. Semak ejen aktif.";
+      elements.manualLeadError.textContent = "Lead sudah disimpan, tetapi dashboard belum dapat sync. Semak ejen aktif.";
       return;
     }
   }
 
   closeModal(elements.manualLeadModal);
-  showToast("Manual lead disimpan", remoteDatabaseMode ? "Supabase dan dashboard telah diselaraskan." : "Google Sheet dan dashboard telah diselaraskan.", "success");
+  showToast("Manual lead disimpan", "Supabase dan dashboard telah diselaraskan.", "success");
   renderAll();
 }
 
@@ -3201,7 +3201,7 @@ async function postGoogleSheetAction(payload, errorLabel, options = {}) {
 }
 
 async function postGoogleSheetActionWithResponse(payload, errorLabel) {
-  if (!getSheetEndpoint()) throw new Error("Web App URL Google Sheet belum ditetapkan.");
+  if (!getSheetEndpoint()) throw new Error("Sambungan server belum ditetapkan.");
 
   try {
     const response = await fetch("/api/lead-status", {
@@ -3512,11 +3512,11 @@ async function submitAgentSignupToSheet(agent, options = {}) {
       const recoveredAgent = await confirmPersistedSignupAgent(agent);
       if (recoveredAgent) return { ok: true, recovered: true, agent: recoveredAgent };
     }
-    throw new Error(result?.error || "Permohonan tidak dapat disimpan di Google Sheet.");
+    throw new Error(result?.error || "Permohonan tidak dapat disimpan di server.");
   }
   const persistedAgent = result.agent || result.persisted_agent;
   if (!persistedAgent?.id || !persistedAgent?.name || !persistedAgent?.phone || !persistedAgent?.email) {
-    throw new Error("Google Sheet tidak mengesahkan maklumat ejen dengan lengkap.");
+    throw new Error("Server tidak mengesahkan maklumat ejen dengan lengkap.");
   }
   return { ...result, agent: persistedAgent };
 }
@@ -3559,7 +3559,7 @@ async function deleteAgentFromSheet(agent) {
   });
   const result = await response.json().catch(() => null);
   if (!response.ok || !result?.ok) {
-    throw new Error(result?.error || "Ejen tidak dapat dipadam daripada Google Sheet.");
+    throw new Error(result?.error || "Ejen tidak dapat dipadam daripada server.");
   }
   return result;
 }
@@ -4075,7 +4075,7 @@ async function remindAllAgentsForFollowUp() {
     pushed ? "Reminder dihantar" : "Reminder belum sync",
     pushed
       ? `${activeAgents.length} agent aktif akan terima reminder pada sync seterusnya.`
-      : "Semak sambungan Google Sheet dan cuba lagi.",
+      : "Semak sambungan server dan cuba lagi.",
     pushed ? "success" : "error",
   );
 }
@@ -4425,7 +4425,7 @@ async function handleCall(leadId) {
       saveState();
       renderAll();
     }
-    showToast("CALL NOW gagal", error?.message || "Semak sambungan Google Sheet dan cuba lagi.", "error");
+    showToast("CALL NOW gagal", error?.message || "Semak sambungan Supabase dan cuba lagi.", "error");
     if (remoteDatabaseMode) {
       lead.pendingContactAction = true;
       const captured = await remoteCapturePromise?.catch(() => false);
@@ -4498,7 +4498,7 @@ function renderActiveLead() {
             </svg>
           </span>
           <h3>Tiada lead menunggu tindakan</h3>
-          <p>Lead baru daripada Google Sheet akan muncul di sini secara automatik.</p>
+          <p>Lead baharu akan muncul di sini secara automatik.</p>
         </div>
       </div>`;
     return;
@@ -5109,11 +5109,15 @@ async function deleteAppointment(appointmentId) {
   setGlobalLoading(true, "Memadam appointment...");
   try {
     if (remoteDatabaseMode) {
-      const { data, error } = await remoteDatabaseClient.rpc("manage_appointment", {
-        p_action: "delete",
-        p_appointment: { id: appointmentId },
-      });
-      if (error || !data?.ok) throw error || new Error(data?.error || "Appointment gagal dipadam.");
+      const { data, error } = isAdmin()
+        ? await remoteDatabaseClient.rpc("admin_delete_appointment", { p_appointment_id: appointmentId })
+        : await remoteDatabaseClient.rpc("manage_appointment", {
+          p_action: "delete",
+          p_appointment: { id: appointmentId },
+        });
+      if (error || !data?.ok || (isAdmin() && Number(data?.deleted) !== 1)) {
+        throw error || new Error(data?.error || "Appointment gagal dipadam.");
+      }
       await loadRemoteState(state.currentUserId);
     } else {
       await postGoogleSheetActionWithResponse({
@@ -5590,8 +5594,8 @@ async function addAgent(event) {
   showToast(
     agentsPushed ? (editingAgent ? "Ejen dikemaskini" : "Ejen didaftarkan") : "Ejen masuk dashboard",
     agentsPushed
-      ? `${name} kini diselaraskan dalam dashboard dan Google Sheet.`
-      : "Google Sheet belum dapat dikemas kini. Semak Web App URL.",
+      ? `${name} kini diselaraskan dalam dashboard dan Supabase.`
+      : "Supabase belum dapat dikemas kini. Cuba lagi.",
     agentsPushed ? "success" : "error",
   );
   renderAll();
@@ -5711,7 +5715,7 @@ async function addProject(event) {
   }
   const project = { id: makeId("project"), name, active: true, createdAt: Date.now() };
   if (!await saveProject(project)) {
-    showToast("Projek tidak disimpan", "Semak sambungan Google Sheet.", "error");
+    showToast("Projek tidak disimpan", "Semak sambungan Supabase.", "error");
     return;
   }
   state.projects.push(project);
@@ -5730,7 +5734,7 @@ async function toggleProject(projectId) {
   project.active = !project.active;
   if (!await saveProject(project)) {
     project.active = previous;
-    showToast("Status projek gagal", "Semak sambungan Google Sheet.", "error");
+    showToast("Status projek gagal", "Semak sambungan Supabase.", "error");
     return;
   }
   saveState();
@@ -5768,7 +5772,7 @@ async function deleteAgentWithLoading(agent, options = {}) {
     } else {
       const result = await deleteAgentFromSheet(agent);
       if (!result?.ok) {
-        throw new Error(result?.error || "Google Sheet belum mengesahkan ejen telah dipadam.");
+        throw new Error(result?.error || "Server belum mengesahkan ejen telah dipadam.");
       }
     }
     authoritativelyDeletedAgentIds.add(agent.id);
@@ -5779,13 +5783,13 @@ async function deleteAgentWithLoading(agent, options = {}) {
       options.rejection ? "Permohonan ditolak" : "Ejen dibuang",
       remoteDatabaseMode
         ? `${agent.name} telah dipadam daripada dashboard Supabase.`
-        : `${agent.name} telah dipadam daripada dashboard dan Google Sheet.`,
+        : `${agent.name} telah dipadam daripada dashboard dan server.`,
       "success",
     );
     return true;
   } catch (error) {
     console.error(error);
-    showToast(options.rejection ? "Reject gagal" : "Ejen tidak dapat dibuang", error.message || "Semak sambungan Google Sheet.", "error");
+    showToast(options.rejection ? "Reject gagal" : "Ejen tidak dapat dibuang", error.message || "Semak sambungan Supabase.", "error");
     return false;
   } finally {
     pendingAgentDeletions.delete(agent.id);
@@ -5827,7 +5831,7 @@ async function toggleAgent(agentId) {
       ? agent.active
         ? `${agent.name} akan menerima giliran lead.`
         : `${agent.name} dikeluarkan daripada giliran.`
-      : "Google Sheet belum dapat dikemas kini. Semak Web App URL.",
+      : "Server belum dapat dikemas kini. Cuba lagi.",
     agentsPushed ? "success" : "error",
   );
   renderAll();
@@ -5842,7 +5846,7 @@ async function removeAgent(agentId) {
 
 function confirmPermanentDelete(itemType, itemName) {
   const firstConfirmed = window.confirm(
-    `Padam ${itemType} ${itemName}? Data ini akan dibuang daripada dashboard dan Google Sheet.`,
+    `Padam ${itemType} ${itemName}? Data ini akan dibuang daripada dashboard dan Supabase.`,
   );
   if (!firstConfirmed) return false;
   return window.confirm(
@@ -5864,7 +5868,7 @@ async function forceAgentOffline(agentId) {
     forced = await forceAgentOfflineInSheet(agent);
   }
   if (!forced) {
-    showToast("Force offline gagal", "Semak sambungan Google Sheet dan cuba semula.", "error");
+    showToast("Force offline gagal", "Semak sambungan Supabase dan cuba semula.", "error");
     return;
   }
   agent.online = false;
@@ -5910,7 +5914,7 @@ async function updateAgentPassword(event) {
     });
     if (error || !data?.ok) {
       elements.agentPasswordError.textContent =
-        data?.error || "Password tidak dapat dikemas kini. Semak sambungan Google Sheet.";
+        data?.error || "Password tidak dapat dikemas kini. Semak sambungan Supabase.";
       return;
     }
   } else {
@@ -5974,7 +5978,7 @@ async function updateContact(event) {
     } else {
       await persistLead(lead);
       const noteSynced = await updateLeadNotesInSheet(lead, lead.notes);
-      if (!noteSynced) throw new Error("Nota tidak dapat disimpan ke Google Sheet.");
+      if (!noteSynced) throw new Error("Nota tidak dapat disimpan ke server.");
     }
     if (normalizeSheetStatus(previousLead.status) !== nextStatus) {
       const statusSynced = await updateLeadStatusFromLog(lead.id, nextStatus, elements.contactStatus);
@@ -6031,7 +6035,7 @@ async function saveLeadNote(leadId, button = null) {
       if (error || !data?.ok) throw error || new Error(data?.error || "Nota ditolak oleh server.");
     } else {
       const noteSynced = await updateLeadNotesInSheet(lead, nextNotes);
-      if (!noteSynced) throw new Error("Nota tidak dapat disimpan ke Google Sheet.");
+      if (!noteSynced) throw new Error("Nota tidak dapat disimpan ke server.");
     }
     saveState();
     if (leadNoteDrafts.get(draftKey) === submittedDraft) leadNoteDrafts.delete(draftKey);
@@ -6039,7 +6043,7 @@ async function saveLeadNote(leadId, button = null) {
   } catch (error) {
     lead.notes = previousNotes;
     console.error(error);
-    showToast("Nota gagal disimpan", error?.message || "Semak sambungan Google Sheet dan cuba lagi.", "error");
+    showToast("Nota gagal disimpan", error?.message || "Semak sambungan Supabase dan cuba lagi.", "error");
   } finally {
     if (pendingLeadNoteUpdates.get(leadId)?.token === updateToken) pendingLeadNoteUpdates.delete(leadId);
     if (button) {
@@ -6109,7 +6113,7 @@ async function updateLeadStatusFromLog(leadId, nextStatus, field = null) {
     } else {
       await persistLead(lead);
       const statusSynced = await updateLeadStatusInSheet(lead, normalizedStatus);
-      if (!statusSynced) throw new Error("Status tidak dapat disimpan ke Google Sheet.");
+      if (!statusSynced) throw new Error("Status tidak dapat disimpan ke server.");
     }
 
     showToast("Status dikemas kini", `${lead.name} kini ${formatSheetStatus(normalizedStatus)}.`);
@@ -6119,7 +6123,7 @@ async function updateLeadStatusFromLog(leadId, nextStatus, field = null) {
     saveState();
     renderAll();
     console.error(error);
-    showToast("Status gagal disimpan", error?.message || "Semak sambungan Google Sheet dan cuba lagi.", "error");
+    showToast("Status gagal disimpan", error?.message || "Semak sambungan Supabase dan cuba lagi.", "error");
     return false;
   } finally {
     leadStatusWriteTimes.set(leadId, Date.now());
@@ -6144,15 +6148,19 @@ async function deleteLeadEverywhere(leadId) {
 
   if (!confirmPermanentDelete("lead", lead.name)) return;
 
-  let sheetDeleted;
+  let deletionConfirmed;
   if (remoteDatabaseMode) {
     const { data, error } = await remoteDatabaseClient.rpc("admin_delete_lead", { p_lead_id: lead.id });
-    sheetDeleted = !error && Boolean(data?.ok);
+    deletionConfirmed = !error && Boolean(data?.ok) && Number(data?.deleted) === 1;
+    if (!deletionConfirmed) {
+      showToast("Lead tidak dipadam", error?.message || data?.error || "Supabase belum mengesahkan pemadaman.", "error");
+      return;
+    }
   } else {
-    sheetDeleted = await deleteLeadFromSheet(lead);
+    deletionConfirmed = await deleteLeadFromSheet(lead);
   }
-  if (!sheetDeleted) {
-    showToast("Lead tidak dipadam", remoteDatabaseMode ? "Supabase belum mengesahkan pemadaman." : "Google Sheet belum dapat dikemas kini. Semak Web App URL.", "error");
+  if (!deletionConfirmed) {
+    showToast("Lead tidak dipadam", "Server belum mengesahkan pemadaman.", "error");
     return;
   }
 
@@ -6168,11 +6176,11 @@ async function deleteLeadEverywhere(leadId) {
       selectedContactId = null;
       closeModal(elements.contactModal);
     }
-    showToast("Lead dipadam", remoteDatabaseMode ? "Supabase dan dashboard telah diselaraskan." : "Google Sheet dan dashboard telah diselaraskan.");
+    showToast("Lead dipadam", "Supabase dan dashboard telah diselaraskan.");
     renderAll();
   } catch (error) {
     console.error(error);
-    showToast("Lead tidak dipadam", "Semak sambungan Google Sheet.", "error");
+    showToast("Lead tidak dipadam", "Semak sambungan Supabase.", "error");
   }
 }
 
@@ -6209,7 +6217,7 @@ async function syncGoogleSheet(options = {}) {
   const syncStateGeneration = authoritativeStateGeneration;
 
   elements.connectionResult.classList.remove("error");
-  elements.connectionResult.innerHTML = '<span class="status-dot"></span><span>Sedang menyemak Google Sheet...</span>';
+  elements.connectionResult.innerHTML = '<span class="status-dot"></span><span>Sedang menyemak server...</span>';
 
   try {
     const url = new URL(endpoint);
@@ -6219,7 +6227,7 @@ async function syncGoogleSheet(options = {}) {
     const payload = await response.json();
     const rows = Array.isArray(payload) ? payload : payload.leads || payload.data || [];
     if (!Array.isArray(payload) && payload?.ok === false) {
-      throw new Error(payload.error || "Google Sheet tidak dapat dibaca");
+      throw new Error(payload.error || "Server tidak dapat dibaca");
     }
     if (!Array.isArray(rows)) throw new Error("Format JSON tidak sah");
 
@@ -6329,7 +6337,7 @@ async function syncGoogleSheet(options = {}) {
       showToast(
         title,
         added || updated || removed
-          ? "Dashboard telah diselaraskan dengan Google Sheet."
+          ? "Dashboard telah diselaraskan dengan server."
           : "Tiada perubahan baru ditemui.",
       );
     }
@@ -6353,7 +6361,7 @@ async function syncGoogleSheet(options = {}) {
     if (!options.silent) {
       showToast("Sync gagal", "Pastikan Web App URL boleh diakses oleh sesiapa sahaja.", "error");
     }
-    console.error("Google Sheet sync failed", error);
+    console.error("Server sync failed", error);
     return false;
   } finally {
     syncInProgress = false;
@@ -6406,8 +6414,8 @@ async function runIntegrationSync(button, loadingLabel, successTitle) {
       await waitForCurrentSync();
     }
     const success = await syncGoogleSheet({ silent: true });
-    if (!success) throw new Error("Google Sheet tidak dapat diselaraskan.");
-    showToast(successTitle, "Dashboard telah diselaraskan dengan Google Sheet.", "success");
+    if (!success) throw new Error("Server tidak dapat diselaraskan.");
+    showToast(successTitle, "Dashboard telah diselaraskan dengan server.", "success");
     return true;
   } catch (error) {
     showToast("Sync gagal", error?.message || "Semak URL dan cuba semula.", "error");
@@ -6748,7 +6756,7 @@ async function bootstrap() {
 
   if (remoteDatabaseRequired) {
     showLogin();
-    showToast("Supabase belum tersambung", "Cuba refresh. Operasi Google Sheet lama tidak akan digunakan.", "error");
+    showToast("Supabase belum tersambung", "Cuba refresh. Operasi server lama tidak akan digunakan.", "error");
     return;
   }
 

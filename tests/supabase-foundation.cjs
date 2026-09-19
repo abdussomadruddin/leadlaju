@@ -284,6 +284,7 @@ test('Supabase replaces Apps Script background reminder and signup push operatio
 
 test('Supabase operational UI mutations branch away from Google Sheet writes', () => {
   assert.match(app, /remoteDatabaseClient\.rpc\("manage_appointment"/);
+  assert.match(app, /remoteDatabaseClient\.rpc\("admin_delete_appointment"/);
   assert.match(app, /remoteDatabaseClient\.rpc\("broadcast_follow_up_reminder"/);
   assert.match(app, /remoteDatabaseClient\.rpc\("admin_upsert_project"/);
   assert.match(app, /remoteDatabaseClient\.rpc\("admin_update_agent"/);
@@ -313,16 +314,34 @@ test('production runtime config enables Supabase without requiring a query flag'
 
 test('all production devices invalidate the old app shell for the direct Supabase importer', () => {
   const worker = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
-  assert.match(worker, /leadlaju-pwa-v20260919-import-fields-v78/);
+  assert.match(worker, /leadlaju-pwa-v20260919-delete-controls-v80/);
   assert.doesNotMatch(worker, /client\.navigate\(/);
-  assert.match(html, /app\.js\?v=20260919-import-fields-v78/);
+  assert.match(html, /app\.js\?v=20260919-delete-controls-v80/);
   assert.match(html, /vendor\/exceljs\.min\.js\?v=4\.4\.0/);
-  assert.match(app, /register\("\/sw\.js\?v=20260919-import-fields-v78"\)/);
+  assert.match(app, /register\("\/sw\.js\?v=20260919-delete-controls-v80"\)/);
   assert.doesNotMatch(app, /get\("backend"\) === "sheet"/);
   assert.match(app, /remoteDatabaseRequired = window\.location\.protocol !== "file:"/);
-  assert.match(app, /if \(remoteDatabaseRequired\)[\s\S]*Operasi Google Sheet lama tidak akan digunakan/);
+  assert.match(app, /if \(remoteDatabaseRequired\)[\s\S]*Operasi server lama tidak akan digunakan/);
   assert.match(app, /Supabase dashboard request timed out/);
   assert.match(app, /Supabase client initialization timed out/);
+});
+
+test('admin lead deletion clears blocking action references and retains ingestion audit safely', () => {
+  const migration = fs.readFileSync(path.join(root, 'supabase/migrations/20260919052200_fix_admin_lead_delete.sql'), 'utf8');
+  assert.match(migration, /action_requests_lead_id_fkey[\s\S]*on delete cascade/);
+  assert.match(migration, /ingestion_events_lead_id_fkey[\s\S]*on delete set null/);
+  assert.match(migration, /'ok', v_deleted = 1/);
+  assert.match(app, /Number\(data\?\.deleted\) === 1/);
+  assert.doesNotMatch(app, /dashboard dan Google Sheet/);
+});
+
+test('admin appointment deletion handles rescheduled appointment chains safely', () => {
+  const migration = fs.readFileSync(path.join(root, 'supabase/migrations/20260919061000_fix_admin_appointment_delete.sql'), 'utf8');
+  assert.match(migration, /appointments_parent_appointment_id_fkey[\s\S]*on delete set null/);
+  assert.match(migration, /create or replace function public\.admin_delete_appointment/);
+  assert.match(migration, /'ok', v_deleted = 1/);
+  assert.match(app, /remoteDatabaseClient\.rpc\("admin_delete_appointment"/);
+  assert.match(app, /Number\(data\?\.deleted\) !== 1/);
 });
 
 test('production UI exposes Supabase realtime and no Google Sheet integration surface', () => {
