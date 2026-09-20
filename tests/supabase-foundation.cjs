@@ -369,13 +369,13 @@ test('production runtime config enables Supabase without requiring a query flag'
   assert.match(app, /config\.backend !== "supabase"/);
 });
 
-test('all production devices invalidate the old app shell for the optimized bulletin client', () => {
+test('all production devices invalidate the old app shell for persistent bulletin state', () => {
   const worker = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
-  assert.match(worker, /leadlaju-pwa-v20260920-bulletin-ui-v84/);
+  assert.match(worker, /leadlaju-pwa-v20260920-bulletin-state-v85/);
   assert.match(worker, /existingClient\.navigate\(targetUrl\)/);
-  assert.match(html, /app\.js\?v=20260920-bulletin-ui-v84/);
+  assert.match(html, /app\.js\?v=20260920-bulletin-state-v85/);
   assert.match(html, /vendor\/exceljs\.min\.js\?v=4\.4\.0/);
-  assert.match(app, /register\("\/sw\.js\?v=20260920-bulletin-ui-v84"\)/);
+  assert.match(app, /register\("\/sw\.js\?v=20260920-bulletin-state-v85"\)/);
   assert.doesNotMatch(app, /get\("backend"\) === "sheet"/);
   assert.match(app, /remoteDatabaseRequired = window\.location\.protocol !== "file:"/);
   assert.match(app, /if \(remoteDatabaseRequired\)[\s\S]*Operasi server lama tidak akan digunakan/);
@@ -399,6 +399,15 @@ test('bulletins use recipient-scoped RLS, canonical RPCs, generic push, and dedi
   assert.match(html, /data-view="bulletins"/);
   assert.match(worker, /OPEN_BULLETIN/);
   assert.match(notificationWorker, /first\.notification_type === "bulletin" \? 86400/);
+});
+
+test('unrelated dashboard realtime reloads preserve the current user bulletin feed', () => {
+  const start = app.indexOf('async function loadRemoteState');
+  const end = app.indexOf('\nasync function subscribeToRemoteDatabase', start);
+  const body = app.slice(start, end);
+  assert.match(body, /const preserveBulletinState = state\.currentUserId === userId/);
+  assert.match(body, /bulletins: locallyLoadedBulletins/);
+  assert.match(body, /bulletinUnreadCount: locallyLoadedBulletinUnreadCount/);
 });
 
 test('admin lead deletion clears blocking action references and retains ingestion audit safely', () => {

@@ -694,6 +694,9 @@ async function loadRemoteState(userId) {
   const wasRemoteDatabaseMode = remoteDatabaseMode;
   const remoteLoadGeneration = authoritativeStateGeneration;
   const locallyCommittedLeads = state.leads.slice();
+  const preserveBulletinState = state.currentUserId === userId;
+  const locallyLoadedBulletins = preserveBulletinState && Array.isArray(state.bulletins) ? state.bulletins : [];
+  const locallyLoadedBulletinUnreadCount = preserveBulletinState ? Number(state.bulletinUnreadCount) || 0 : 0;
   const previousLeadKeys = new Set(state.leads.map(leadNotificationKey));
   const shouldDetectNewLeads = false;
   try {
@@ -736,6 +739,8 @@ async function loadRemoteState(userId) {
       activities: (snapshot?.events || []).map(mapActivity),
       appointments: normalizeAppointments(snapshot?.appointments),
       projects: normalizeProjects(snapshot?.projects),
+      bulletins: locallyLoadedBulletins,
+      bulletinUnreadCount: locallyLoadedBulletinUnreadCount,
       roundRobinIndex: state.roundRobinIndex || 0,
       integration: normalizeIntegration({
         endpoint: "",
@@ -2138,7 +2143,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-    .register("/sw.js?v=20260920-bulletin-ui-v84")
+    .register("/sw.js?v=20260920-bulletin-state-v85")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
