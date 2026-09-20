@@ -2138,7 +2138,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-    .register("/sw.js?v=20260920-bulletin-v83")
+    .register("/sw.js?v=20260920-bulletin-ui-v84")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -5369,7 +5369,7 @@ function renderUser() {
       : viewTitles[activeView] || "LeadLaju";
 
   document.querySelectorAll(".admin-only").forEach((item) => {
-    item.style.display = isAdmin() ? "flex" : "none";
+    item.style.display = isAdmin() ? (item.classList.contains("admin-only-block") ? "block" : "flex") : "none";
   });
   if (!isAdmin() && ["agents", "projects", "lead-monitor", "import-leads", "integrations"].includes(activeView)) {
     switchView("dashboard");

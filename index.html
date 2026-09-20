@@ -25,9 +25,9 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260920-bulletin-v83" />
+    <link rel="stylesheet" href="styles.css?v=20260920-bulletin-ui-v84" />
     <script src="vendor/exceljs.min.js?v=4.4.0" defer></script>
-    <script src="app.js?v=20260920-bulletin-v83" defer></script>
+    <script src="app.js?v=20260920-bulletin-ui-v84" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -594,24 +594,29 @@
         </section>
 
         <section class="view" id="bulletins-view">
-          <div class="content-heading">
-            <div><span class="section-kicker">Makluman pasukan</span><h2>Buletin News</h2><p>Hebahan penting daripada pasukan pengurusan.</p></div>
+          <div class="content-heading bulletin-page-heading">
+            <div><span class="section-kicker">Makluman pasukan</span><h2>Buletin News</h2><p>Hebahan penting, kemas kini projek dan maklumat pasukan dalam satu tempat.</p></div>
           </div>
-          <section class="panel bulletin-composer admin-only" id="bulletin-composer">
-            <div class="panel-heading"><div><span class="section-kicker">Admin sahaja</span><h3>Terbitkan hebahan</h3></div></div>
+          <section class="panel bulletin-composer admin-only admin-only-block" id="bulletin-composer">
+            <div class="bulletin-composer-heading">
+              <span class="bulletin-composer-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 11v2a2 2 0 0 0 2 2h2l3 4h2l-2-4 7-3V6L8 9H6a2 2 0 0 0-2 2Z" /><path d="M18 8.5h2.5M18 5l2-1.5M18 12l2 1.5" /></svg></span>
+              <div><span class="section-kicker">Admin sahaja</span><h3>Terbitkan hebahan baru</h3><p>Hebahan akan muncul secara realtime dan dihantar ke semua peranti penerima.</p></div>
+            </div>
             <form id="bulletin-form" class="bulletin-form">
               <input id="bulletin-id" type="hidden" />
-              <label>Tajuk<input id="bulletin-title" maxlength="120" required /></label>
-              <label>Sasaran<select id="bulletin-project"><option value="">General - semua ejen aktif</option></select></label>
-              <label class="bulletin-body-field">Hebahan<textarea id="bulletin-body" maxlength="5000" required></textarea></label>
-              <label>CTA (optional)<input id="bulletin-cta-text" maxlength="40" placeholder="Contoh: Lihat detail" /></label>
-              <label>URL CTA (https://)<input id="bulletin-cta-url" type="url" maxlength="2048" placeholder="https://..." /></label>
+              <label class="bulletin-title-field"><span>Tajuk hebahan</span><input id="bulletin-title" maxlength="120" placeholder="Contoh: Taklimat projek hujung minggu" required /></label>
+              <label><span>Sasaran penerima</span><select id="bulletin-project"><option value="">General - semua ejen aktif</option></select></label>
+              <label class="bulletin-body-field"><span>Mesej</span><textarea id="bulletin-body" maxlength="5000" placeholder="Tulis maklumat yang perlu diketahui oleh ejen..." required></textarea><small>Maksimum 5,000 aksara</small></label>
+              <div class="bulletin-cta-fields">
+                <label><span>Teks butang <em>Optional</em></span><input id="bulletin-cta-text" maxlength="40" placeholder="Contoh: Lihat detail" /></label>
+                <label><span>URL butang <em>HTTPS sahaja</em></span><input id="bulletin-cta-url" type="url" maxlength="2048" placeholder="https://example.com" /></label>
+              </div>
               <p class="field-error" id="bulletin-error"></p>
-              <div class="form-actions"><button class="primary-button" id="bulletin-submit" type="submit">Publish hebahan</button><button class="secondary-button" id="bulletin-cancel-edit" type="button" hidden>Batal edit</button></div>
+              <div class="form-actions bulletin-form-actions"><button class="secondary-button" id="bulletin-cancel-edit" type="button" hidden>Batal edit</button><button class="primary-button" id="bulletin-submit" type="submit">Publish hebahan</button></div>
             </form>
           </section>
           <section class="bulletin-featured" id="bulletin-featured"></section>
-          <section class="panel bulletin-history-panel"><div class="panel-heading"><div><span class="section-kicker">Arkib hebahan</span><h3>History</h3></div></div><div id="bulletin-history" class="bulletin-history"></div></section>
+          <section class="bulletin-history-panel"><div class="bulletin-section-heading"><div><span class="section-kicker">Arkib hebahan</span><h3>Hebahan terdahulu</h3></div></div><div id="bulletin-history" class="bulletin-history"></div></section>
         </section>
 
         <section class="view admin-only-view" id="agents-view">
