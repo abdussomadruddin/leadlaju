@@ -210,6 +210,21 @@ test('admin log lead supports filtering by agent', () => {
   assert.match(source, /leadAgentFilter\?\.addEventListener\("change", renderLeadsTable\)/);
 });
 
+test('lead and appointment lists support Kuala Lumpur month and year filters', () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const html = fs.readFileSync('index.html', 'utf8');
+  assert.match(html, /id="lead-month-filter"/);
+  assert.match(html, /id="lead-year-filter"/);
+  assert.match(html, /id="appointment-month-filter"/);
+  assert.match(html, /id="appointment-year-filter"/);
+  assert.match(source, /function populateMonthYearFilters\(monthFilter, yearFilter, records, getDate\)/);
+  assert.match(source, /function matchesMonthYearFilter\(value, monthFilter, yearFilter\)/);
+  assert.match(source, /matchesMonthYearFilter\(lead\.createdAt \|\| lead\.receivedAt, elements\.leadMonthFilter, elements\.leadYearFilter\)/);
+  assert.match(source, /matchesMonthYearFilter\(appointment\.scheduledAt, elements\.appointmentMonthFilter, elements\.appointmentYearFilter\)/);
+  assert.match(source, /leadMonthFilter\?\.addEventListener\("change", renderLeadsTable\)/);
+  assert.match(source, /appointmentYearFilter\?\.addEventListener\("change", renderAppointments\)/);
+});
+
 test('log lead navigation badge counts all visible records', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   assert.match(source, /navLeadCount\.textContent = visibleLeads\.length/);

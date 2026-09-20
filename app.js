@@ -292,6 +292,8 @@ const elements = {
   leadSearch: document.querySelector("#lead-search"),
   leadFilter: document.querySelector("#lead-filter"),
   leadAgentFilter: document.querySelector("#lead-agent-filter"),
+  leadMonthFilter: document.querySelector("#lead-month-filter"),
+  leadYearFilter: document.querySelector("#lead-year-filter"),
   leadLogCount: document.querySelector("#lead-log-count"),
   navMonitorCount: document.querySelector("#nav-monitor-count"),
   monitorHealth: document.querySelector("#monitor-health"),
@@ -307,6 +309,8 @@ const elements = {
   appointmentCount: document.querySelector("#appointment-count"),
   appointmentStatusFilter: document.querySelector("#appointment-status-filter"),
   appointmentProjectFilter: document.querySelector("#appointment-project-filter"),
+  appointmentMonthFilter: document.querySelector("#appointment-month-filter"),
+  appointmentYearFilter: document.querySelector("#appointment-year-filter"),
   appointmentModal: document.querySelector("#appointment-modal"),
   appointmentForm: document.querySelector("#appointment-form"),
   appointmentModalKicker: document.querySelector("#appointment-modal-kicker"),
@@ -1573,6 +1577,44 @@ function formatDateTime(value) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(parseLeadTimestamp(value)));
+}
+
+const MALAY_MONTH_NAMES = [
+  "Januari", "Februari", "Mac", "April", "Mei", "Jun",
+  "Julai", "Ogos", "September", "Oktober", "November", "Disember",
+];
+
+function populateMonthYearFilters(monthFilter, yearFilter, records, getDate) {
+  if (!monthFilter || !yearFilter) return;
+  const selectedMonth = monthFilter.value || "all";
+  const selectedYear = yearFilter.value || "all";
+  const years = new Set();
+  const months = new Set();
+  records.forEach((record) => {
+    const value = getDate(record);
+    if (!value) return;
+    const parts = malaysiaDateParts(value);
+    if (!parts.year || !parts.month) return;
+    years.add(parts.year);
+    months.add(parts.month);
+  });
+  monthFilter.innerHTML = [
+    '<option value="all">Semua bulan</option>',
+    ...[...months].sort().map((month) => `<option value="${month}">${MALAY_MONTH_NAMES[Number(month) - 1]}</option>`),
+  ].join("");
+  yearFilter.innerHTML = [
+    '<option value="all">Semua tahun</option>',
+    ...[...years].sort((left, right) => Number(right) - Number(left)).map((year) => `<option value="${year}">${year}</option>`),
+  ].join("");
+  monthFilter.value = [...monthFilter.options].some((option) => option.value === selectedMonth) ? selectedMonth : "all";
+  yearFilter.value = [...yearFilter.options].some((option) => option.value === selectedYear) ? selectedYear : "all";
+}
+
+function matchesMonthYearFilter(value, monthFilter, yearFilter) {
+  if (!value) return false;
+  const parts = malaysiaDateParts(value);
+  return (monthFilter?.value === "all" || parts.month === monthFilter?.value) &&
+    (yearFilter?.value === "all" || parts.year === yearFilter?.value);
 }
 
 function relativeTime(value) {
@@ -4829,6 +4871,12 @@ function renderLeadsTable() {
         : "all";
   }
   const agentFilter = elements.leadAgentFilter?.value || "all";
+  populateMonthYearFilters(
+    elements.leadMonthFilter,
+    elements.leadYearFilter,
+    visibleLeads,
+    (lead) => lead.createdAt || lead.receivedAt,
+  );
   const rows = state.leads
     .filter((lead) => {
       if (isVisuallyExpiredAssignment(lead)) return false;
@@ -4846,7 +4894,9 @@ function renderLeadsTable() {
         formatSheetStatus(getLeadVisualStatus(lead)).toLowerCase().includes(search) ||
         String(lead.notes || "").toLowerCase().includes(search);
       const visualStatus = getLeadVisualStatus(lead);
-      return matchesAgent && matchesSearch && (filter === "all" || visualStatus === filter);
+      return matchesAgent && matchesSearch &&
+        (filter === "all" || visualStatus === filter) &&
+        matchesMonthYearFilter(lead.createdAt || lead.receivedAt, elements.leadMonthFilter, elements.leadYearFilter);
     })
     .sort((a, b) => (b.receivedAt || 0) - (a.receivedAt || 0));
 
@@ -4969,9 +5019,16 @@ function renderAppointments() {
     ...projects.map((project) => `<option value="${escapeHtml(project)}">${escapeHtml(project)}</option>`),
   ].join("");
   elements.appointmentProjectFilter.value = projects.includes(selectedProject) ? selectedProject : "all";
+  populateMonthYearFilters(
+    elements.appointmentMonthFilter,
+    elements.appointmentYearFilter,
+    visible,
+    (appointment) => appointment.scheduledAt,
+  );
   const filtered = visible.filter((appointment) =>
     (selectedStatus === "all" || appointment.status === selectedStatus) &&
-    (elements.appointmentProjectFilter.value === "all" || appointment.project === elements.appointmentProjectFilter.value),
+    (elements.appointmentProjectFilter.value === "all" || appointment.project === elements.appointmentProjectFilter.value) &&
+    matchesMonthYearFilter(appointment.scheduledAt, elements.appointmentMonthFilter, elements.appointmentYearFilter),
   );
   elements.appointmentCount.textContent = `${filtered.length} appointment`;
   elements.appointmentList.innerHTML = filtered.length
@@ -6786,8 +6843,12 @@ elements.logoutButton.addEventListener("click", logout);
 elements.leadSearch.addEventListener("input", renderLeadsTable);
 elements.leadFilter.addEventListener("change", renderLeadsTable);
 elements.leadAgentFilter?.addEventListener("change", renderLeadsTable);
+elements.leadMonthFilter?.addEventListener("change", renderLeadsTable);
+elements.leadYearFilter?.addEventListener("change", renderLeadsTable);
 elements.appointmentStatusFilter?.addEventListener("change", renderAppointments);
 elements.appointmentProjectFilter?.addEventListener("change", renderAppointments);
+elements.appointmentMonthFilter?.addEventListener("change", renderAppointments);
+elements.appointmentYearFilter?.addEventListener("change", renderAppointments);
 elements.monitorSeverityFilter?.addEventListener("change", renderLeadMonitor);
 elements.monitorAgentFilter?.addEventListener("change", renderLeadMonitor);
 elements.monitorRefreshButton?.addEventListener("click", async () => {
