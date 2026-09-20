@@ -2143,7 +2143,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-    .register("/sw.js?v=20260920-bulletin-frame-v86")
+    .register("/sw.js?v=20260920-bulletin-remind-v87")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -5703,8 +5703,9 @@ async function markBulletinRead(id) {
 
 function bulletinCard(bulletin, featured = false) {
   const ctaUrl = validBulletinUrl(bulletin.ctaUrl);
+  const unreadCount = Math.max(0, bulletin.recipientCount - bulletin.readCount);
   const stats = isAdmin() ? `<small>${bulletin.readCount} dibaca / ${bulletin.recipientCount} penerima</small>` : bulletin.readAt ? '<small class="bulletin-read">Sudah dibaca</small>' : '<small class="bulletin-unread">Belum dibaca</small>';
-  return `<article class="bulletin-card ${featured ? "featured" : ""} ${bulletin.status === "archived" ? "archived" : ""}" data-bulletin-open="${bulletin.id}"><span class="section-kicker">${escapeHtml(bulletin.projectName || "General")}</span><h3>${escapeHtml(bulletin.title)}</h3><p>${escapeHtml(bulletin.body).replace(/\n/g, "<br>")}</p><div class="bulletin-card-footer"><small>${formatDateTime(bulletin.publishedAt)}</small>${stats}</div>${ctaUrl ? `<a class="secondary-button compact bulletin-cta" href="${escapeHtml(ctaUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(bulletin.ctaText)}</a>` : ""}${isAdmin() && bulletin.status === "published" ? `<div class="bulletin-admin-actions"><button class="text-button" type="button" data-bulletin-edit="${bulletin.id}">Edit</button><button class="text-button danger-text" type="button" data-bulletin-archive="${bulletin.id}">Archive</button></div>` : ""}</article>`;
+  return `<article class="bulletin-card ${featured ? "featured" : ""} ${bulletin.status === "archived" ? "archived" : ""}" data-bulletin-open="${bulletin.id}"><span class="section-kicker">${escapeHtml(bulletin.projectName || "General")}</span><h3>${escapeHtml(bulletin.title)}</h3><p>${escapeHtml(bulletin.body).replace(/\n/g, "<br>")}</p><div class="bulletin-card-footer"><small>${formatDateTime(bulletin.publishedAt)}</small>${stats}</div>${ctaUrl ? `<a class="secondary-button compact bulletin-cta" href="${escapeHtml(ctaUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(bulletin.ctaText)}</a>` : ""}${isAdmin() && bulletin.status === "published" ? `<div class="bulletin-admin-actions"><button class="secondary-button compact bulletin-remind" type="button" data-bulletin-remind="${bulletin.id}" ${unreadCount ? "" : "disabled"}>Remind Again${unreadCount ? ` (${unreadCount})` : ""}</button><button class="text-button" type="button" data-bulletin-edit="${bulletin.id}">Edit</button><button class="text-button danger-text" type="button" data-bulletin-archive="${bulletin.id}">Archive</button></div>` : ""}</article>`;
 }
 
 function renderBulletins() {
@@ -5752,6 +5753,23 @@ async function saveBulletin(event) {
     if (error) throw error;
     resetBulletinForm(); await loadBulletinFeed(); renderBulletins(); showToast(id ? "Buletin dikemas kini" : "Buletin diterbitkan", "Hebahan telah dihantar kepada penerima.", "success");
   } catch (error) { elements.bulletinError.textContent = error?.message || "Buletin gagal disimpan."; } finally { elements.bulletinSubmit.disabled = false; }
+}
+
+async function remindUnreadBulletin(id, button) {
+  if (!isAdmin() || !remoteDatabaseMode || !id || button?.disabled) return;
+  const originalLabel = button?.textContent || "Remind Again";
+  if (button) { button.disabled = true; button.textContent = "Menghantar..."; }
+  try {
+    const { data, error } = await remoteDatabaseClient.rpc("remind_bulletin_unread", { p_bulletin_id: id });
+    if (error) throw error;
+    const count = Number(data?.enqueued_count) || 0;
+    await loadBulletinFeed();
+    renderBulletins();
+    showToast(count ? "Reminder dihantar" : "Semua sudah baca", count ? `Push dihantar semula kepada ${count} penerima yang belum baca.` : "Tiada penerima belum baca untuk diingatkan.", "success");
+  } catch (error) {
+    if (button) { button.disabled = false; button.textContent = originalLabel; }
+    showToast("Reminder gagal", error?.message || "Push reminder tidak dapat dihantar.", "error");
+  }
 }
 
 function renderAll() {
@@ -7041,7 +7059,9 @@ elements.bulletinCancelEdit?.addEventListener("click", resetBulletinForm);
 document.querySelector("#bulletins-view")?.addEventListener("click", (event) => {
   const edit = event.target.closest("[data-bulletin-edit]");
   const archive = event.target.closest("[data-bulletin-archive]");
+  const remind = event.target.closest("[data-bulletin-remind]");
   const open = event.target.closest("[data-bulletin-open]");
+  if (remind) { remindUnreadBulletin(remind.dataset.bulletinRemind, remind); return; }
   if (edit) { const item = state.bulletins.find((bulletin) => bulletin.id === edit.dataset.bulletinEdit); if (!item) return; elements.bulletinId.value=item.id; elements.bulletinTitle.value=item.title; elements.bulletinBody.value=item.body; elements.bulletinCtaText.value=item.ctaText; elements.bulletinCtaUrl.value=item.ctaUrl; elements.bulletinProject.value=item.projectId || ""; elements.bulletinProject.disabled=true; elements.bulletinSubmit.textContent="Simpan perubahan"; elements.bulletinCancelEdit.hidden=false; window.scrollTo({top: 0, behavior: "smooth"}); return; }
   if (archive) { remoteDatabaseClient.rpc("archive_bulletin", { p_bulletin_id: archive.dataset.bulletinArchive }).then(({error}) => { if (error) throw error; return loadBulletinFeed(); }).then(() => renderBulletins()).catch((error) => showToast("Archive gagal", error.message, "error")); return; }
   if (open && !event.target.closest("a,button")) openBulletin(open.dataset.bulletinOpen);

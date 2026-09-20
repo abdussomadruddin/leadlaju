@@ -3553,6 +3553,9 @@ td small {
 .bulletin-read { color: #16805b; }
 .bulletin-unread { color: #d84242; font-weight: 700; }
 .danger-text { color: #d84242; }
+.bulletin-remind { border-color: #f1c66f; color: #8a5a00; background: #fff8e8; }
+.bulletin-remind:hover:not(:disabled) { border-color: #dda939; background: #fff2d2; }
+.bulletin-remind:disabled { cursor: not-allowed; opacity: .55; }
 .bulletin-cta { position: relative; z-index: 1; margin-top: 18px; display: inline-flex; }
 .bulletin-card.featured .bulletin-cta { border-color: #cfe0ff; color: var(--blue-dark); background: var(--blue-soft); }
 
@@ -3577,7 +3580,7 @@ td small {
   .bulletin-card.featured h3 { font-size: 22px; }
   .bulletin-card.featured p { font-size: 13px; }
   .bulletin-card-footer { align-items: flex-start; flex-direction: column; gap: 6px; }
-  .bulletin-admin-actions { justify-content: flex-start; }
+  .bulletin-admin-actions { justify-content: flex-start; flex-wrap: wrap; }
 }
 
 .integration-form-card select {
