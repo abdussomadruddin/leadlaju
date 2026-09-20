@@ -641,7 +641,8 @@ test('every device blocks agent access until its own notification permission is 
   assert.match(accessBody, /const showReminder = !granted && !notificationReminderDismissedForSession/);
   assert.match(accessBody, /notificationRequiredModal\.classList\.toggle\("open", showReminder\)/);
   assert.match(syncBody, /enforceAgentNotificationAccess\(\)/);
-  assert.match(html, /Tekan <strong>Add to Home Screen<\/strong>/);
+  assert.match(html, /Tekan <strong>Settings<\/strong> pada browser atau butang <strong>Share<\/strong>/);
+  assert.match(html, /Pilih <strong>Add to Home Screen<\/strong>/);
   assert.match(html, /Buka LeadLaju melalui ikon aplikasi/);
   assert.match(html, /id="enable-required-notifications"/);
   assert.match(html, /id="add-to-home-screen"/);

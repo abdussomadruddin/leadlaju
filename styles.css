@@ -3713,6 +3713,7 @@ td small {
 }
 
 .notification-required-card {
+  width: min(410px, 100%);
   text-align: center;
 }
 
@@ -3961,7 +3962,7 @@ td small {
   display: grid;
   width: 58px;
   height: 58px;
-  margin: 22px auto 16px;
+  margin: 18px auto 18px;
   place-items: center;
   border-radius: 50%;
   color: var(--blue);
@@ -4001,7 +4002,7 @@ td small {
 .notification-steps {
   display: grid;
   max-width: 340px;
-  gap: 9px;
+  gap: 8px;
   margin: 0 auto 20px;
   padding: 0;
   color: var(--ink-700);
@@ -4014,7 +4015,11 @@ td small {
   display: grid;
   grid-template-columns: 24px 1fr;
   gap: 9px;
-  align-items: center;
+  align-items: start;
+  padding: 9px 10px;
+  border: 1px solid #e6ebf3;
+  border-radius: 8px;
+  background: #fafcff;
   font-size: 13px;
   line-height: 1.4;
   counter-increment: notification-step;
@@ -4031,6 +4036,12 @@ td small {
   content: counter(notification-step);
   font-size: 11px;
   font-weight: 700;
+}
+
+.notification-steps li > span {
+  min-width: 0;
+  padding-top: 2px;
+  overflow-wrap: anywhere;
 }
 
 .potential-reminder-card > p {
@@ -4078,10 +4089,7 @@ td small {
 }
 
 .notification-home-screen-button {
-  min-height: 44px;
-  border-color: #b9cff7;
-  color: var(--blue-dark);
-  background: #f5f8ff;
+  min-height: 48px;
 }
 
 .notification-close-button {
@@ -4092,6 +4100,14 @@ td small {
 
 .notification-enable-button svg {
   width: 19px;
+}
+
+.notification-enable-button {
+  min-height: 46px;
+  margin-top: 10px;
+  border-color: #cfe0ff;
+  color: var(--blue-dark);
+  background: #f5f8ff;
 }
 
 @keyframes modal-in {
