@@ -2143,7 +2143,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-    .register("/sw.js?v=20260920-bulletin-remind-v87")
+    .register("/sw.js?v=20260921-home-screen-guide-v88")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -3555,8 +3555,8 @@ function showHomeScreenHelp() {
   elements.homeScreenHelpMessage.textContent = isInstalledApp()
     ? "Buka aplikasi LeadLaju dari skrin utama, kemudian tekan loceng untuk benarkan notifikasi lead baharu."
     : isIos
-      ? "Tekan ikon Share dalam pelayar, pilih Add to Home Screen, kemudian buka LeadLaju melalui ikon aplikasi dan aktifkan loceng."
-      : "Pilih Install atau Add to Home Screen dalam menu pelayar, kemudian buka LeadLaju sebagai aplikasi dan aktifkan loceng.";
+      ? "1. Tekan Share. 2. Pilih Add to Home Screen. 3. Tekan Add."
+      : "Buka menu pelayar dan pilih Install atau Add to Home Screen.";
 }
 
 async function addToHomeScreen() {

@@ -25,9 +25,9 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260920-bulletin-remind-v87" />
+    <link rel="stylesheet" href="styles.css?v=20260921-home-screen-guide-v88" />
     <script src="vendor/exceljs.min.js?v=4.4.0" defer></script>
-    <script src="app.js?v=20260920-bulletin-remind-v87" defer></script>
+    <script src="app.js?v=20260921-home-screen-guide-v88" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -976,18 +976,22 @@
             <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" />
           </svg>
         </div>
-        <p id="notification-required-description">Tambah LeadLaju ke skrin utama supaya ia berfungsi sebagai aplikasi di telefon. Kemudian aktifkan notifikasi melalui tetapan pelayar untuk menerima lead baharu.</p>
+        <ol class="notification-steps" id="notification-required-description">
+          <li>Tekan <strong>Add to Home Screen</strong>.</li>
+          <li>Buka LeadLaju melalui ikon aplikasi.</li>
+          <li>Tekan <strong>Aktifkan loceng</strong> dan pilih Allow.</li>
+        </ol>
         <div class="home-screen-help" id="home-screen-help" hidden>
           <strong id="home-screen-help-title">Tambah ke skrin utama</strong>
-          <p id="home-screen-help-message">Buka menu Share dalam pelayar, pilih Add to Home Screen, kemudian buka LeadLaju melalui ikon aplikasi dan aktifkan notifikasi.</p>
+          <p id="home-screen-help-message">Tekan Share, pilih Add to Home Screen, kemudian tekan Add.</p>
         </div>
         <button class="primary-button notification-enable-button" id="enable-required-notifications" type="button">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" />
           </svg>
-          <span>Aktifkan loceng sekarang</span>
+          <span>Aktifkan loceng</span>
         </button>
-        <button class="secondary-button notification-home-screen-button" id="add-to-home-screen" type="button">Add to Homescreen</button>
+        <button class="secondary-button notification-home-screen-button" id="add-to-home-screen" type="button">Add to Home Screen</button>
         <button class="text-button notification-close-button" id="close-notification-reminder" type="button">Tutup</button>
       </div>
     </div>

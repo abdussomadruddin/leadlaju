@@ -3998,11 +3998,39 @@ td small {
   stroke-width: 1.8;
 }
 
-.notification-required-card > p {
-  margin: 0 auto 20px;
+.notification-steps {
+  display: grid;
   max-width: 340px;
-  color: var(--muted);
-  line-height: 1.6;
+  gap: 9px;
+  margin: 0 auto 20px;
+  padding: 0;
+  color: var(--ink-700);
+  counter-reset: notification-step;
+  list-style: none;
+  text-align: left;
+}
+
+.notification-steps li {
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  gap: 9px;
+  align-items: center;
+  font-size: 13px;
+  line-height: 1.4;
+  counter-increment: notification-step;
+}
+
+.notification-steps li::before {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--blue);
+  content: counter(notification-step);
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .potential-reminder-card > p {
@@ -4051,6 +4079,9 @@ td small {
 
 .notification-home-screen-button {
   min-height: 44px;
+  border-color: #b9cff7;
+  color: var(--blue-dark);
+  background: #f5f8ff;
 }
 
 .notification-close-button {
