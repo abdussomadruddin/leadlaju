@@ -225,6 +225,16 @@ test('lead and appointment lists support Kuala Lumpur month and year filters', (
   assert.match(source, /appointmentYearFilter\?\.addEventListener\("change", renderAppointments\)/);
 });
 
+test('missed five-minute metric uses a warning icon instead of a success check', () => {
+  const html = fs.readFileSync('index.html', 'utf8');
+  const styles = fs.readFileSync('styles.css', 'utf8');
+  const start = html.indexOf('Missed 5 minit');
+  const card = html.slice(html.lastIndexOf('<article', start), start + 80);
+  assert.match(card, /class="stat-icon red"/);
+  assert.match(card, /M8 8l8 8/);
+  assert.match(styles, /\.stat-icon\.red \{\s+color: var\(--red-dark\);\s+background: var\(--red-soft\);/);
+});
+
 test('log lead navigation badge counts all visible records', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   assert.match(source, /navLeadCount\.textContent = visibleLeads\.length/);

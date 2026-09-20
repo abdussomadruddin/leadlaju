@@ -1342,6 +1342,11 @@ svg {
   background: var(--green-soft);
 }
 
+.stat-icon.red {
+  color: var(--red-dark);
+  background: var(--red-soft);
+}
+
 .stat-icon.amber {
   color: var(--amber);
   background: var(--amber-soft);
