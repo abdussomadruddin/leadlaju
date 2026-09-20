@@ -1,12 +1,12 @@
-const CACHE_NAME = "leadlaju-pwa-v20260919-pabbly-v82";
+const CACHE_NAME = "leadlaju-pwa-v20260920-bulletin-v83";
 const LEAD_HANDOFF_CACHE = "leadlaju-notification-snapshots";
 const LEAD_HANDOFF_SCHEMA_VERSION = 1;
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20260919-pabbly-v82",
+  "/styles.css?v=20260920-bulletin-v83",
   "/vendor/exceljs.min.js?v=4.4.0",
-  "/app.js?v=20260919-pabbly-v82",
+  "/app.js?v=20260920-bulletin-v83",
   "/manifest.webmanifest?v=20260625-pwa-notifications",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",
@@ -215,6 +215,7 @@ async function showLeadNotification(payload = {}, timing = createLeadTiming(payl
       view: payload.view || null,
       reminderType: payload.reminderType || null,
       potentialCount: Number(payload.potentialCount) || 0,
+      bulletinId: payload.bulletinId || null,
     }
   };
   if (String(options.tag).startsWith("leadlaju-active-")) {
@@ -320,6 +321,18 @@ self.addEventListener("notificationclick", (event) => {
 
   event.waitUntil(
     (async () => {
+      if (notificationData.bulletinId) {
+        const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+        const existingClient = clients.find((client) => client.url.startsWith(self.location.origin));
+        if (existingClient) {
+          await existingClient.navigate(targetUrl);
+          await existingClient.focus();
+          existingClient.postMessage({ type: "OPEN_BULLETIN", bulletinId: notificationData.bulletinId });
+          return;
+        }
+        await self.clients.openWindow(targetUrl);
+        return;
+      }
       await cacheLeadSnapshot(notificationData);
       const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
       const existingClient = clients.find((client) => client.url.startsWith(self.location.origin));

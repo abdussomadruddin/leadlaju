@@ -59,13 +59,14 @@ Deno.serve(async (request) => {
         view: first.payload?.view || null,
         reminderType: first.payload?.reminderType || null,
         potentialCount: Number(first.payload?.potentialCount) || 0,
+        bulletinId: first.payload?.bulletinId || null,
       });
       let delivered = 0;
       const deliveryErrors: string[] = [];
       for (const row of rows) {
         if (!row.endpoint || !row.p256dh || !row.auth_secret) continue;
         try {
-          await webpush.sendNotification({ endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth_secret } }, notification, { TTL: 300, urgency: "high" });
+          await webpush.sendNotification({ endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth_secret } }, notification, { TTL: first.notification_type === "bulletin" ? 86400 : 300, urgency: first.notification_type === "bulletin" ? "normal" : "high" });
           delivered += 1;
           await admin.from("push_subscriptions").update({ last_success_at: new Date().toISOString(), failure_count: 0, updated_at: new Date().toISOString() }).eq("id", row.subscription_id);
         } catch (cause) {

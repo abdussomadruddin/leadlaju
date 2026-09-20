@@ -1028,7 +1028,8 @@ test('cold-start notification handoff waits for authenticated app readiness and 
   assert.match(worker, /type: "LEAD_ASSIGNMENT_HANDOFF"/);
   assert.match(source, /type: "LEAD_ASSIGNMENT_HANDOFF_ACK"/);
   assert.match(worker, /acknowledgeLeadHandoff\(event\.data\)/);
-  assert.ok(click.indexOf('await cacheLeadSnapshot(notificationData)') < click.indexOf('await self.clients.openWindow(targetUrl)'));
+  const leadClickBranch = click.slice(click.indexOf('await cacheLeadSnapshot(notificationData)'));
+  assert.ok(leadClickBranch.indexOf('await cacheLeadSnapshot(notificationData)') < leadClickBranch.indexOf('await self.clients.openWindow(targetUrl)'));
   assert.match(worker, /\[CACHE_NAME, LEAD_HANDOFF_CACHE\]\.includes\(key\)/);
 });
 

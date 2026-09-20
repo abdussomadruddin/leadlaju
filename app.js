@@ -103,6 +103,8 @@ const defaultState = {
     { id: "project-bbsap", name: "BBSAP Sitiawan", active: true },
   ],
   activities: [],
+  bulletins: [],
+  bulletinUnreadCount: 0,
   roundRobinIndex: 0,
   integration: {
     endpoint: DEFAULT_GOOGLE_SHEET_ENDPOINT,
@@ -173,6 +175,7 @@ let notifiedAdminReminderKeys = loadAdminReminderKeys(ADMIN_REMINDER_NOTIFIED_KE
 let latestAdminReminder = null;
 let pendingPotentialReminder = new URLSearchParams(window.location.search).get("reminder") === "potential";
 let pendingNotificationLeadId = new URLSearchParams(window.location.search).get("lead") || "";
+let pendingBulletinId = new URLSearchParams(window.location.search).get("bulletin") || "";
 let globalLoadingCount = 0;
 const expiryRequestStates = new Map();
 const leadTimingDeliveries = new Map();
@@ -239,6 +242,7 @@ const elements = {
   queueLabel: document.querySelector("#queue-label"),
   navLeadCount: document.querySelector("#nav-lead-count"),
   navAppointmentCount: document.querySelector("#nav-appointment-count"),
+  navBulletinCount: document.querySelector("#nav-bulletin-count"),
   notificationCount: document.querySelector("#notification-count"),
   notificationButton: document.querySelector("#notification-button"),
   refreshButton: document.querySelector("#refresh-button"),
@@ -369,6 +373,18 @@ const elements = {
   integrationProjects: document.querySelector("#integration-projects"),
   refreshIntegrations: document.querySelector("#refresh-integrations"),
   copyIntegrationEndpoint: document.querySelector("#copy-integration-endpoint"),
+  bulletinForm: document.querySelector("#bulletin-form"),
+  bulletinId: document.querySelector("#bulletin-id"),
+  bulletinTitle: document.querySelector("#bulletin-title"),
+  bulletinProject: document.querySelector("#bulletin-project"),
+  bulletinBody: document.querySelector("#bulletin-body"),
+  bulletinCtaText: document.querySelector("#bulletin-cta-text"),
+  bulletinCtaUrl: document.querySelector("#bulletin-cta-url"),
+  bulletinError: document.querySelector("#bulletin-error"),
+  bulletinSubmit: document.querySelector("#bulletin-submit"),
+  bulletinCancelEdit: document.querySelector("#bulletin-cancel-edit"),
+  bulletinFeatured: document.querySelector("#bulletin-featured"),
+  bulletinHistory: document.querySelector("#bulletin-history"),
   liveSyncLabel: document.querySelector("#live-sync-label"),
   resetCodeFields: document.querySelector("#reset-code-fields"),
   toast: document.querySelector("#toast"),
@@ -762,6 +778,10 @@ async function subscribeToRemoteDatabase() {
 }
 
 function handleRemoteBroadcast(message) {
+  if (message?.event === "bulletin_changed") {
+    loadBulletinFeed().then(() => renderBulletins()).catch((error) => console.warn("Realtime bulletin refresh failed", error));
+    return;
+  }
   if (message?.event !== "assignment_snapshot") {
     queueRemoteReload();
     return;
@@ -928,6 +948,7 @@ function startAuthenticatedApp(user, options = {}) {
   markCurrentLeadNotificationsSeen();
   scheduleSync();
   scheduleFollowUpReminders();
+  loadBulletinFeed().then(() => { renderBulletins(); openRequestedBulletin(); }).catch((error) => console.warn("Bulletin feed failed", error));
   switchView(getRequestedStartView());
   renderAll();
   enforceAgentNotificationAccess();
@@ -1919,7 +1940,7 @@ function getNotificationStartUrl(viewName = "") {
 function getRequestedStartView() {
   const params = new URLSearchParams(window.location.search);
   const requestedView = params.get("view") || window.location.hash.replace(/^#/, "");
-  return ["dashboard", "leads", "appointments", "agents", "projects", "lead-monitor", "import-leads"].includes(requestedView) ? requestedView : "dashboard";
+  return ["dashboard", "leads", "appointments", "bulletins", "agents", "projects", "lead-monitor", "import-leads", "integrations"].includes(requestedView) ? requestedView : "dashboard";
 }
 
 async function syncNotificationLead(leadId) {
@@ -2117,7 +2138,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-    .register("/sw.js?v=20260919-pabbly-v82")
+    .register("/sw.js?v=20260920-bulletin-v83")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -5647,6 +5668,87 @@ function integrationPayload(provider) {
   }, null, 2);
 }
 
+function normalizeBulletin(row = {}) {
+  return { id: String(row.id || ""), title: String(row.title || ""), body: String(row.body || ""), status: String(row.status || "published"), projectId: row.project_id || row.projectId || "", projectName: String(row.project_name || row.projectName || "General"), ctaText: String(row.cta_text || row.ctaText || ""), ctaUrl: String(row.cta_url || row.ctaUrl || ""), publishedAt: parseLeadTimestamp(row.published_at || row.publishedAt, Date.now()), readAt: row.read_at || row.readAt || null, recipientCount: Number(row.recipient_count ?? row.recipientCount) || 0, readCount: Number(row.read_count ?? row.readCount) || 0 };
+}
+
+function validBulletinUrl(value) {
+  try { const url = new URL(String(value || "")); return url.protocol === "https:" ? url.href : ""; } catch { return ""; }
+}
+
+async function loadBulletinFeed() {
+  if (!remoteDatabaseMode || !remoteDatabaseClient || !state.currentUserId) return false;
+  const { data, error } = await remoteDatabaseClient.rpc("get_bulletin_feed");
+  if (error) throw error;
+  state.bulletins = (data?.bulletins || []).map(normalizeBulletin);
+  state.bulletinUnreadCount = Number(data?.unread_count) || 0;
+  return true;
+}
+
+async function markBulletinRead(id) {
+  const bulletin = state.bulletins.find((item) => item.id === id);
+  if (!bulletin || isAdmin() || bulletin.readAt || !remoteDatabaseMode) return true;
+  const { error } = await remoteDatabaseClient.rpc("mark_bulletin_read", { p_bulletin_id: id });
+  if (error) throw error;
+  bulletin.readAt = new Date().toISOString();
+  state.bulletinUnreadCount = Math.max(0, state.bulletinUnreadCount - 1);
+  renderBulletins();
+  return true;
+}
+
+function bulletinCard(bulletin, featured = false) {
+  const ctaUrl = validBulletinUrl(bulletin.ctaUrl);
+  const stats = isAdmin() ? `<small>${bulletin.readCount} dibaca / ${bulletin.recipientCount} penerima</small>` : bulletin.readAt ? '<small class="bulletin-read">Sudah dibaca</small>' : '<small class="bulletin-unread">Belum dibaca</small>';
+  return `<article class="bulletin-card ${featured ? "featured" : ""} ${bulletin.status === "archived" ? "archived" : ""}" data-bulletin-open="${bulletin.id}"><span class="section-kicker">${escapeHtml(bulletin.projectName || "General")}</span><h3>${escapeHtml(bulletin.title)}</h3><p>${escapeHtml(bulletin.body).replace(/\n/g, "<br>")}</p><div class="bulletin-card-footer"><small>${formatDateTime(bulletin.publishedAt)}</small>${stats}</div>${ctaUrl ? `<a class="secondary-button compact bulletin-cta" href="${escapeHtml(ctaUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(bulletin.ctaText)}</a>` : ""}${isAdmin() && bulletin.status === "published" ? `<div class="bulletin-admin-actions"><button class="text-button" type="button" data-bulletin-edit="${bulletin.id}">Edit</button><button class="text-button danger-text" type="button" data-bulletin-archive="${bulletin.id}">Archive</button></div>` : ""}</article>`;
+}
+
+function renderBulletins() {
+  if (!elements.bulletinFeatured || !elements.bulletinHistory) return;
+  const rows = state.bulletins || [];
+  const visible = isAdmin() ? rows : rows.filter((bulletin) => bulletin.status === "published");
+  const latest = visible.find((bulletin) => bulletin.status === "published") || visible[0];
+  elements.navBulletinCount.hidden = !state.bulletinUnreadCount;
+  elements.navBulletinCount.textContent = state.bulletinUnreadCount || 0;
+  elements.bulletinFeatured.innerHTML = latest ? bulletinCard(latest, true) : '<div class="empty-state">Tiada hebahan buat masa ini.</div>';
+  elements.bulletinHistory.innerHTML = visible.filter((bulletin) => bulletin.id !== latest?.id).map((bulletin) => bulletinCard(bulletin)).join("") || '<p class="empty-state">Belum ada hebahan lama.</p>';
+  if (isAdmin() && elements.bulletinProject) {
+    const current = elements.bulletinProject.value;
+    elements.bulletinProject.innerHTML = '<option value="">General - semua ejen aktif</option>' + state.projects.filter((project) => project.active).map((project) => `<option value="${project.id}">${escapeHtml(project.name)}</option>`).join("");
+    elements.bulletinProject.value = [...elements.bulletinProject.options].some((option) => option.value === current) ? current : "";
+  }
+}
+
+async function openBulletin(id) {
+  const bulletin = state.bulletins.find((item) => item.id === id);
+  if (!bulletin) return;
+  await markBulletinRead(id).catch(() => false);
+  showToast(bulletin.title, bulletin.body.slice(0, 160), "success");
+}
+
+async function openRequestedBulletin() {
+  if (!pendingBulletinId) return;
+  const id = pendingBulletinId; pendingBulletinId = "";
+  await openBulletin(id);
+}
+
+function resetBulletinForm() {
+  elements.bulletinForm?.reset(); elements.bulletinId.value = ""; elements.bulletinProject.disabled = false; elements.bulletinError.textContent = ""; elements.bulletinSubmit.textContent = "Publish hebahan"; elements.bulletinCancelEdit.hidden = true;
+}
+
+async function saveBulletin(event) {
+  event.preventDefault();
+  const id = elements.bulletinId.value;
+  const title = elements.bulletinTitle.value.trim(); const body = elements.bulletinBody.value.trim(); const ctaText = elements.bulletinCtaText.value.trim(); const ctaUrl = elements.bulletinCtaUrl.value.trim();
+  if ((ctaText || ctaUrl) && (!ctaText || !validBulletinUrl(ctaUrl))) { elements.bulletinError.textContent = "CTA memerlukan teks dan URL https:// yang sah."; return; }
+  elements.bulletinSubmit.disabled = true; elements.bulletinError.textContent = "";
+  try {
+    const args = id ? { p_bulletin_id: id, p_title: title, p_body: body, p_cta_text: ctaText || null, p_cta_url: ctaUrl || null } : { p_title: title, p_body: body, p_project_id: elements.bulletinProject.value || null, p_cta_text: ctaText || null, p_cta_url: ctaUrl || null };
+    const { error } = await remoteDatabaseClient.rpc(id ? "update_bulletin" : "publish_bulletin", args);
+    if (error) throw error;
+    resetBulletinForm(); await loadBulletinFeed(); renderBulletins(); showToast(id ? "Buletin dikemas kini" : "Buletin diterbitkan", "Hebahan telah dihantar kepada penerima.", "success");
+  } catch (error) { elements.bulletinError.textContent = error?.message || "Buletin gagal disimpan."; } finally { elements.bulletinSubmit.disabled = false; }
+}
+
 function renderAll() {
   enforceSingleActiveLead();
   syncExpiryAssignmentTimer();
@@ -5661,6 +5763,7 @@ function renderAll() {
   renderAgents();
   renderProjects();
   renderIntegrationProjects();
+  renderBulletins();
   renderLeadMonitor();
   updateLifecycleMutationGate();
 }
@@ -5673,6 +5776,7 @@ const viewTitles = {
   "lead-monitor": "Monitor Pergerakan Lead",
   "import-leads": "Import Lead",
   integrations: "Integration",
+  bulletins: "Buletin News",
 };
 
 function switchView(viewName) {
@@ -5693,6 +5797,11 @@ function switchView(viewName) {
       : "LeadLaju";
   renderUser();
   if (viewName === "integrations") loadIntegrationStatus();
+  if (viewName === "bulletins") {
+    openRequestedBulletin();
+    const latest = state.bulletins.find((bulletin) => bulletin.status === "published");
+    if (latest) markBulletinRead(latest.id).catch(() => false);
+  }
   setMobileSidebarOpen(false);
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -6922,6 +7031,16 @@ elements.uploadLeadsButton?.addEventListener("click", uploadImportedLeads);
 elements.clearLeadImport?.addEventListener("click", resetLeadImport);
 elements.downloadSampleCsv?.addEventListener("click", downloadLeadSampleCsv);
 elements.downloadSampleXlsx?.addEventListener("click", downloadLeadSampleXlsx);
+elements.bulletinForm?.addEventListener("submit", saveBulletin);
+elements.bulletinCancelEdit?.addEventListener("click", resetBulletinForm);
+document.querySelector("#bulletins-view")?.addEventListener("click", (event) => {
+  const edit = event.target.closest("[data-bulletin-edit]");
+  const archive = event.target.closest("[data-bulletin-archive]");
+  const open = event.target.closest("[data-bulletin-open]");
+  if (edit) { const item = state.bulletins.find((bulletin) => bulletin.id === edit.dataset.bulletinEdit); if (!item) return; elements.bulletinId.value=item.id; elements.bulletinTitle.value=item.title; elements.bulletinBody.value=item.body; elements.bulletinCtaText.value=item.ctaText; elements.bulletinCtaUrl.value=item.ctaUrl; elements.bulletinProject.value=item.projectId || ""; elements.bulletinProject.disabled=true; elements.bulletinSubmit.textContent="Simpan perubahan"; elements.bulletinCancelEdit.hidden=false; window.scrollTo({top: 0, behavior: "smooth"}); return; }
+  if (archive) { remoteDatabaseClient.rpc("archive_bulletin", { p_bulletin_id: archive.dataset.bulletinArchive }).then(({error}) => { if (error) throw error; return loadBulletinFeed(); }).then(() => renderBulletins()).catch((error) => showToast("Archive gagal", error.message, "error")); return; }
+  if (open && !event.target.closest("a,button")) openBulletin(open.dataset.bulletinOpen);
+});
 elements.closePotentialReminder?.addEventListener("click", () => closeModal(elements.potentialReminderModal));
 elements.closeLeadAvailability?.addEventListener("click", () => closeModal(elements.leadAvailabilityModal));
 elements.refreshButton?.addEventListener("click", () => {
@@ -6959,6 +7078,7 @@ if ("serviceWorker" in navigator) {
       if (event.data.leadId) syncNotificationLead(event.data.leadId);
     }
     if (event.data?.type === "OPEN_VIEW") switchView(event.data.view || "dashboard");
+    if (event.data?.type === "OPEN_BULLETIN") { pendingBulletinId = event.data.bulletinId || ""; switchView("bulletins"); loadBulletinFeed().then(openRequestedBulletin); }
     if (event.data?.type === "OPEN_POTENTIAL_REMINDER") handlePotentialReminderNotification();
   });
 }

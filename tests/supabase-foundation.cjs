@@ -369,18 +369,36 @@ test('production runtime config enables Supabase without requiring a query flag'
   assert.match(app, /config\.backend !== "supabase"/);
 });
 
-test('all production devices invalidate the old app shell for the direct Supabase importer', () => {
+test('all production devices invalidate the old app shell for the bulletin-aware Supabase client', () => {
   const worker = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
-  assert.match(worker, /leadlaju-pwa-v20260919-pabbly-v82/);
-  assert.doesNotMatch(worker, /client\.navigate\(/);
-  assert.match(html, /app\.js\?v=20260919-pabbly-v82/);
+  assert.match(worker, /leadlaju-pwa-v20260920-bulletin-v83/);
+  assert.match(worker, /existingClient\.navigate\(targetUrl\)/);
+  assert.match(html, /app\.js\?v=20260920-bulletin-v83/);
   assert.match(html, /vendor\/exceljs\.min\.js\?v=4\.4\.0/);
-  assert.match(app, /register\("\/sw\.js\?v=20260919-pabbly-v82"\)/);
+  assert.match(app, /register\("\/sw\.js\?v=20260920-bulletin-v83"\)/);
   assert.doesNotMatch(app, /get\("backend"\) === "sheet"/);
   assert.match(app, /remoteDatabaseRequired = window\.location\.protocol !== "file:"/);
   assert.match(app, /if \(remoteDatabaseRequired\)[\s\S]*Operasi server lama tidak akan digunakan/);
   assert.match(app, /Supabase dashboard request timed out/);
   assert.match(app, /Supabase client initialization timed out/);
+});
+
+test('bulletins use recipient-scoped RLS, canonical RPCs, generic push, and dedicated realtime reloads', () => {
+  const bulletin = fs.readFileSync(path.join(root, 'supabase/migrations/20260920052133_bulletin_news.sql'), 'utf8');
+  const worker = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
+  assert.match(bulletin, /create table public\.bulletins/);
+  assert.match(bulletin, /create table public\.bulletin_recipients/);
+  assert.match(bulletin, /primary key \(bulletin_id, agent_id\)/);
+  assert.match(bulletin, /alter table public\.bulletins enable row level security/);
+  assert.match(bulletin, /create or replace function public\.publish_bulletin/);
+  assert.match(bulletin, /create or replace function public\.mark_bulletin_read/);
+  assert.match(bulletin, /select r\.agent_id,'bulletin'/);
+  assert.match(bulletin, /'bulletin_changed'/);
+  assert.match(app, /message\?\.event === "bulletin_changed"/);
+  assert.match(app, /rpc\("get_bulletin_feed"\)/);
+  assert.match(html, /data-view="bulletins"/);
+  assert.match(worker, /OPEN_BULLETIN/);
+  assert.match(notificationWorker, /first\.notification_type === "bulletin" \? 86400/);
 });
 
 test('admin lead deletion clears blocking action references and retains ingestion audit safely', () => {

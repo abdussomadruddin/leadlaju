@@ -25,9 +25,9 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260919-pabbly-v82" />
+    <link rel="stylesheet" href="styles.css?v=20260920-bulletin-v83" />
     <script src="vendor/exceljs.min.js?v=4.4.0" defer></script>
-    <script src="app.js?v=20260919-pabbly-v82" defer></script>
+    <script src="app.js?v=20260920-bulletin-v83" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -240,6 +240,11 @@
             </svg>
             Appointment
             <span class="nav-count" id="nav-appointment-count">0</span>
+          </button>
+          <button class="nav-item" data-view="bulletins" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5z" /><path d="M8 8h8M8 12h8M8 16h5" /></svg>
+            Buletin News
+            <span class="nav-count nav-count-alert" id="nav-bulletin-count" hidden>0</span>
           </button>
           <button class="nav-item admin-only" data-view="agents" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -586,6 +591,27 @@
             </div>
             <div class="appointment-list" id="appointment-list"></div>
           </div>
+        </section>
+
+        <section class="view" id="bulletins-view">
+          <div class="content-heading">
+            <div><span class="section-kicker">Makluman pasukan</span><h2>Buletin News</h2><p>Hebahan penting daripada pasukan pengurusan.</p></div>
+          </div>
+          <section class="panel bulletin-composer admin-only" id="bulletin-composer">
+            <div class="panel-heading"><div><span class="section-kicker">Admin sahaja</span><h3>Terbitkan hebahan</h3></div></div>
+            <form id="bulletin-form" class="bulletin-form">
+              <input id="bulletin-id" type="hidden" />
+              <label>Tajuk<input id="bulletin-title" maxlength="120" required /></label>
+              <label>Sasaran<select id="bulletin-project"><option value="">General - semua ejen aktif</option></select></label>
+              <label class="bulletin-body-field">Hebahan<textarea id="bulletin-body" maxlength="5000" required></textarea></label>
+              <label>CTA (optional)<input id="bulletin-cta-text" maxlength="40" placeholder="Contoh: Lihat detail" /></label>
+              <label>URL CTA (https://)<input id="bulletin-cta-url" type="url" maxlength="2048" placeholder="https://..." /></label>
+              <p class="field-error" id="bulletin-error"></p>
+              <div class="form-actions"><button class="primary-button" id="bulletin-submit" type="submit">Publish hebahan</button><button class="secondary-button" id="bulletin-cancel-edit" type="button" hidden>Batal edit</button></div>
+            </form>
+          </section>
+          <section class="bulletin-featured" id="bulletin-featured"></section>
+          <section class="panel bulletin-history-panel"><div class="panel-heading"><div><span class="section-kicker">Arkib hebahan</span><h3>History</h3></div></div><div id="bulletin-history" class="bulletin-history"></div></section>
         </section>
 
         <section class="view admin-only-view" id="agents-view">
