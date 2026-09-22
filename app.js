@@ -775,7 +775,10 @@ async function subscribeToRemoteDatabase() {
     const channel = remoteDatabaseClient.channel(topic, { config: { private: true } })
       .on("broadcast", { event: "*" }, handleRemoteBroadcast)
       .subscribe((status) => {
-        if (status === "SUBSCRIBED") queueRemoteReload();
+        if (status === "SUBSCRIBED") {
+          queueRemoteReload();
+          loadBulletinFeed().then(() => renderBulletins()).catch((error) => console.warn("Realtime bulletin catch-up failed", error));
+        }
       });
     remoteRealtimeChannels.push(channel);
   });
@@ -1731,8 +1734,9 @@ function failLifecycleSync() {
 function runLifecycleAuthoritativeSync() {
   if (typeof remoteDatabaseMode !== "undefined" && remoteDatabaseMode) {
     return loadRemoteState(state.currentUserId)
-      .then((success) => {
+      .then(async (success) => {
         if (success) {
+          await loadBulletinFeed();
           renderAll();
           completeLifecycleAuthoritativeRender();
         } else failLifecycleSync();
@@ -2143,7 +2147,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-    .register("/sw.js?v=20260921-home-screen-guide-v89")
+    .register("/sw.js?v=20260922-bulletin-catchup-v90")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -7122,6 +7126,7 @@ window.addEventListener("focus", () => {
   processExpiredLeads();
   checkFollowUpReminder();
   if (latestAdminReminder) sendAdminFollowUpNotification(latestAdminReminder);
+  beginResumeSync();
 });
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
