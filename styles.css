@@ -50,6 +50,15 @@ body.authenticated {
   overflow-x: hidden;
 }
 
+body.agent-access-locked {
+  overflow: hidden;
+}
+
+body.agent-access-locked .app-shell {
+  pointer-events: none;
+  user-select: none;
+}
+
 body.auth-pending .login-screen,
 body.auth-pending .app-shell,
 body.authenticated .login-screen,
@@ -3873,6 +3882,14 @@ td small {
 .notification-required-card {
   width: min(410px, 100%);
   text-align: center;
+}
+
+.agent-access-locked #notification-required-modal {
+  z-index: 140;
+}
+
+.notification-required-card [hidden] {
+  display: none !important;
 }
 
 .potential-reminder-card {

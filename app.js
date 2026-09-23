@@ -168,7 +168,8 @@ let cachedAssignmentCheckInProgress = false;
 let notificationAudioContext = null;
 let lastAgentPresenceHeartbeatAt = 0;
 let deferredInstallPrompt = null;
-let notificationReminderDismissedForSession = false;
+let agentPushAccessReady = false;
+let agentPushAccessCheckInProgress = false;
 const expandedProjectStatusIds = new Set();
 let agentPresenceSessionStartedAt = 0;
 let notifiedLeadKeys = loadNotifiedLeadKeys();
@@ -965,7 +966,9 @@ function startAuthenticatedApp(user, options = {}) {
   }, 1000);
   scheduleExpiryWatchdog();
   registerServiceWorker().then(() => announceAssignmentReceiverReady());
-  syncPushSubscription().catch((error) => console.warn("Push subscription sync failed", error));
+  if (user.role === "admin") {
+    syncPushSubscription().catch((error) => console.warn("Push subscription sync failed", error));
+  }
   markCurrentLeadNotificationsSeen();
   scheduleSync();
   scheduleFollowUpReminders();
@@ -1307,6 +1310,8 @@ function logout() {
     sendAgentLogoutState(user);
   }
   localStorage.removeItem("leadlaju-push-subscription-owner");
+  agentPushAccessReady = false;
+  document.body.classList.remove("agent-access-locked");
   localStorage.removeItem(AUTH_KEY);
   const wasRemote = remoteDatabaseMode;
   remoteRealtimeChannels.forEach((channel) => remoteDatabaseClient?.removeChannel(channel));
@@ -2161,7 +2166,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-    .register("/sw.js?v=20260923-follow-up-due-v91")
+    .register("/sw.js?v=20260923-agent-pwa-gate-v92")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -3549,19 +3554,84 @@ async function setAgentLeadAvailability(ready) {
   }
 }
 
-function enforceAgentNotificationAccess() {
-  const user = getCurrentUser();
-  if (user?.role !== "agent") return;
-  const granted = "Notification" in window && Notification.permission === "granted";
-  const showReminder = !granted && !notificationReminderDismissedForSession;
-  elements.notificationRequiredModal.classList.toggle("open", showReminder);
-  elements.notificationRequiredModal.setAttribute("aria-hidden", String(!showReminder));
-  if (granted) notificationReminderDismissedForSession = false;
-  if (granted) updateAgentPresence(true);
-}
-
 function isInstalledApp() {
   return window.matchMedia?.("(display-mode: standalone)").matches || window.navigator.standalone === true;
+}
+
+function getAgentAppAccessState() {
+  if (!isPhonePushDevice()) return "phone-required";
+  if (!isInstalledApp()) return "install-required";
+  if (!("Notification" in window) || Notification.permission !== "granted") return "permission-required";
+  if (!agentPushAccessReady) return "subscription-required";
+  return "ready";
+}
+
+function renderAgentAccessGate(accessState) {
+  const locked = accessState !== "ready";
+  document.body.classList.toggle("agent-access-locked", locked);
+  elements.notificationRequiredModal.classList.toggle("open", locked);
+  elements.notificationRequiredModal.setAttribute("aria-hidden", String(!locked));
+  if (!locked) return;
+
+  const title = elements.notificationRequiredModal.querySelector("#notification-required-title");
+  const steps = elements.notificationRequiredModal.querySelector("#notification-required-description");
+  elements.homeScreenHelp.hidden = true;
+
+  if (accessState === "phone-required") {
+    title.textContent = "Gunakan aplikasi telefon";
+    steps.innerHTML = "<li><span>Buka <strong>leadlaju.vercel.app</strong> pada iPhone atau telefon Android.</span></li><li><span>Tambah LeadLaju ke Home Screen dan buka melalui ikon aplikasi.</span></li><li><span>Aktifkan loceng untuk mula menggunakan LeadLaju.</span></li>";
+    elements.addToHomeScreen.hidden = true;
+    elements.enableRequiredNotifications.hidden = true;
+    return;
+  }
+
+  if (accessState === "install-required") {
+    title.textContent = "Pasang LeadLaju";
+    steps.innerHTML = "<li><span>Tekan <strong>Settings</strong> pada browser atau butang <strong>Share</strong>.</span></li><li><span>Pilih <strong>Add to Home Screen</strong>, kemudian tekan Add.</span></li><li><span>Tutup browser dan buka LeadLaju melalui ikon aplikasi.</span></li>";
+    elements.addToHomeScreen.hidden = false;
+    elements.enableRequiredNotifications.hidden = true;
+    return;
+  }
+
+  title.textContent = accessState === "subscription-required" ? "Sediakan notifikasi" : "Aktifkan notifikasi";
+  steps.innerHTML = accessState === "subscription-required"
+    ? "<li><span>Notifikasi mesti disambungkan kepada peranti ini sebelum LeadLaju boleh digunakan.</span></li><li><span>Tekan <strong>Sambung semula</strong> jika proses tidak selesai.</span></li>"
+    : "<li><span>Tekan <strong>Aktifkan loceng</strong>.</span></li><li><span>Pilih <strong>Allow</strong> apabila telefon meminta kebenaran.</span></li><li><span>LeadLaju dibuka selepas notifikasi berjaya disambungkan.</span></li>";
+  elements.addToHomeScreen.hidden = true;
+  elements.enableRequiredNotifications.hidden = false;
+  elements.enableRequiredNotifications.querySelector("span").textContent = accessState === "subscription-required"
+    ? "Sambung semula"
+    : "Aktifkan loceng";
+}
+
+async function verifyAgentPushAccess(force = false) {
+  if (agentPushAccessCheckInProgress || !isPhonePushDevice() || !isInstalledApp()) return false;
+  if (!("Notification" in window) || Notification.permission !== "granted") return false;
+  agentPushAccessCheckInProgress = true;
+  try {
+    agentPushAccessReady = await syncPushSubscription(force).catch((error) => {
+      console.warn("Agent push access check failed", error);
+      return false;
+    });
+    return agentPushAccessReady;
+  } finally {
+    agentPushAccessCheckInProgress = false;
+    renderAgentAccessGate(getAgentAppAccessState());
+  }
+}
+
+function enforceAgentNotificationAccess() {
+  const user = getCurrentUser();
+  if (user?.role !== "agent") {
+    document.body.classList.remove("agent-access-locked");
+    elements.notificationRequiredModal.classList.remove("open");
+    elements.notificationRequiredModal.setAttribute("aria-hidden", "true");
+    return;
+  }
+  const accessState = getAgentAppAccessState();
+  renderAgentAccessGate(accessState);
+  if (accessState === "subscription-required") verifyAgentPushAccess();
+  if (accessState === "ready") updateAgentPresence(true);
 }
 
 function showHomeScreenHelp() {
@@ -3588,7 +3658,10 @@ async function addToHomeScreen() {
 }
 
 function closeNotificationReminder() {
-  notificationReminderDismissedForSession = true;
+  if (getCurrentUser()?.role === "agent") {
+    logout();
+    return;
+  }
   elements.notificationRequiredModal.classList.remove("open");
   elements.notificationRequiredModal.setAttribute("aria-hidden", "true");
 }
@@ -4216,6 +4289,10 @@ function scheduleFollowUpReminders() {
 }
 
 async function requestNotifications() {
+  if (getCurrentUser()?.role === "agent" && (!isPhonePushDevice() || !isInstalledApp())) {
+    enforceAgentNotificationAccess();
+    return;
+  }
   if (!("Notification" in window)) {
     showToast("Tidak disokong", "Pelayar ini tidak menyokong notifikasi sistem.", "error");
     return;
@@ -4223,20 +4300,26 @@ async function requestNotifications() {
   await registerServiceWorker();
   await playNotificationSound();
   if (Notification.permission === "granted") {
-    await syncPushSubscription(true).catch((error) => console.warn("Push subscription sync failed", error));
-    showToast("Notifikasi aktif", "Lead baru dan reminder follow up akan keluar notifikasi sistem.");
+    const subscribed = isAdmin()
+      ? await syncPushSubscription(true).catch(() => false)
+      : await verifyAgentPushAccess(true);
+    showToast(
+      subscribed ? "Notifikasi aktif" : "Notifikasi belum disambungkan",
+      subscribed ? "Lead baru dan reminder follow up akan keluar notifikasi sistem." : "Semak internet dan tekan Sambung semula.",
+      subscribed ? "success" : "error",
+    );
     enforceAgentNotificationAccess();
     return;
   }
   const permission = await Notification.requestPermission();
   if (permission === "granted") {
     await playNotificationSound();
-    await syncPushSubscription(true).catch((error) => console.warn("Push subscription sync failed", error));
-    elements.notificationRequiredModal.classList.remove("open");
-    elements.notificationRequiredModal.setAttribute("aria-hidden", "true");
-    notificationReminderDismissedForSession = false;
-    await updateAgentPresence(true, true);
+    const subscribed = isAdmin()
+      ? await syncPushSubscription(true).catch(() => false)
+      : await verifyAgentPushAccess(true);
+    if (subscribed) await updateAgentPresence(true, true);
   }
+  enforceAgentNotificationAccess();
   showToast(
     permission === "granted" ? "Notifikasi diaktifkan" : "Notifikasi belum aktif",
     permission === "granted"
@@ -7243,9 +7326,11 @@ window.addEventListener("beforeinstallprompt", (event) => {
 window.addEventListener("appinstalled", () => {
   deferredInstallPrompt = null;
   showToast("LeadLaju dipasang", "Buka aplikasi dari skrin utama dan aktifkan loceng untuk notifikasi lead baharu.", "success");
+  enforceAgentNotificationAccess();
 });
 
 window.addEventListener("focus", () => {
+  enforceAgentNotificationAccess();
   processExpiredLeads();
   checkFollowUpReminder();
   if (latestAdminReminder) sendAdminFollowUpNotification(latestAdminReminder);
@@ -7255,6 +7340,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     runtimeWasHidden = true;
   } else {
+    enforceAgentNotificationAccess();
     processExpiredLeads();
     checkFollowUpReminder();
     if (latestAdminReminder) sendAdminFollowUpNotification(latestAdminReminder);

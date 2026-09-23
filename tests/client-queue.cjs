@@ -633,13 +633,17 @@ test('newer assignment and status revisions reject stale rows but accept newer a
 test('every device blocks agent access until its own notification permission is granted', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const html = fs.readFileSync('index.html', 'utf8');
-  const accessStart = source.indexOf('function enforceAgentNotificationAccess(');
+  const stateStart = source.indexOf('function getAgentAppAccessState(');
+  const stateBody = source.slice(stateStart, source.indexOf('\nfunction ', stateStart + 1));
+  const accessStart = source.indexOf('function renderAgentAccessGate(');
   const accessBody = source.slice(accessStart, source.indexOf('\nasync function ', accessStart + 1));
   const syncStart = source.indexOf('async function syncGoogleSheet(');
   const syncBody = source.slice(syncStart, source.indexOf('\nfunction ', syncStart + 1));
-  assert.match(accessBody, /Notification\.permission === "granted"/);
-  assert.match(accessBody, /const showReminder = !granted && !notificationReminderDismissedForSession/);
-  assert.match(accessBody, /notificationRequiredModal\.classList\.toggle\("open", showReminder\)/);
+  assert.match(stateBody, /Notification\.permission !== "granted"/);
+  assert.match(stateBody, /!isPhonePushDevice\(\)/);
+  assert.match(stateBody, /!isInstalledApp\(\)/);
+  assert.match(stateBody, /!agentPushAccessReady/);
+  assert.match(accessBody, /notificationRequiredModal\.classList\.toggle\("open", locked\)/);
   assert.match(syncBody, /enforceAgentNotificationAccess\(\)/);
   assert.match(html, /Tekan <strong>Settings<\/strong> pada browser atau butang <strong>Share<\/strong>/);
   assert.match(html, /Pilih <strong>Add to Home Screen<\/strong>/);
@@ -1599,8 +1603,8 @@ test('a stale assignment timer revalidates the exact assignment before expiry', 
 
 test('focus and visibility immediately recheck an overdue assignment', () => {
   const source = fs.readFileSync('app.js', 'utf8');
-  assert.match(source, /window\.addEventListener\("focus", \(\) => \{\s*processExpiredLeads\(\)/);
-  assert.match(source, /document\.addEventListener\("visibilitychange", \(\) => \{[\s\S]*?if \(document\.hidden\)[\s\S]*?else \{\s*processExpiredLeads\(\)/);
+  assert.match(source, /window\.addEventListener\("focus", \(\) => \{[\s\S]*?processExpiredLeads\(\)/);
+  assert.match(source, /document\.addEventListener\("visibilitychange", \(\) => \{[\s\S]*?if \(document\.hidden\)[\s\S]*?else \{[\s\S]*?processExpiredLeads\(\)/);
 });
 
 test('failed expiry stays authoritative locally and becomes retryable', () => {
