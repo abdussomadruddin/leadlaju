@@ -25,9 +25,9 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260922-bulletin-catchup-v90" />
+    <link rel="stylesheet" href="styles.css?v=20260923-follow-up-due-v91" />
     <script src="vendor/exceljs.min.js?v=4.4.0" defer></script>
-    <script src="app.js?v=20260922-bulletin-catchup-v90" defer></script>
+    <script src="app.js?v=20260923-follow-up-due-v91" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -240,6 +240,14 @@
             </svg>
             Appointment
             <span class="nav-count" id="nav-appointment-count">0</span>
+          </button>
+          <button class="nav-item" data-view="follow-up-due" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 8v5l3 2" />
+              <circle cx="12" cy="12" r="9" />
+            </svg>
+            <span>Follow Up Due</span>
+            <span class="nav-count nav-count-alert" id="nav-follow-up-count" hidden>0</span>
           </button>
           <button class="nav-item" data-view="bulletins" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5z" /><path d="M8 8h8M8 12h8M8 16h5" /></svg>
@@ -590,6 +598,30 @@
               <span class="queue-label" id="appointment-count">0 appointment</span>
             </div>
             <div class="appointment-list" id="appointment-list"></div>
+          </div>
+        </section>
+
+        <section class="view" id="follow-up-due-view">
+          <div class="content-heading follow-up-heading">
+            <div>
+              <span class="section-kicker">Susulan pelanggan</span>
+              <h2>Follow Up Due</h2>
+              <p>Lead Contacted tanpa kemas kini remark selama 2 hari.</p>
+            </div>
+            <span class="queue-label" id="follow-up-count">0 case</span>
+          </div>
+          <div class="table-card follow-up-due-card">
+            <div class="table-toolbar follow-up-toolbar">
+              <select class="admin-only" id="follow-up-agent-filter" aria-label="Tapis ejen">
+                <option value="all">Semua ejen</option>
+              </select>
+              <select class="admin-only" id="follow-up-project-filter" aria-label="Tapis projek">
+                <option value="all">Semua projek</option>
+              </select>
+              <select id="follow-up-month-filter" aria-label="Tapis bulan"></select>
+              <select id="follow-up-year-filter" aria-label="Tapis tahun"></select>
+            </div>
+            <div class="follow-up-due-list" id="follow-up-due-list"></div>
           </div>
         </section>
 

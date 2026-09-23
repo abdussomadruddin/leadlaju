@@ -105,6 +105,9 @@ const defaultState = {
   activities: [],
   bulletins: [],
   bulletinUnreadCount: 0,
+  followUpDue: [],
+  followUpServerNow: null,
+  followUpLoadedAt: null,
   roundRobinIndex: 0,
   integration: {
     endpoint: DEFAULT_GOOGLE_SHEET_ENDPOINT,
@@ -242,6 +245,7 @@ const elements = {
   queueLabel: document.querySelector("#queue-label"),
   navLeadCount: document.querySelector("#nav-lead-count"),
   navAppointmentCount: document.querySelector("#nav-appointment-count"),
+  navFollowUpCount: document.querySelector("#nav-follow-up-count"),
   navBulletinCount: document.querySelector("#nav-bulletin-count"),
   notificationCount: document.querySelector("#notification-count"),
   notificationButton: document.querySelector("#notification-button"),
@@ -326,6 +330,12 @@ const elements = {
   appointmentNotes: document.querySelector("#appointment-notes"),
   appointmentFormError: document.querySelector("#appointment-form-error"),
   appointmentSubmitButton: document.querySelector("#appointment-submit-button"),
+  followUpDueList: document.querySelector("#follow-up-due-list"),
+  followUpCount: document.querySelector("#follow-up-count"),
+  followUpAgentFilter: document.querySelector("#follow-up-agent-filter"),
+  followUpProjectFilter: document.querySelector("#follow-up-project-filter"),
+  followUpMonthFilter: document.querySelector("#follow-up-month-filter"),
+  followUpYearFilter: document.querySelector("#follow-up-year-filter"),
   contactModal: document.querySelector("#contact-modal"),
   contactForm: document.querySelector("#contact-form"),
   contactName: document.querySelector("#contact-name"),
@@ -674,6 +684,7 @@ function mapLead(row) {
     queueState: String(row.queue_state || "").toLowerCase(),
     responseMs: row.response_ms,
     contactedAt: row.contacted_at ? new Date(row.contacted_at).getTime() : null,
+    followUpActivityAt: row.follow_up_activity_at ? new Date(row.follow_up_activity_at).getTime() : null,
     notes: row.notes || "",
   };
 }
@@ -750,6 +761,7 @@ async function loadRemoteState(userId) {
       }),
     };
     remoteDatabaseMode = true;
+    await loadFollowUpDueFeed();
     saveState();
     if (shouldDetectNewLeads) {
       await notifyForNewVisibleLeads(previousLeadKeys);
@@ -778,6 +790,7 @@ async function subscribeToRemoteDatabase() {
         if (status === "SUBSCRIBED") {
           queueRemoteReload();
           loadBulletinFeed().then(() => renderBulletins()).catch((error) => console.warn("Realtime bulletin catch-up failed", error));
+          loadFollowUpDueFeed().then(() => renderFollowUpDue()).catch((error) => console.warn("Realtime follow-up catch-up failed", error));
         }
       });
     remoteRealtimeChannels.push(channel);
@@ -957,6 +970,7 @@ function startAuthenticatedApp(user, options = {}) {
   scheduleSync();
   scheduleFollowUpReminders();
   loadBulletinFeed().then(() => { renderBulletins(); openRequestedBulletin(); }).catch((error) => console.warn("Bulletin feed failed", error));
+  loadFollowUpDueFeed().then(renderFollowUpDue).catch((error) => console.warn("Follow-up feed failed", error));
   switchView(getRequestedStartView());
   renderAll();
   enforceAgentNotificationAccess();
@@ -1949,7 +1963,7 @@ function getNotificationStartUrl(viewName = "") {
 function getRequestedStartView() {
   const params = new URLSearchParams(window.location.search);
   const requestedView = params.get("view") || window.location.hash.replace(/^#/, "");
-  return ["dashboard", "leads", "appointments", "bulletins", "agents", "projects", "lead-monitor", "import-leads", "integrations"].includes(requestedView) ? requestedView : "dashboard";
+  return ["dashboard", "leads", "appointments", "follow-up-due", "bulletins", "agents", "projects", "lead-monitor", "import-leads", "integrations"].includes(requestedView) ? requestedView : "dashboard";
 }
 
 async function syncNotificationLead(leadId) {
@@ -2147,7 +2161,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-    .register("/sw.js?v=20260922-bulletin-catchup-v90")
+    .register("/sw.js?v=20260923-follow-up-due-v91")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -5776,6 +5790,98 @@ async function remindUnreadBulletin(id, button) {
   }
 }
 
+function normalizeFollowUpDue(row) {
+  return {
+    id: String(row.id || ""),
+    name: String(row.name || "Lead"),
+    phone: String(row.phone || ""),
+    email: String(row.email || ""),
+    city: String(row.city || ""),
+    notes: String(row.notes || ""),
+    projectId: String(row.project_id || ""),
+    project: String(row.project || "Tidak dinyatakan"),
+    assignedAgentId: String(row.assigned_agent_id || ""),
+    assignedAgentName: String(row.assigned_agent_name || "Tiada ejen"),
+    assignmentRevision: Number(row.assignment_revision) || 0,
+    statusRevision: Number(row.status_revision) || 0,
+    contactedAt: row.contacted_at ? new Date(row.contacted_at).getTime() : null,
+    followUpActivityAt: row.follow_up_activity_at ? new Date(row.follow_up_activity_at).getTime() : null,
+    dueAt: row.due_at ? new Date(row.due_at).getTime() : null,
+    notificationDueAt: row.notification_due_at ? new Date(row.notification_due_at).getTime() : null,
+  };
+}
+
+async function loadFollowUpDueFeed() {
+  if (!remoteDatabaseClient || !remoteDatabaseMode || !state.currentUserId) return false;
+  const { data, error } = await remoteDatabaseClient.rpc("get_follow_up_due");
+  if (error) throw error;
+  state.followUpDue = (data?.leads || []).map(normalizeFollowUpDue);
+  state.followUpServerNow = data?.server_now ? new Date(data.server_now).getTime() : Date.now();
+  state.followUpLoadedAt = Date.now();
+  return true;
+}
+
+function followUpCanonicalNow() {
+  if (!state.followUpServerNow || !state.followUpLoadedAt) return Date.now();
+  return state.followUpServerNow + Math.max(0, Date.now() - state.followUpLoadedAt);
+}
+
+function followUpOverdueLabel(item) {
+  const elapsed = Math.max(0, followUpCanonicalNow() - Number(item.dueAt || followUpCanonicalNow()));
+  const hours = Math.floor(elapsed / (60 * 60 * 1000));
+  if (hours < 24) return `${hours} jam overdue`;
+  const days = Math.floor(hours / 24);
+  const remainingHours = hours % 24;
+  return remainingHours ? `${days} hari ${remainingHours} jam overdue` : `${days} hari overdue`;
+}
+
+function renderFollowUpDue() {
+  if (!elements.followUpDueList) return;
+  const rows = Array.isArray(state.followUpDue) ? state.followUpDue : [];
+  const selectedAgent = elements.followUpAgentFilter?.value || "all";
+  const selectedProject = elements.followUpProjectFilter?.value || "all";
+
+  if (isAdmin() && elements.followUpAgentFilter) {
+    const agents = [...new Map(rows.map((item) => [item.assignedAgentId, item.assignedAgentName])).entries()];
+    elements.followUpAgentFilter.innerHTML = '<option value="all">Semua ejen</option>' + agents
+      .map(([id, name]) => `<option value="${escapeHtml(id)}">${escapeHtml(name)}</option>`).join("");
+    elements.followUpAgentFilter.value = agents.some(([id]) => id === selectedAgent) ? selectedAgent : "all";
+  }
+  if (isAdmin() && elements.followUpProjectFilter) {
+    const projects = [...new Set(rows.map((item) => item.project).filter(Boolean))].sort();
+    elements.followUpProjectFilter.innerHTML = '<option value="all">Semua projek</option>' + projects
+      .map((project) => `<option value="${escapeHtml(project)}">${escapeHtml(project)}</option>`).join("");
+    elements.followUpProjectFilter.value = projects.includes(selectedProject) ? selectedProject : "all";
+  }
+
+  populateMonthYearFilters(
+    elements.followUpMonthFilter,
+    elements.followUpYearFilter,
+    rows,
+    (item) => item.followUpActivityAt,
+  );
+  const filtered = rows.filter((item) =>
+    (!isAdmin() || elements.followUpAgentFilter?.value === "all" || item.assignedAgentId === elements.followUpAgentFilter.value) &&
+    (!isAdmin() || elements.followUpProjectFilter?.value === "all" || item.project === elements.followUpProjectFilter.value) &&
+    matchesMonthYearFilter(item.followUpActivityAt, elements.followUpMonthFilter, elements.followUpYearFilter)
+  );
+
+  elements.navFollowUpCount.hidden = rows.length === 0;
+  elements.navFollowUpCount.textContent = rows.length;
+  elements.followUpCount.textContent = `${filtered.length} case`;
+  elements.followUpDueList.innerHTML = filtered.length ? filtered.map((item) => `
+    <article class="follow-up-due-item">
+      <div class="follow-up-lead">
+        <span class="member-avatar">${initials(item.name)}</span>
+        <span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.project)}</small></span>
+      </div>
+      <div class="follow-up-owner"><small>Ejen</small><strong>${escapeHtml(item.assignedAgentName)}</strong></div>
+      <div class="follow-up-note"><small>Remark terakhir</small><p>${escapeHtml(item.notes || "Belum ada remark")}</p></div>
+      <div class="follow-up-time"><strong>${followUpOverdueLabel(item)}</strong><small>Dikemas kini ${formatDateTime(item.followUpActivityAt)}</small></div>
+      <button class="secondary-button compact" type="button" data-follow-up-open="${item.id}">Buka lead</button>
+    </article>`).join("") : '<div class="follow-up-empty"><span aria-hidden="true">✓</span><strong>Semua follow up terkawal</strong><p>Tiada lead Contacted yang melebihi 2 hari tanpa kemas kini.</p></div>';
+}
+
 function renderAll() {
   enforceSingleActiveLead();
   syncExpiryAssignmentTimer();
@@ -5791,6 +5897,7 @@ function renderAll() {
   renderProjects();
   renderIntegrationProjects();
   renderBulletins();
+  renderFollowUpDue();
   renderLeadMonitor();
   updateLifecycleMutationGate();
 }
@@ -5798,6 +5905,7 @@ function renderAll() {
 const viewTitles = {
   leads: "Log Lead",
   appointments: "Appointment Tracker",
+  "follow-up-due": "Follow Up Due",
   agents: "Pengurusan Ejen",
   projects: "Projek",
   "lead-monitor": "Monitor Pergerakan Lead",
@@ -5828,6 +5936,9 @@ function switchView(viewName) {
     openRequestedBulletin();
     const latest = state.bulletins.find((bulletin) => bulletin.status === "published");
     if (latest) markBulletinRead(latest.id).catch(() => false);
+  }
+  if (viewName === "follow-up-due") {
+    loadFollowUpDueFeed().then(renderFollowUpDue).catch((error) => console.warn("Follow-up feed failed", error));
   }
   setMobileSidebarOpen(false);
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -6985,6 +7096,10 @@ elements.appointmentStatusFilter?.addEventListener("change", renderAppointments)
 elements.appointmentProjectFilter?.addEventListener("change", renderAppointments);
 elements.appointmentMonthFilter?.addEventListener("change", renderAppointments);
 elements.appointmentYearFilter?.addEventListener("change", renderAppointments);
+elements.followUpAgentFilter?.addEventListener("change", renderFollowUpDue);
+elements.followUpProjectFilter?.addEventListener("change", renderFollowUpDue);
+elements.followUpMonthFilter?.addEventListener("change", renderFollowUpDue);
+elements.followUpYearFilter?.addEventListener("change", renderFollowUpDue);
 elements.monitorSeverityFilter?.addEventListener("change", renderLeadMonitor);
 elements.monitorAgentFilter?.addEventListener("change", renderLeadMonitor);
 elements.monitorRefreshButton?.addEventListener("click", async () => {
@@ -7037,6 +7152,14 @@ elements.appointmentList?.addEventListener("click", (event) => {
     if (appointment) openAppointmentModal(appointment.leadId, appointment.id, "edit");
   }
   if (remove) deleteAppointment(remove.dataset.appointmentDelete);
+});
+elements.followUpDueList?.addEventListener("click", (event) => {
+  const open = event.target.closest("[data-follow-up-open]");
+  if (!open) return;
+  const item = state.followUpDue.find((row) => row.id === open.dataset.followUpOpen);
+  elements.leadSearch.value = item?.name || open.dataset.followUpOpen;
+  switchView("leads");
+  renderLeadsTable();
 });
 elements.leadsTableBody.addEventListener("change", (event) => {
   const statusField = event.target.closest("[data-lead-status]");

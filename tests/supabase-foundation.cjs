@@ -369,13 +369,13 @@ test('production runtime config enables Supabase without requiring a query flag'
   assert.match(app, /config\.backend !== "supabase"/);
 });
 
-test('all production devices invalidate the old app shell for bulletin catch-up', () => {
+test('all production devices invalidate the old app shell for Follow Up Due', () => {
   const worker = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
-  assert.match(worker, /leadlaju-pwa-v20260922-bulletin-catchup-v90/);
+  assert.match(worker, /leadlaju-pwa-v20260923-follow-up-due-v91/);
   assert.match(worker, /existingClient\.navigate\(targetUrl\)/);
-  assert.match(html, /app\.js\?v=20260922-bulletin-catchup-v90/);
+  assert.match(html, /app\.js\?v=20260923-follow-up-due-v91/);
   assert.match(html, /vendor\/exceljs\.min\.js\?v=4\.4\.0/);
-  assert.match(app, /register\("\/sw\.js\?v=20260922-bulletin-catchup-v90"\)/);
+  assert.match(app, /register\("\/sw\.js\?v=20260923-follow-up-due-v91"\)/);
   assert.doesNotMatch(app, /get\("backend"\) === "sheet"/);
   assert.match(app, /remoteDatabaseRequired = window\.location\.protocol !== "file:"/);
   assert.match(app, /if \(remoteDatabaseRequired\)[\s\S]*Operasi server lama tidak akan digunakan/);

@@ -47,6 +47,25 @@ Deno.serve(async (request) => {
   for (const [outboxId, rows] of groups) {
     const first = rows[0];
     if (first.notification_type !== "new_lead") {
+      if (first.notification_type === "follow_up_due") {
+        const { data: countData, error: followUpError } = await admin
+          .rpc("get_follow_up_notification_count", { p_agent_id: first.user_id });
+        const count = Number(countData) || 0;
+        if (followUpError || !count) {
+          await admin.rpc("finish_notification_outbox", {
+            p_outbox_id: outboxId,
+            p_success: !followUpError,
+            p_error: followUpError?.message || null,
+          });
+          if (followUpError) failed += 1;
+          continue;
+        }
+        first.payload = {
+          ...first.payload,
+          body: `${count} lead perlu follow up.`,
+          followUpDueCount: count,
+        };
+      }
       const notification = JSON.stringify({
         title: String(first.payload?.title || "LeadLaju notification"),
         body: String(first.payload?.body || "Ada update baru dalam LeadLaju."),
@@ -59,6 +78,7 @@ Deno.serve(async (request) => {
         view: first.payload?.view || null,
         reminderType: first.payload?.reminderType || null,
         potentialCount: Number(first.payload?.potentialCount) || 0,
+        followUpDueCount: Number(first.payload?.followUpDueCount) || 0,
         bulletinId: first.payload?.bulletinId || null,
       });
       let delivered = 0;
