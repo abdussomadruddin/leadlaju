@@ -2290,7 +2290,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-    .register("/sw.js?v=20260926-follow-up-due-v97")
+    .register("/sw.js?v=20260926-lead-copy-v98")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -5087,6 +5087,35 @@ function renderLeadFollowUpButton(lead, actionAttribute = "data-lead-follow-up")
   return `<button class="contact-edit-button lead-follow-up-button follow-up-stage-${followUpCount}" type="button" ${actionAttribute}="${escapeHtml(lead?.id || "")}" ${!whatsappUrl || followUpCount >= 6 ? "disabled" : ""} title="${title}">${icon}<span>Follow Up${followUpCount ? ` ${followUpCount}` : ""}</span></button>`;
 }
 
+function renderLeadCopyButton(lead, actionAttribute = "data-lead-copy") {
+  const available = lead && canAccessLead(lead) && canViewLeadPhone(lead);
+  return `<button class="contact-edit-button lead-copy-button" type="button" ${actionAttribute}="${escapeHtml(lead?.id || "")}" ${available ? "" : "disabled"} title="${available ? "Copy details lead" : "Tekan CALL NOW dahulu"}" aria-label="Copy details ${escapeHtml(lead?.name || "lead")}">Copy</button>`;
+}
+
+function leadDetailsCopyText(lead) {
+  return [
+    "*Inquiry For House*",
+    "",
+    `Nama: ${String(lead.name || "-").trim()}`,
+    `No Phone: ${String(lead.phone || "-").trim()}`,
+    `Email: ${String(lead.email || "-").trim()}`,
+    `Projek: ${String(lead.project || "Tidak dinyatakan").trim()}`,
+  ].join("\n");
+}
+
+async function copyLeadDetails(leadId) {
+  const lead = state.leads.find((item) => item.id === leadId);
+  if (!lead || !canAccessLead(lead) || !canViewLeadPhone(lead)) return false;
+  try {
+    await navigator.clipboard.writeText(leadDetailsCopyText(lead));
+    showToast("Details disalin", `${lead.name} telah disalin.`, "success");
+    return true;
+  } catch {
+    showToast("Copy gagal", "Benarkan akses clipboard dan cuba lagi.", "error");
+    return false;
+  }
+}
+
 function renderLeadsTable() {
   const focusedNote = document.activeElement;
   if (focusedNote?.matches("[data-lead-note]") && elements.leadsTableBody.contains(focusedNote)) {
@@ -5211,10 +5240,11 @@ function renderLeadsTable() {
               <td data-label="Status"><select class="lead-status-select ${visualStatus}" data-lead-status="${lead.id}" aria-label="Status ${escapeHtml(lead.name)}">${statusOptions}</select></td>
               <td data-label="Call">${callButton}</td>
               <td data-label="Follow Up">${followUpButton}</td>
+              <td data-label="Copy">${renderLeadCopyButton(lead)}</td>
               <td data-label="Butiran"><button class="lead-log-toggle" type="button" data-lead-expand="${lead.id}" aria-expanded="${expanded}" aria-controls="lead-log-detail-${lead.id}" aria-label="${expanded ? "Tutup" : "Buka"} butiran ${escapeHtml(lead.name)}">${expanded ? "⌃" : "⌄"}</button></td>
             </tr>
             <tr class="lead-log-detail" id="lead-log-detail-${lead.id}" ${expanded ? "" : "hidden"}>
-              <td colspan="6"><div class="lead-log-detail-grid">
+              <td colspan="7"><div class="lead-log-detail-grid">
                 <div><span class="lead-detail-label">Telefon / Emel</span><strong>${escapeHtml(displayLeadPhone(lead))}</strong><small>${phoneVisible ? escapeHtml(lead.email || "Tiada emel") : "No Phone, Whatsapp & Emel dibuka selepas CALL NOW"}</small></div>
                 <div><span class="lead-detail-label">Sumber</span><strong>${escapeHtml(lead.source || "-")}</strong></div>
                 <div><span class="lead-detail-label">Ejen</span><strong>${escapeHtml(assignedAgentLabel)}</strong></div>
@@ -5235,7 +5265,7 @@ function renderLeadsTable() {
             </tr>`;
         })
         .join("")
-    : `<tr><td class="table-empty" colspan="6">Tiada lead ditemui.</td></tr>`;
+    : `<tr><td class="table-empty" colspan="7">Tiada lead ditemui.</td></tr>`;
 }
 
 function appointmentDateTimeLocalValue(value) {
@@ -6099,7 +6129,10 @@ function renderFollowUpDue() {
       <div class="follow-up-owner"><small>Ejen</small><strong>${escapeHtml(item.assignedAgentName)}</strong></div>
       <div class="follow-up-note"><small>Remark terakhir</small><p>${escapeHtml(item.notes || "Belum ada remark")}</p></div>
       <div class="follow-up-time"><strong>${followUpOverdueLabel(item)}</strong><small>Dikemas kini ${formatDateTime(item.followUpActivityAt)}</small></div>
-      ${renderLeadFollowUpButton(lead, "data-follow-up-due-action")}
+      <div class="follow-up-due-actions">
+        ${renderLeadFollowUpButton(lead, "data-follow-up-due-action")}
+        ${renderLeadCopyButton(lead, "data-follow-up-due-copy")}
+      </div>
     </article>`;
   }).join("") : '<div class="follow-up-empty"><span aria-hidden="true">✓</span><strong>Semua follow up terkawal</strong><p>Tiada lead Contacted yang melebihi 2 hari tanpa kemas kini.</p></div>';
 }
@@ -7413,6 +7446,8 @@ elements.monitorList?.addEventListener("click", (event) => {
   renderLeadsTable();
 });
 elements.leadsTableBody.addEventListener("click", (event) => {
+  const copy = event.target.closest("[data-lead-copy]");
+  if (copy) { copyLeadDetails(copy.dataset.leadCopy); return; }
   const followUp = event.target.closest("[data-lead-follow-up]");
   if (followUp) {
     recordLeadFollowUp(followUp.dataset.leadFollowUp, followUp);
@@ -7455,6 +7490,8 @@ elements.appointmentList?.addEventListener("click", (event) => {
   if (remove) deleteAppointment(remove.dataset.appointmentDelete);
 });
 elements.followUpDueList?.addEventListener("click", (event) => {
+  const copy = event.target.closest("[data-follow-up-due-copy]");
+  if (copy) { copyLeadDetails(copy.dataset.followUpDueCopy); return; }
   const action = event.target.closest("[data-follow-up-due-action]");
   if (action) recordLeadFollowUp(action.dataset.followUpDueAction, action);
 });
