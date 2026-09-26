@@ -699,6 +699,7 @@ function mapLead(row) {
     responseMs: row.response_ms,
     contactedAt: row.contacted_at ? new Date(row.contacted_at).getTime() : null,
     followUpActivityAt: row.follow_up_activity_at ? new Date(row.follow_up_activity_at).getTime() : null,
+    followUpCount: Number(row.follow_up_count) || 0,
     notes: row.notes || "",
   };
 }
@@ -2289,7 +2290,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-    .register("/sw.js?v=20260926-agent-account-v94")
+    .register("/sw.js?v=20260926-follow-up-v95")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -5072,6 +5073,8 @@ function leadNoteDraftKey(leadId) {
   return `${state.currentUserId}:${leadId}`;
 }
 
+const expandedLeadLogIds = new Set();
+
 function renderLeadsTable() {
   const focusedNote = document.activeElement;
   if (focusedNote?.matches("[data-lead-note]") && elements.leadsTableBody.contains(focusedNote)) {
@@ -5085,11 +5088,14 @@ function renderLeadsTable() {
     ? state.leads.filter((lead) => !isVisuallyExpiredAssignment(lead))
     : state.leads.filter((lead) => lead.assignedAgentId === state.currentUserId && !isVisuallyExpiredAssignment(lead));
   const statusCounts = Object.fromEntries(LEAD_STATUS_OPTIONS.map((status) => [status.value, 0]));
+  const followUpCounts = new Map();
   const agentCounts = new Map();
   let unassignedCount = 0;
   visibleLeads.forEach((lead) => {
     const visualStatus = getLeadVisualStatus(lead);
     statusCounts[visualStatus] = (statusCounts[visualStatus] || 0) + 1;
+    const followUpCount = Math.min(6, Number(lead.followUpCount) || 0);
+    if (followUpCount > 0) followUpCounts.set(followUpCount, (followUpCounts.get(followUpCount) || 0) + 1);
     if (lead.assignedAgentId) {
       agentCounts.set(lead.assignedAgentId, (agentCounts.get(lead.assignedAgentId) || 0) + 1);
     } else {
@@ -5101,8 +5107,10 @@ function renderLeadsTable() {
     ...LEAD_STATUS_OPTIONS.map(
       (status) => `<option value="${status.value}">${status.label} (${statusCounts[status.value] || 0})</option>`,
     ),
+    ...(followUpCounts.size ? [`<option value="follow_up">Follow Up (${[...followUpCounts.values()].reduce((sum, count) => sum + count, 0)})</option>`] : []),
+    ...[1, 2, 3, 4, 5, 6].filter((count) => followUpCounts.has(count)).map((count) => `<option value="follow_up_${count}">Follow Up ${count} (${followUpCounts.get(count)})</option>`),
   ].join("");
-  elements.leadFilter.value = selectedStatus;
+  elements.leadFilter.value = [...elements.leadFilter.options].some((option) => option.value === selectedStatus) ? selectedStatus : "all";
   const filter = elements.leadFilter.value || "all";
   if (elements.leadAgentFilter && isAdmin()) {
     elements.leadAgentFilter.innerHTML = [
@@ -5145,7 +5153,7 @@ function renderLeadsTable() {
         String(lead.notes || "").toLowerCase().includes(search);
       const visualStatus = getLeadVisualStatus(lead);
       return matchesAgent && matchesSearch &&
-        (filter === "all" || visualStatus === filter) &&
+        (filter === "all" || visualStatus === filter || (filter === "follow_up" && Number(lead.followUpCount) > 0) || (filter.startsWith("follow_up_") && Number(lead.followUpCount) === Number(filter.slice(10)))) &&
         matchesMonthYearFilter(lead.createdAt || lead.receivedAt, elements.leadMonthFilter, elements.leadYearFilter);
     })
     .sort((a, b) => (b.receivedAt || 0) - (a.receivedAt || 0));
@@ -5157,16 +5165,21 @@ function renderLeadsTable() {
     ? rows
         .map((lead) => {
           const visualStatus = getLeadVisualStatus(lead);
-          const statusOptions = renderLeadStatusOptions(visualStatus);
           const requiresCallNow = !isAdmin() && visualStatus === "new";
+          const statusOptions = renderLeadStatusOptions(visualStatus, isAdmin() || requiresCallNow);
           const contactedTime = lead.contactedAt ? `<small>Dihubungi ${formatDateTime(lead.contactedAt)}</small>` : "";
-          const whatsappUrl = canViewLeadPhone(lead) ? whatsappLeadUrl(lead.phone) : "";
+          const phoneVisible = canViewLeadPhone(lead);
+          const whatsappUrl = phoneVisible ? whatsappLeadUrl(lead.phone) : "";
           const whatsappButton = whatsappUrl
             ? `<a class="contact-edit-button whatsapp" href="${whatsappUrl}" target="_blank" rel="noopener">WhatsApp</a>`
-            : "";
-          const leadContactActions = whatsappButton
-            ? `<span class="lead-contact-actions">${whatsappButton}</span>`
-            : "";
+            : `<button class="contact-edit-button whatsapp" type="button" disabled title="WhatsApp tersedia selepas CALL NOW">WhatsApp</button>`;
+          const callButton = requiresCallNow
+            ? `<button class="log-call-now-button" type="button" data-lead-call="${lead.id}">CALL NOW</button>`
+            : phoneVisible && lead.phone
+              ? `<a class="contact-edit-button" href="tel:${escapeHtml(String(lead.phone).replace(/[^+\d]/g, ""))}">Call</a>`
+              : `<button class="contact-edit-button" type="button" disabled title="Nombor telefon belum tersedia">Call</button>`;
+          const followUpCount = Math.min(6, Number(lead.followUpCount) || 0);
+          const followUpButton = `<button class="contact-edit-button lead-follow-up-button" type="button" data-lead-follow-up="${lead.id}" ${!whatsappUrl || followUpCount >= 6 ? "disabled" : ""} title="${followUpCount >= 6 ? "Maksimum Follow Up 6" : !whatsappUrl ? "Tekan CALL NOW dahulu" : `Rekod Follow Up ${followUpCount + 1} dan buka WhatsApp`}">Follow Up${followUpCount ? ` ${followUpCount}` : ""}</button>`;
           const editButton = canViewLeadPhone(lead)
             ? `<button class="contact-edit-button" type="button" data-lead-edit="${lead.id}">Edit</button>`
             : "";
@@ -5183,32 +5196,24 @@ function renderLeadsTable() {
           const activeTime = lead.receivedAt
             ? `<small>Aktif ${formatDateTime(lead.receivedAt)}</small>`
             : "<small>Menunggu giliran</small>";
+          const expanded = expandedLeadLogIds.has(lead.id);
           return `
-            <tr data-lead-row="${lead.id}">
-              <td data-label="Lead">
-                <strong>${escapeHtml(lead.name)}</strong>
-                <small>${escapeHtml(displayLeadPhone(lead))}</small>
-                <small>${canViewLeadPhone(lead) && lead.email ? escapeHtml(lead.email) : "No Phone, Whatsapp & Emel dibuka selepas CALL NOW"}</small>
-                ${leadContactActions}
-              </td>
-              <td data-label="Projek / Sumber">
-                <strong>${escapeHtml(lead.project || "Tidak dinyatakan")}</strong>
-                <small>${escapeHtml(lead.source)}</small>
-              </td>
-              <td data-label="Ejen">${escapeHtml(assignedAgentLabel)}</td>
-              <td data-label="Masa"><strong>Tarikh ${formatDateTime(lead.createdAt || lead.receivedAt)}</strong>${activeTime}${contactedTime}</td>
-              <td data-label="Status">
-                ${requiresCallNow
-                  ? `<button class="log-call-now-button" type="button" data-lead-call="${lead.id}">CALL NOW</button>`
-                  : `<select
-                      class="lead-status-select ${visualStatus}"
-                      data-lead-status="${lead.id}"
-                      aria-label="Status ${escapeHtml(lead.name)}"
-                    >
-                      ${statusOptions}
-                    </select>`}
-              </td>
-              <td class="lead-note-cell" data-label="Nota">
+            <tr class="lead-log-summary" data-lead-row="${lead.id}">
+              <td data-label="Nama"><strong>${escapeHtml(lead.name)}</strong></td>
+              <td data-label="Projek"><strong>${escapeHtml(lead.project || "Tidak dinyatakan")}</strong></td>
+              <td data-label="Status"><select class="lead-status-select ${visualStatus}" data-lead-status="${lead.id}" aria-label="Status ${escapeHtml(lead.name)}">${statusOptions}</select></td>
+              <td data-label="Call">${callButton}</td>
+              <td data-label="WhatsApp">${whatsappButton}</td>
+              <td data-label="Follow Up">${followUpButton}</td>
+              <td data-label="Butiran"><button class="lead-log-toggle" type="button" data-lead-expand="${lead.id}" aria-expanded="${expanded}" aria-controls="lead-log-detail-${lead.id}" aria-label="${expanded ? "Tutup" : "Buka"} butiran ${escapeHtml(lead.name)}">${expanded ? "⌃" : "⌄"}</button></td>
+            </tr>
+            <tr class="lead-log-detail" id="lead-log-detail-${lead.id}" ${expanded ? "" : "hidden"}>
+              <td colspan="7"><div class="lead-log-detail-grid">
+                <div><span class="lead-detail-label">Telefon / Emel</span><strong>${escapeHtml(displayLeadPhone(lead))}</strong><small>${phoneVisible ? escapeHtml(lead.email || "Tiada emel") : "No Phone, Whatsapp & Emel dibuka selepas CALL NOW"}</small></div>
+                <div><span class="lead-detail-label">Sumber</span><strong>${escapeHtml(lead.source || "-")}</strong></div>
+                <div><span class="lead-detail-label">Ejen</span><strong>${escapeHtml(assignedAgentLabel)}</strong></div>
+                <div><span class="lead-detail-label">Masa</span><strong>Tarikh ${formatDateTime(lead.createdAt || lead.receivedAt)}</strong>${activeTime}${contactedTime}</div>
+                <div class="lead-note-cell"><span class="lead-detail-label">Nota</span>
                 <textarea
                   class="lead-note-field"
                   data-lead-note="${lead.id}"
@@ -5218,8 +5223,9 @@ function renderLeadsTable() {
                 <div class="lead-note-actions">
                   <button class="lead-note-save" type="button" data-lead-note-save="${lead.id}">Simpan nota</button>
                 </div>
-              </td>
-              <td data-label="Tindakan"><span class="lead-actions">${actionButtons || "-"}</span></td>
+                </div>
+                <div><span class="lead-detail-label">Tindakan</span><span class="lead-actions">${actionButtons || "-"}</span></div>
+              </div></td>
             </tr>`;
         })
         .join("")
@@ -6816,12 +6822,61 @@ async function saveLeadNote(leadId, button = null) {
   }
 }
 
+async function recordLeadFollowUp(leadId, button) {
+  if (!guardLifecycleMutation()) return false;
+  const lead = state.leads.find((item) => item.id === leadId);
+  if (!lead || !canAccessLead(lead) || !canViewLeadPhone(lead)) return false;
+  const whatsappUrl = whatsappLeadUrl(lead.phone);
+  if (!whatsappUrl || Number(lead.followUpCount) >= 6) return false;
+  const previousCount = Number(lead.followUpCount) || 0;
+  const previousStatus = lead.status;
+  if (remoteDatabaseRequired && !remoteDatabaseMode) {
+    showToast("Follow Up belum tersedia", "Sambungan Supabase diperlukan sebelum WhatsApp dibuka.", "error");
+    return false;
+  }
+  button.disabled = true;
+  try {
+    if (remoteDatabaseMode) {
+      const { data, error } = await remoteDatabaseClient.rpc("record_lead_follow_up", {
+        p_lead_id: leadId,
+        p_expected_count: previousCount,
+      });
+      if (error || !data?.ok) throw error || new Error(data?.error || "Follow Up tidak dapat disimpan.");
+      lead.followUpCount = Number(data.follow_up_count);
+      lead.status = data.status;
+      lead.statusRevision = Number(data.status_revision) || lead.statusRevision;
+      queueRemoteReload();
+    } else {
+      lead.followUpCount = previousCount + 1;
+      if (lead.followUpCount === 3) applySheetStatusToLead(lead, "all_offer_presented");
+      saveState();
+    }
+    renderAll();
+    showToast("Follow Up direkod", `${lead.name}: Follow Up ${lead.followUpCount}.`);
+    window.location.assign(whatsappUrl);
+    return true;
+  } catch (error) {
+    lead.followUpCount = previousCount;
+    lead.status = previousStatus;
+    console.error(error);
+    showToast("Follow Up gagal", error?.message || "Semak sambungan dan cuba lagi.", "error");
+    return false;
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function updateLeadStatusFromLog(leadId, nextStatus, field = null) {
   if (!guardLifecycleMutation()) return false;
   const lead = state.leads.find((item) => item.id === leadId);
   if (!lead) return false;
 
   const normalizedStatus = normalizeSheetStatus(nextStatus);
+  if (getCurrentUser()?.role === "agent" && getLeadVisualStatus(lead) === "new" && normalizedStatus !== "new") {
+    if (field) field.value = "new";
+    showToast("CALL NOW diperlukan", "Tekan CALL NOW sebelum menukar status lead.", "error");
+    return false;
+  }
   if (getCurrentUser()?.role === "agent" && normalizedStatus === "new") {
     if (field) field.value = getLeadVisualStatus(lead);
     showToast("CALL NOW diperlukan", "Ejen tidak boleh menukar status lead kembali kepada New.", "error");
@@ -7348,6 +7403,19 @@ elements.monitorList?.addEventListener("click", (event) => {
   renderLeadsTable();
 });
 elements.leadsTableBody.addEventListener("click", (event) => {
+  const followUp = event.target.closest("[data-lead-follow-up]");
+  if (followUp) {
+    recordLeadFollowUp(followUp.dataset.leadFollowUp, followUp);
+    return;
+  }
+  const expand = event.target.closest("[data-lead-expand]");
+  if (expand) {
+    const leadId = expand.dataset.leadExpand;
+    if (expandedLeadLogIds.has(leadId)) expandedLeadLogIds.delete(leadId);
+    else expandedLeadLogIds.add(leadId);
+    renderLeadsTable();
+    return;
+  }
   const edit = event.target.closest("[data-lead-edit]");
   const remove = event.target.closest("[data-lead-delete]");
   const saveNote = event.target.closest("[data-lead-note-save]");

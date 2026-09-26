@@ -4404,6 +4404,21 @@ td small {
   gap: 6px;
 }
 
+.lead-log-summary td { vertical-align: middle; }
+.lead-log-summary td:first-child { min-width: 130px; }
+.lead-log-summary td:nth-child(2) { min-width: 110px; }
+.lead-log-summary .contact-edit-button,
+.lead-log-summary .log-call-now-button { display: inline-flex; align-items: center; justify-content: center; min-width: 76px; min-height: 34px; margin: 0; }
+.lead-log-summary .contact-edit-button:disabled { cursor: not-allowed; opacity: .5; }
+.lead-log-toggle { width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink-700); font-size: 23px; line-height: 1; cursor: pointer; }
+.lead-log-detail td { padding: 16px 18px; background: #f8fafc; white-space: normal; }
+.lead-log-detail[hidden] { display: none !important; }
+.lead-log-detail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.lead-log-detail-grid > div { min-width: 0; }
+.lead-log-detail-grid strong,
+.lead-log-detail-grid small { overflow-wrap: anywhere; }
+.lead-detail-label { display: block; margin-bottom: 7px; color: var(--ink-500); font-size: 9px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+
 .lead-contact-actions {
   display: flex;
   flex-wrap: wrap;
@@ -5003,6 +5018,21 @@ td small {
     text-transform: uppercase;
     content: attr(data-label);
   }
+
+  .lead-log-table tr.lead-log-summary { grid-template-columns: repeat(3, minmax(0, 1fr)) auto; }
+  .lead-log-table .lead-log-summary td { padding: 10px; border-right: 0; order: 0; }
+  .lead-log-table .lead-log-summary td:nth-child(1),
+  .lead-log-table .lead-log-summary td:nth-child(2) { grid-column: span 2; }
+  .lead-log-table .lead-log-summary td:nth-child(3) { grid-column: 1 / -1; }
+  .lead-log-table .lead-log-summary td:nth-child(n+4) { grid-column: span 1; border-bottom: 0; }
+  .lead-log-table .lead-log-summary td::before { margin-bottom: 4px; }
+  .lead-log-table .lead-log-summary .contact-edit-button,
+  .lead-log-table .lead-log-summary .log-call-now-button { min-width: 0; width: 100%; padding: 5px; font-size: 11px; }
+  .lead-log-table tr.lead-log-detail { display: block; }
+  .lead-log-table .lead-log-detail td { padding: 14px; }
+  .lead-log-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .lead-log-detail-grid .lead-note-cell,
+  .lead-log-detail-grid > div:last-child { grid-column: 1 / -1; }
 
   .lead-log-table td small {
     margin-top: 4px;
