@@ -6,9 +6,13 @@ const app = fs.readFileSync('app.js', 'utf8');
 const html = fs.readFileSync('index.html', 'utf8');
 const migration = fs.readFileSync('supabase/migrations/20260926090000_lead_follow_up_count.sql', 'utf8');
 
-test('compact lead log keeps Call, WhatsApp, Follow Up, status and expandable details', () => {
-  assert.match(html, /<th>Nama<\/th>[\s\S]*<th>Projek<\/th>[\s\S]*<th>Status<\/th>[\s\S]*<th>Call<\/th>[\s\S]*<th>WhatsApp<\/th>[\s\S]*<th>Follow Up<\/th>[\s\S]*<th>Butiran<\/th>/);
+test('compact lead log keeps Call, Follow Up, status and expandable details without separate WhatsApp', () => {
+  assert.match(html, /<th>Nama<\/th>[\s\S]*<th>Projek<\/th>[\s\S]*<th>Status<\/th>[\s\S]*<th>Call<\/th>[\s\S]*<th>Follow Up<\/th>[\s\S]*<th>Butiran<\/th>/);
+  assert.doesNotMatch(html, /<th>WhatsApp<\/th>/);
   assert.match(app, /data-lead-follow-up/);
+  assert.match(app, /lead-follow-up-icon/);
+  assert.match(app, /follow-up-stage-\$\{followUpCount\}/);
+  assert.doesNotMatch(app, /<td data-label="WhatsApp">/);
   assert.match(app, /data-lead-expand/);
   assert.match(app, /class="lead-log-detail"[\s\S]*\$\{expanded \? "" : "hidden"\}/);
 });

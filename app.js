@@ -2290,7 +2290,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-    .register("/sw.js?v=20260926-follow-up-v95")
+    .register("/sw.js?v=20260926-follow-up-button-v96")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -5170,16 +5170,14 @@ function renderLeadsTable() {
           const contactedTime = lead.contactedAt ? `<small>Dihubungi ${formatDateTime(lead.contactedAt)}</small>` : "";
           const phoneVisible = canViewLeadPhone(lead);
           const whatsappUrl = phoneVisible ? whatsappLeadUrl(lead.phone) : "";
-          const whatsappButton = whatsappUrl
-            ? `<a class="contact-edit-button whatsapp" href="${whatsappUrl}" target="_blank" rel="noopener">WhatsApp</a>`
-            : `<button class="contact-edit-button whatsapp" type="button" disabled title="WhatsApp tersedia selepas CALL NOW">WhatsApp</button>`;
           const callButton = requiresCallNow
             ? `<button class="log-call-now-button" type="button" data-lead-call="${lead.id}">CALL NOW</button>`
             : phoneVisible && lead.phone
               ? `<a class="contact-edit-button" href="tel:${escapeHtml(String(lead.phone).replace(/[^+\d]/g, ""))}">Call</a>`
               : `<button class="contact-edit-button" type="button" disabled title="Nombor telefon belum tersedia">Call</button>`;
           const followUpCount = Math.min(6, Number(lead.followUpCount) || 0);
-          const followUpButton = `<button class="contact-edit-button lead-follow-up-button" type="button" data-lead-follow-up="${lead.id}" ${!whatsappUrl || followUpCount >= 6 ? "disabled" : ""} title="${followUpCount >= 6 ? "Maksimum Follow Up 6" : !whatsappUrl ? "Tekan CALL NOW dahulu" : `Rekod Follow Up ${followUpCount + 1} dan buka WhatsApp`}">Follow Up${followUpCount ? ` ${followUpCount}` : ""}</button>`;
+          const followUpIcon = `<svg class="lead-follow-up-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20.5 11.7a8.5 8.5 0 0 1-12.6 7.5L3.5 20.5l1.3-4.3a8.5 8.5 0 1 1 15.7-4.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8.3 8.2c-.4.4-.7 1-.7 1.5 0 2.8 3.1 5.9 5.9 6.2.6.1 1.2-.2 1.6-.6l.7-.8-2.1-1.1-.9.9a7.4 7.4 0 0 1-3.1-3.1l.9-.9-1.1-2.1-.8.7Z" fill="currentColor"/></svg>`;
+          const followUpButton = `<button class="contact-edit-button lead-follow-up-button follow-up-stage-${followUpCount}" type="button" data-lead-follow-up="${lead.id}" ${!whatsappUrl || followUpCount >= 6 ? "disabled" : ""} title="${followUpCount >= 6 ? "Maksimum Follow Up 6" : !whatsappUrl ? "Tekan CALL NOW dahulu" : `Rekod Follow Up ${followUpCount + 1} dan buka WhatsApp`}">${followUpIcon}<span>Follow Up${followUpCount ? ` ${followUpCount}` : ""}</span></button>`;
           const editButton = canViewLeadPhone(lead)
             ? `<button class="contact-edit-button" type="button" data-lead-edit="${lead.id}">Edit</button>`
             : "";
@@ -5203,12 +5201,11 @@ function renderLeadsTable() {
               <td data-label="Projek"><strong>${escapeHtml(lead.project || "Tidak dinyatakan")}</strong></td>
               <td data-label="Status"><select class="lead-status-select ${visualStatus}" data-lead-status="${lead.id}" aria-label="Status ${escapeHtml(lead.name)}">${statusOptions}</select></td>
               <td data-label="Call">${callButton}</td>
-              <td data-label="WhatsApp">${whatsappButton}</td>
               <td data-label="Follow Up">${followUpButton}</td>
               <td data-label="Butiran"><button class="lead-log-toggle" type="button" data-lead-expand="${lead.id}" aria-expanded="${expanded}" aria-controls="lead-log-detail-${lead.id}" aria-label="${expanded ? "Tutup" : "Buka"} butiran ${escapeHtml(lead.name)}">${expanded ? "⌃" : "⌄"}</button></td>
             </tr>
             <tr class="lead-log-detail" id="lead-log-detail-${lead.id}" ${expanded ? "" : "hidden"}>
-              <td colspan="7"><div class="lead-log-detail-grid">
+              <td colspan="6"><div class="lead-log-detail-grid">
                 <div><span class="lead-detail-label">Telefon / Emel</span><strong>${escapeHtml(displayLeadPhone(lead))}</strong><small>${phoneVisible ? escapeHtml(lead.email || "Tiada emel") : "No Phone, Whatsapp & Emel dibuka selepas CALL NOW"}</small></div>
                 <div><span class="lead-detail-label">Sumber</span><strong>${escapeHtml(lead.source || "-")}</strong></div>
                 <div><span class="lead-detail-label">Ejen</span><strong>${escapeHtml(assignedAgentLabel)}</strong></div>
@@ -5229,7 +5226,7 @@ function renderLeadsTable() {
             </tr>`;
         })
         .join("")
-    : `<tr><td class="table-empty" colspan="7">Tiada lead ditemui.</td></tr>`;
+    : `<tr><td class="table-empty" colspan="6">Tiada lead ditemui.</td></tr>`;
 }
 
 function appointmentDateTimeLocalValue(value) {
