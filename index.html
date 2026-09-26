@@ -25,9 +25,9 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260923-agent-pwa-gate-v92" />
+    <link rel="stylesheet" href="styles.css?v=20260926-agent-account-v93" />
     <script src="vendor/exceljs.min.js?v=4.4.0" defer></script>
-    <script src="app.js?v=20260923-agent-pwa-gate-v92" defer></script>
+    <script src="app.js?v=20260926-agent-account-v93" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -295,16 +295,19 @@
           </button>
         </nav>
 
-        <div class="sidebar-user">
-          <span class="avatar" id="sidebar-avatar">NA</span>
-          <span>
-            <strong id="sidebar-user-name">Nur Aina</strong>
-            <small id="sidebar-user-role">Property Agent</small>
-          </span>
-          <button class="icon-button" id="sidebar-settings" type="button" aria-label="Log keluar">
+        <div class="sidebar-account">
+          <div class="account-menu" id="account-menu" hidden>
+            <button id="edit-own-details" type="button">Edit details</button>
+            <button id="account-logout" type="button">Log keluar</button>
+          </div>
+          <button class="sidebar-user" id="sidebar-settings" type="button" aria-label="Buka pilihan akaun" aria-expanded="false" aria-controls="account-menu">
+            <span class="avatar" id="sidebar-avatar">NA</span>
+            <span class="sidebar-user-details">
+              <strong id="sidebar-user-name">Nur Aina</strong>
+              <small id="sidebar-user-role">Property Agent</small>
+            </span>
             <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M10 17l5-5-5-5M15 12H3" />
-              <path d="M14 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5" />
+              <path d="m6 9 6 6 6-6" />
             </svg>
           </button>
         </div>
@@ -984,6 +987,36 @@
           <p class="reset-error" id="agent-password-error" role="alert"></p>
           <button class="primary-button full" type="submit">Simpan kata laluan</button>
         </form>
+      </div>
+    </div>
+
+    <div class="modal-backdrop" id="own-details-modal" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="own-details-title">
+        <div class="modal-heading">
+          <div><span class="section-kicker">Akaun saya</span><h2 id="own-details-title">Edit details</h2></div>
+          <button class="modal-close" data-close-modal="own-details-modal" type="button" aria-label="Tutup">×</button>
+        </div>
+        <form id="own-details-form">
+          <label for="own-name">Nama</label>
+          <input id="own-name" type="text" autocomplete="name" required />
+          <label for="own-password">Kata laluan baru (pilihan)</label>
+          <input id="own-password" type="password" autocomplete="new-password" minlength="8" placeholder="Kosongkan jika tidak mahu tukar" />
+          <label for="own-password-confirm">Sahkan kata laluan baru</label>
+          <input id="own-password-confirm" type="password" autocomplete="new-password" placeholder="Ulang kata laluan baru" />
+          <p class="reset-error" id="own-details-error" role="alert"></p>
+          <button class="primary-button full" type="submit">Simpan details</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal-backdrop" id="logout-confirm-modal" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="logout-confirm-title">
+        <div class="modal-heading"><h2 id="logout-confirm-title">Log keluar?</h2></div>
+        <p id="logout-confirm-message">Jika logout, anda tidak akan terima lead baru.</p>
+        <div class="account-confirm-actions">
+          <button class="secondary-button" id="logout-cancel" type="button">Cancel</button>
+          <button class="primary-button" id="logout-continue" type="button">Logout</button>
+        </div>
       </div>
     </div>
 

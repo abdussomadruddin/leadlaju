@@ -13,7 +13,7 @@ test('agent access requires a phone, installed web app, permission and push subs
 });
 
 test('agent gate cannot be dismissed to reveal the app', () => {
-  assert.match(app, /function closeNotificationReminder\(\)[\s\S]*getCurrentUser\(\)\?\.role === "agent"[\s\S]*logout\(\)/);
+  assert.match(app, /function closeNotificationReminder\(\)[\s\S]*getCurrentUser\(\)\?\.role === "agent"[\s\S]*requestLogout\(\)/);
   assert.match(css, /body\.agent-access-locked \.app-shell[\s\S]*pointer-events: none/);
   assert.match(html, /id="close-notification-reminder"[^>]*>Log keluar</);
 });
@@ -24,6 +24,6 @@ test('admin remains exempt from the mandatory agent app gate', () => {
 });
 
 test('new cache version distributes the mandatory access gate', () => {
-  assert.match(html, /20260923-agent-pwa-gate-v92/);
-  assert.match(sw, /leadlaju-pwa-v20260923-agent-pwa-gate-v92/);
+  assert.match(html, /20260926-agent-account-v93/);
+  assert.match(sw, /leadlaju-pwa-v20260926-agent-account-v93/);
 });

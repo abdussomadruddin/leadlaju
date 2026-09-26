@@ -238,6 +238,19 @@ const elements = {
   viewTitle: document.querySelector("#view-title"),
   todayLabel: document.querySelector("#today-label"),
   sidebarSettings: document.querySelector("#sidebar-settings"),
+  accountMenu: document.querySelector("#account-menu"),
+  editOwnDetails: document.querySelector("#edit-own-details"),
+  accountLogout: document.querySelector("#account-logout"),
+  ownDetailsModal: document.querySelector("#own-details-modal"),
+  ownDetailsForm: document.querySelector("#own-details-form"),
+  ownName: document.querySelector("#own-name"),
+  ownPassword: document.querySelector("#own-password"),
+  ownPasswordConfirm: document.querySelector("#own-password-confirm"),
+  ownDetailsError: document.querySelector("#own-details-error"),
+  logoutConfirmModal: document.querySelector("#logout-confirm-modal"),
+  logoutConfirmMessage: document.querySelector("#logout-confirm-message"),
+  logoutCancel: document.querySelector("#logout-cancel"),
+  logoutContinue: document.querySelector("#logout-continue"),
   sidebarAvatar: document.querySelector("#sidebar-avatar"),
   sidebarUserName: document.querySelector("#sidebar-user-name"),
   sidebarUserRole: document.querySelector("#sidebar-user-role"),
@@ -997,6 +1010,7 @@ function showLogin() {
   window.clearInterval(followUpReminderTimer);
   stopExpiryWatchdog();
   setMobileSidebarOpen(false);
+  closeLogoutConfirmation();
   elements.appShell.setAttribute("aria-hidden", "true");
   document.body.classList.remove("auth-pending", "authenticated");
   document.body.classList.add("logged-out");
@@ -1012,6 +1026,115 @@ function setMobileSidebarOpen(open) {
   elements.sidebar.classList.toggle("open", open);
   elements.mobileMenu.setAttribute("aria-expanded", String(open));
   elements.mobileMenu.setAttribute("aria-label", open ? "Tutup menu" : "Buka menu");
+  if (!open) setAccountMenuOpen(false);
+}
+
+function setAccountMenuOpen(open) {
+  elements.accountMenu.hidden = !open;
+  elements.sidebarSettings.setAttribute("aria-expanded", String(open));
+}
+
+let logoutConfirmationStep = 0;
+
+function closeLogoutConfirmation() {
+  logoutConfirmationStep = 0;
+  closeModal(elements.logoutConfirmModal);
+}
+
+function requestLogout() {
+  setAccountMenuOpen(false);
+  if (getCurrentUser()?.role !== "agent") {
+    logout();
+    return;
+  }
+  logoutConfirmationStep = 1;
+  elements.logoutConfirmMessage.textContent = "Jika logout, anda tidak akan terima lead baru.";
+  elements.logoutContinue.textContent = "Logout";
+  elements.logoutConfirmModal.classList.add("open");
+  elements.logoutConfirmModal.setAttribute("aria-hidden", "false");
+  elements.logoutCancel.focus();
+}
+
+function continueLogout() {
+  if (logoutConfirmationStep === 1) {
+    logoutConfirmationStep = 2;
+    elements.logoutConfirmMessage.textContent = "Pengesahan terakhir: anda pasti mahu logout dan berhenti menerima lead baru?";
+    elements.logoutContinue.textContent = "Ya, logout";
+    elements.logoutCancel.focus();
+    return;
+  }
+  if (logoutConfirmationStep === 2) {
+    closeLogoutConfirmation();
+    logout();
+  }
+}
+
+function openOwnDetails() {
+  const user = getCurrentUser();
+  if (!user) return;
+  setAccountMenuOpen(false);
+  elements.ownDetailsForm.reset();
+  elements.ownName.value = user.name;
+  elements.ownDetailsError.textContent = "";
+  elements.ownDetailsModal.classList.add("open");
+  elements.ownDetailsModal.setAttribute("aria-hidden", "false");
+  elements.ownName.focus();
+}
+
+async function saveOwnDetails(event) {
+  event.preventDefault();
+  const user = getCurrentUser();
+  if (!user) return;
+  const name = elements.ownName.value.trim();
+  const password = elements.ownPassword.value;
+  const confirmation = elements.ownPasswordConfirm.value;
+  if (!name || name.length > 120) {
+    elements.ownDetailsError.textContent = "Nama mesti antara 1 hingga 120 aksara.";
+    return;
+  }
+  if (password && password.length < 8) {
+    elements.ownDetailsError.textContent = "Kata laluan mesti sekurang-kurangnya 8 aksara.";
+    return;
+  }
+  if (password !== confirmation) {
+    elements.ownDetailsError.textContent = "Pengesahan kata laluan tidak sepadan.";
+    return;
+  }
+  const button = elements.ownDetailsForm.querySelector('button[type="submit"]');
+  button.disabled = true;
+  elements.ownDetailsError.textContent = "";
+  let nameSaved = false;
+  try {
+    if (remoteDatabaseMode && remoteDatabaseClient) {
+      if (name !== user.name) {
+        const result = await remoteDatabaseClient.functions.invoke("admin-manage-agent", {
+          body: { action: "update_self_name", name },
+        });
+        if (result.error || !result.data?.ok) throw result.error || new Error(result.data?.error || "Nama gagal dikemas kini.");
+        user.name = name;
+        nameSaved = true;
+        saveState();
+        renderUser();
+      }
+      if (password) {
+        const { error } = await remoteDatabaseClient.auth.updateUser({ password });
+        if (error) throw error;
+      }
+    } else if (password) {
+      user.password = password;
+    }
+    user.name = name;
+    saveState();
+    renderUser();
+    closeModal(elements.ownDetailsModal);
+    showToast("Details dikemas kini", "Maklumat akaun anda berjaya disimpan.");
+  } catch (error) {
+    elements.ownDetailsError.textContent = nameSaved
+      ? `Nama disimpan, tetapi kata laluan gagal dikemas kini: ${error.message || "Sila cuba lagi."}`
+      : error.message || "Details gagal disimpan.";
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function setLoginError(message) {
@@ -2166,7 +2289,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-    .register("/sw.js?v=20260923-agent-pwa-gate-v92")
+    .register("/sw.js?v=20260926-agent-account-v93")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -3659,7 +3782,7 @@ async function addToHomeScreen() {
 
 function closeNotificationReminder() {
   if (getCurrentUser()?.role === "agent") {
-    logout();
+    requestLogout();
     return;
   }
   elements.notificationRequiredModal.classList.remove("open");
@@ -5469,6 +5592,7 @@ function renderUser() {
   elements.sidebarAvatar.textContent = initials(user.name);
   elements.sidebarUserName.textContent = user.name;
   elements.sidebarUserRole.textContent = user.role === "admin" ? "Administrator" : "Property Agent";
+  elements.logoutButton.hidden = user.role === "agent";
   elements.viewTitle.innerHTML =
     activeView === "dashboard"
       ? `Selamat datang, <span>${escapeHtml(user.name.split(" ")[0])}</span>`
@@ -7168,8 +7292,24 @@ elements.forgotPasswordButton.addEventListener("click", openResetPasswordModal);
 elements.resetRequestForm.addEventListener("submit", requestPasswordReset);
 elements.resetVerifyForm.addEventListener("submit", verifyPasswordReset);
 elements.resetBackButton.addEventListener("click", resetPasswordFlow);
-elements.sidebarSettings.addEventListener("click", logout);
-elements.logoutButton.addEventListener("click", logout);
+elements.sidebarSettings.addEventListener("click", () => setAccountMenuOpen(elements.accountMenu.hidden));
+elements.editOwnDetails.addEventListener("click", openOwnDetails);
+elements.accountLogout.addEventListener("click", requestLogout);
+elements.logoutButton.addEventListener("click", requestLogout);
+elements.logoutCancel.addEventListener("click", closeLogoutConfirmation);
+elements.logoutContinue.addEventListener("click", continueLogout);
+elements.ownDetailsForm.addEventListener("submit", saveOwnDetails);
+elements.logoutConfirmModal.addEventListener("click", (event) => {
+  if (event.target === elements.logoutConfirmModal) closeLogoutConfirmation();
+});
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".sidebar-account")) setAccountMenuOpen(false);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  setAccountMenuOpen(false);
+  if (logoutConfirmationStep) closeLogoutConfirmation();
+});
 elements.leadSearch.addEventListener("input", renderLeadsTable);
 elements.leadFilter.addEventListener("change", renderLeadsTable);
 elements.leadAgentFilter?.addEventListener("change", renderLeadsTable);

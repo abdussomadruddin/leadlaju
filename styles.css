@@ -846,13 +846,66 @@ svg {
   box-shadow: 0 0 0 4px rgba(24, 166, 106, 0.12);
 }
 
+.sidebar-account {
+  position: relative;
+  margin-top: auto;
+}
+
 .sidebar-user {
   display: flex;
+  width: 100%;
   gap: 10px;
   align-items: center;
-  margin-top: auto;
   padding: 13px 8px 0;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sidebar-user-details {
+  display: grid;
+  min-width: 0;
+}
+
+.sidebar-user > svg {
+  width: 16px;
+  margin-left: auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+
+.account-menu {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 8px;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: #1c2b4a;
+}
+
+.account-menu button {
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 8px;
+  color: #e5edff;
+  background: transparent;
+  text-align: left;
+}
+
+.account-menu button:hover,
+.sidebar-user:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.account-confirm-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 24px;
 }
 
 .avatar {
@@ -3886,6 +3939,10 @@ td small {
 
 .agent-access-locked #notification-required-modal {
   z-index: 140;
+}
+
+.agent-access-locked #logout-confirm-modal {
+  z-index: 150;
 }
 
 .notification-required-card [hidden] {

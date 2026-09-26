@@ -109,6 +109,18 @@ Deno.serve(async (request) => {
     if (authError || !authData.user) return response({ ok: false, error: "Authentication required" }, 401);
     const { data: actor } = await admin.from("profiles").select("role,active,approval_status")
       .eq("id", authData.user.id).maybeSingle();
+    if (action === "update_self_name") {
+      const name = text(body.name);
+      if (!actor || !actor.active || actor.approval_status !== "approved") {
+        return response({ ok: false, error: "Akaun tidak aktif." }, 403);
+      }
+      if (!name || name.length > 120) return response({ ok: false, error: "Nama tidak sah." }, 400);
+      const { data: profile, error } = await admin.from("profiles")
+        .update({ name, updated_at: new Date().toISOString() })
+        .eq("id", authData.user.id).select("id,name").single();
+      if (error) throw error;
+      return response({ ok: true, profile });
+    }
     if (!actor || actor.role !== "admin" || !actor.active || actor.approval_status !== "approved") {
       return response({ ok: false, error: "Admin required" }, 403);
     }
