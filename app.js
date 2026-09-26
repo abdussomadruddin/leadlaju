@@ -2290,7 +2290,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-    .register("/sw.js?v=20260926-follow-up-button-v96")
+    .register("/sw.js?v=20260926-follow-up-due-v97")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -5075,6 +5075,18 @@ function leadNoteDraftKey(leadId) {
 
 const expandedLeadLogIds = new Set();
 
+function renderLeadFollowUpButton(lead, actionAttribute = "data-lead-follow-up") {
+  const followUpCount = Math.min(6, Math.max(0, Number(lead?.followUpCount) || 0));
+  const whatsappUrl = lead && canViewLeadPhone(lead) ? whatsappLeadUrl(lead.phone) : "";
+  const title = followUpCount >= 6
+    ? "Maksimum Follow Up 6"
+    : !lead ? "Data lead belum tersedia"
+      : !whatsappUrl ? "Tekan CALL NOW dahulu"
+        : `Rekod Follow Up ${followUpCount + 1} dan buka WhatsApp`;
+  const icon = `<svg class="lead-follow-up-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20.5 11.7a8.5 8.5 0 0 1-12.6 7.5L3.5 20.5l1.3-4.3a8.5 8.5 0 1 1 15.7-4.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8.3 8.2c-.4.4-.7 1-.7 1.5 0 2.8 3.1 5.9 5.9 6.2.6.1 1.2-.2 1.6-.6l.7-.8-2.1-1.1-.9.9a7.4 7.4 0 0 1-3.1-3.1l.9-.9-1.1-2.1-.8.7Z" fill="currentColor"/></svg>`;
+  return `<button class="contact-edit-button lead-follow-up-button follow-up-stage-${followUpCount}" type="button" ${actionAttribute}="${escapeHtml(lead?.id || "")}" ${!whatsappUrl || followUpCount >= 6 ? "disabled" : ""} title="${title}">${icon}<span>Follow Up${followUpCount ? ` ${followUpCount}` : ""}</span></button>`;
+}
+
 function renderLeadsTable() {
   const focusedNote = document.activeElement;
   if (focusedNote?.matches("[data-lead-note]") && elements.leadsTableBody.contains(focusedNote)) {
@@ -5169,15 +5181,12 @@ function renderLeadsTable() {
           const statusOptions = renderLeadStatusOptions(visualStatus, isAdmin() || requiresCallNow);
           const contactedTime = lead.contactedAt ? `<small>Dihubungi ${formatDateTime(lead.contactedAt)}</small>` : "";
           const phoneVisible = canViewLeadPhone(lead);
-          const whatsappUrl = phoneVisible ? whatsappLeadUrl(lead.phone) : "";
           const callButton = requiresCallNow
             ? `<button class="log-call-now-button" type="button" data-lead-call="${lead.id}">CALL NOW</button>`
             : phoneVisible && lead.phone
               ? `<a class="contact-edit-button" href="tel:${escapeHtml(String(lead.phone).replace(/[^+\d]/g, ""))}">Call</a>`
               : `<button class="contact-edit-button" type="button" disabled title="Nombor telefon belum tersedia">Call</button>`;
-          const followUpCount = Math.min(6, Number(lead.followUpCount) || 0);
-          const followUpIcon = `<svg class="lead-follow-up-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20.5 11.7a8.5 8.5 0 0 1-12.6 7.5L3.5 20.5l1.3-4.3a8.5 8.5 0 1 1 15.7-4.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8.3 8.2c-.4.4-.7 1-.7 1.5 0 2.8 3.1 5.9 5.9 6.2.6.1 1.2-.2 1.6-.6l.7-.8-2.1-1.1-.9.9a7.4 7.4 0 0 1-3.1-3.1l.9-.9-1.1-2.1-.8.7Z" fill="currentColor"/></svg>`;
-          const followUpButton = `<button class="contact-edit-button lead-follow-up-button follow-up-stage-${followUpCount}" type="button" data-lead-follow-up="${lead.id}" ${!whatsappUrl || followUpCount >= 6 ? "disabled" : ""} title="${followUpCount >= 6 ? "Maksimum Follow Up 6" : !whatsappUrl ? "Tekan CALL NOW dahulu" : `Rekod Follow Up ${followUpCount + 1} dan buka WhatsApp`}">${followUpIcon}<span>Follow Up${followUpCount ? ` ${followUpCount}` : ""}</span></button>`;
+          const followUpButton = renderLeadFollowUpButton(lead);
           const editButton = canViewLeadPhone(lead)
             ? `<button class="contact-edit-button" type="button" data-lead-edit="${lead.id}">Edit</button>`
             : "";
@@ -6079,7 +6088,9 @@ function renderFollowUpDue() {
   elements.navFollowUpCount.hidden = rows.length === 0;
   elements.navFollowUpCount.textContent = rows.length;
   elements.followUpCount.textContent = `${filtered.length} case`;
-  elements.followUpDueList.innerHTML = filtered.length ? filtered.map((item) => `
+  elements.followUpDueList.innerHTML = filtered.length ? filtered.map((item) => {
+    const lead = state.leads.find((row) => row.id === item.id);
+    return `
     <article class="follow-up-due-item">
       <div class="follow-up-lead">
         <span class="member-avatar">${initials(item.name)}</span>
@@ -6088,8 +6099,9 @@ function renderFollowUpDue() {
       <div class="follow-up-owner"><small>Ejen</small><strong>${escapeHtml(item.assignedAgentName)}</strong></div>
       <div class="follow-up-note"><small>Remark terakhir</small><p>${escapeHtml(item.notes || "Belum ada remark")}</p></div>
       <div class="follow-up-time"><strong>${followUpOverdueLabel(item)}</strong><small>Dikemas kini ${formatDateTime(item.followUpActivityAt)}</small></div>
-      <button class="secondary-button compact" type="button" data-follow-up-open="${item.id}">Buka lead</button>
-    </article>`).join("") : '<div class="follow-up-empty"><span aria-hidden="true">✓</span><strong>Semua follow up terkawal</strong><p>Tiada lead Contacted yang melebihi 2 hari tanpa kemas kini.</p></div>';
+      ${renderLeadFollowUpButton(lead, "data-follow-up-due-action")}
+    </article>`;
+  }).join("") : '<div class="follow-up-empty"><span aria-hidden="true">✓</span><strong>Semua follow up terkawal</strong><p>Tiada lead Contacted yang melebihi 2 hari tanpa kemas kini.</p></div>';
 }
 
 function renderAll() {
@@ -6842,6 +6854,7 @@ async function recordLeadFollowUp(leadId, button) {
       lead.followUpCount = Number(data.follow_up_count);
       lead.status = data.status;
       lead.statusRevision = Number(data.status_revision) || lead.statusRevision;
+      if (lead.status !== "contacted") state.followUpDue = state.followUpDue.filter((item) => item.id !== leadId);
       queueRemoteReload();
     } else {
       lead.followUpCount = previousCount + 1;
@@ -7442,12 +7455,8 @@ elements.appointmentList?.addEventListener("click", (event) => {
   if (remove) deleteAppointment(remove.dataset.appointmentDelete);
 });
 elements.followUpDueList?.addEventListener("click", (event) => {
-  const open = event.target.closest("[data-follow-up-open]");
-  if (!open) return;
-  const item = state.followUpDue.find((row) => row.id === open.dataset.followUpOpen);
-  elements.leadSearch.value = item?.name || open.dataset.followUpOpen;
-  switchView("leads");
-  renderLeadsTable();
+  const action = event.target.closest("[data-follow-up-due-action]");
+  if (action) recordLeadFollowUp(action.dataset.followUpDueAction, action);
 });
 elements.leadsTableBody.addEventListener("change", (event) => {
   const statusField = event.target.closest("[data-lead-status]");

@@ -41,7 +41,7 @@ test('worker suppresses stale grouped alerts and refreshes the canonical count',
   assert.match(worker, /followUpDueCount: count/);
 });
 
-test('Follow Up Due navigation, filters and lead handoff are wired for desktop and phone', () => {
+test('Follow Up Due navigation, filters and direct WhatsApp follow-up are wired for desktop and phone', () => {
   assert.match(html, /data-view="follow-up-due"/);
   assert.match(html, /id="nav-follow-up-count"/);
   assert.match(html, /id="follow-up-agent-filter"/);
@@ -49,7 +49,9 @@ test('Follow Up Due navigation, filters and lead handoff are wired for desktop a
   assert.match(html, /id="follow-up-month-filter"/);
   assert.match(html, /id="follow-up-year-filter"/);
   assert.match(app, /rpc\("get_follow_up_due"\)/);
-  assert.match(app, /data-follow-up-open/);
+  assert.match(app, /data-follow-up-due-action/);
+  assert.match(app, /recordLeadFollowUp\(action\.dataset\.followUpDueAction, action\)/);
+  assert.doesNotMatch(app, /data-follow-up-open/);
   assert.match(app, /"follow-up-due": "Follow Up Due"/);
   assert.match(css, /@media \(max-width: 650px\)[\s\S]*\.follow-up-due-item/);
   assert.match(sw, /notificationData\.leadId \? "OPEN_DASHBOARD" : view \? "OPEN_VIEW" : "OPEN_DASHBOARD"/);
