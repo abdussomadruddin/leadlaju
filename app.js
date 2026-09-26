@@ -2289,7 +2289,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-    .register("/sw.js?v=20260926-agent-account-v93")
+    .register("/sw.js?v=20260926-agent-account-v94")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -5592,7 +5592,7 @@ function renderUser() {
   elements.sidebarAvatar.textContent = initials(user.name);
   elements.sidebarUserName.textContent = user.name;
   elements.sidebarUserRole.textContent = user.role === "admin" ? "Administrator" : "Property Agent";
-  elements.logoutButton.hidden = user.role === "agent";
+  elements.logoutButton.hidden = true;
   elements.viewTitle.innerHTML =
     activeView === "dashboard"
       ? `Selamat datang, <span>${escapeHtml(user.name.split(" ")[0])}</span>`

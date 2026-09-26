@@ -857,24 +857,17 @@ svg {
   gap: 10px;
   align-items: center;
   padding: 13px 8px 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border: 0;
+  border-radius: 0;
   color: inherit;
   background: transparent;
   text-align: left;
-  cursor: pointer;
+  cursor: default;
 }
 
 .sidebar-user-details {
   display: grid;
   min-width: 0;
-}
-
-.sidebar-user > svg {
-  width: 16px;
-  margin-left: auto;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
 }
 
 .account-menu {
@@ -896,8 +889,7 @@ svg {
   text-align: left;
 }
 
-.account-menu button:hover,
-.sidebar-user:hover {
+.account-menu button:hover {
   background: rgba(255, 255, 255, 0.08);
 }
 
