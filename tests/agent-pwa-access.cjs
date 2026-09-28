@@ -24,6 +24,6 @@ test('admin remains exempt from the mandatory agent app gate', () => {
 });
 
 test('new cache version distributes the mandatory access gate', () => {
-  assert.match(html, /20260928-status-v102/);
-  assert.match(sw, /leadlaju-pwa-v20260928-status-v102/);
+  assert.match(html, /20260928-followup-v103/);
+  assert.match(sw, /leadlaju-pwa-v20260928-followup-v103/);
 });

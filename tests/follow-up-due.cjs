@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
 const migration = fs.readFileSync('supabase/migrations/20260923040344_follow_up_due.sql', 'utf8');
+const thresholdMigration = fs.readFileSync('supabase/migrations/20260928044220_follow_up_due_24h.sql', 'utf8');
 const worker = fs.readFileSync('supabase/functions/process-notification-outbox/index.ts', 'utf8');
 const app = fs.readFileSync('app.js', 'utf8');
 const html = fs.readFileSync('index.html', 'utf8');
@@ -24,13 +25,25 @@ test('canonical feed is scoped and uses the exact 48-hour threshold', () => {
   assert.match(migration, /grant execute on function public\.get_follow_up_due\(\) to authenticated/);
 });
 
-test('grouped reminders use Kuala Lumpur 8 AM and 4 PM slots after 72 hours', () => {
+test('original reminder migration established Kuala Lumpur 8 AM and 4 PM slots', () => {
   assert.match(migration, /p_now at time zone 'Asia\/Kuala_Lumpur'/);
   assert.match(migration, /extract\(hour from v_local\) not in \(8, 16\)/);
   assert.match(migration, /l\.follow_up_activity_at <= p_now - interval '3 days'/);
   assert.match(migration, /group by l\.assigned_agent_id/);
   assert.match(migration, /'follow_up_due:' \|\| v_date_key \|\| ':' \|\| v_slot/);
   assert.match(migration, /'leadlaju-follow-up-due-reminders'/);
+});
+
+test('current Follow Up Due and push eligibility both begin after 24 hours', () => {
+  assert.match(thresholdMigration, /'due_at', l\.follow_up_activity_at \+ interval '1 day'/);
+  assert.match(thresholdMigration, /'notification_due_at', l\.follow_up_activity_at \+ interval '1 day'/);
+  assert.match(thresholdMigration, /l\.follow_up_activity_at <= now\(\) - interval '1 day'/);
+  assert.match(thresholdMigration, /follow_up_activity_at <= now\(\) - interval '1 day'/);
+  assert.match(thresholdMigration, /l\.follow_up_activity_at <= p_now - interval '1 day'/);
+  assert.match(thresholdMigration, /extract\(hour from v_local\) not in \(8, 16\)/);
+  assert.doesNotMatch(thresholdMigration, /interval '(?:2|3) days'/);
+  assert.match(html, /selama 24 jam/);
+  assert.match(app, /melebihi 24 jam tanpa kemas kini/);
 });
 
 test('worker suppresses stale grouped alerts and refreshes the canonical count', () => {

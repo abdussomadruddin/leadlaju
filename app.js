@@ -2322,7 +2322,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20260928-status-v102")
+      .register("/sw.js?v=20260928-followup-v103")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -6170,7 +6170,7 @@ function renderFollowUpDue() {
         ${renderLeadCopyButton(lead, "data-follow-up-due-copy")}
       </div>
     </article>`;
-  }).join("") : '<div class="follow-up-empty"><span aria-hidden="true">✓</span><strong>Semua follow up terkawal</strong><p>Tiada lead Contacted yang melebihi 2 hari tanpa kemas kini.</p></div>';
+  }).join("") : '<div class="follow-up-empty"><span aria-hidden="true">✓</span><strong>Semua follow up terkawal</strong><p>Tiada lead Contacted yang melebihi 24 jam tanpa kemas kini.</p></div>';
 }
 
 function performanceDateOffset(days) {
