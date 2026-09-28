@@ -7,6 +7,7 @@ const root = path.resolve(__dirname, "..");
 const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
 const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
 const sql = fs.readFileSync(path.join(root, "supabase/migrations/20260928035701_agent_performance_report.sql"), "utf8");
+const statusSql = fs.readFileSync(path.join(root, "supabase/migrations/20260928041713_agent_performance_status_counts.sql"), "utf8");
 
 test("performance report is server-owned and rejects cross-agent requests", () => {
   assert.match(sql, /security definer set search_path = ''/);
@@ -39,4 +40,21 @@ test("admin report and private agent summary are separate surfaces", () => {
   assert.match(app, /if \(\["agents", "performance",/);
   assert.match(app, /workbook\.addWorksheet\("Ringkasan Ejen"\)/);
   assert.match(app, /workbook\.addWorksheet\("Trend Mingguan"\)/);
+});
+
+test("status totals deduplicate leads, use current ownership and preserve report privacy", () => {
+  assert.match(statusSql, /count\(distinct lead_id\) filter \(where status = 'contacted'\)/);
+  assert.match(statusSql, /status in \('need_follow_up', 'all_offer_presented'\)/);
+  assert.match(statusSql, /status in \('cancelled', 'rejected'\)/);
+  assert.match(statusSql, /l\.assigned_agent_id = ar\.agent_id/);
+  assert.match(statusSql, /from assignment_rows ar/);
+  assert.match(statusSql, /and \(p_project_id is null or l\.project_id = p_project_id\)/);
+  assert.match(statusSql, /and \(v_admin or id = v_user\)/);
+  assert.doesNotMatch(statusSql, /phone|email/);
+  for (const field of ["total_contacted", "total_follow_up", "total_potential", "total_cancelled_rejected", "total_client"]) {
+    assert.match(statusSql, new RegExp(`'${field}'`));
+    assert.match(app, new RegExp(`row\\.${field}`));
+  }
+  assert.match(html, /Total Cancelled &amp; Rejected/);
+  assert.match(app, /trend\.addRow\(\["Minggu bermula"[\s\S]*"Total Client"/);
 });

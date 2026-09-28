@@ -375,6 +375,7 @@ const elements = {
   performanceProject: document.querySelector("#performance-project"),
   performanceAgent: document.querySelector("#performance-agent"),
   performanceStatus: document.querySelector("#performance-status"),
+  performanceCards: document.querySelector("#performance-cards"),
   performanceRows: document.querySelector("#performance-rows"),
   performanceDetail: document.querySelector("#performance-detail"),
   performanceDetailTitle: document.querySelector("#performance-detail-title"),
@@ -2312,7 +2313,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20260928-performance-v99")
+      .register("/sw.js?v=20260928-status-v100")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -6255,17 +6256,26 @@ function renderPerformanceReport() {
   elements.performanceRows.innerHTML = rows.length ? rows.map((row) => `<tr>
     <td><button type="button" class="performance-agent-link" data-performance-agent="${escapeHtml(row.agent_id)}">${escapeHtml(row.agent_name)}</button></td>
     <td>${Number(row.assignments) || 0}</td>
+    <td>${Number(row.total_contacted) || 0}</td><td>${Number(row.total_follow_up) || 0}</td>
+    <td>${Number(row.total_potential) || 0}</td><td>${Number(row.total_cancelled_rejected) || 0}</td><td>${Number(row.total_client) || 0}</td>
     <td>${performanceRateLabel(row)} <small>(${Number(row.within_five) || 0}/${Number(row.assignments) || 0})</small></td>
     <td>${Number(row.appointments) || 0}</td><td>${Number(row.show_ups) || 0}</td><td>${Number(row.due_now) || 0}</td>
-  </tr>`).join("") : '<tr><td colspan="6">Tiada ejen untuk penapis ini.</td></tr>';
+  </tr>`).join("") : '<tr><td colspan="11">Tiada ejen untuk penapis ini.</td></tr>';
+  const cardMetric = (label, value) => `<div><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></div>`;
+  elements.performanceCards.innerHTML = rows.length ? rows.map((row) => `<details class="performance-card">
+    <summary><span class="performance-card-name">${escapeHtml(row.agent_name)}</span><span class="performance-card-summary">${Number(row.assignments) || 0} lead · ${Number(row.due_now) || 0} due</span></summary>
+    <div class="performance-card-grid">${cardMetric("Total Contacted", Number(row.total_contacted) || 0)}${cardMetric("Total Follow Up", Number(row.total_follow_up) || 0)}${cardMetric("Total Potential", Number(row.total_potential) || 0)}${cardMetric("Total Cancelled & Rejected", Number(row.total_cancelled_rejected) || 0)}${cardMetric("Total Client", Number(row.total_client) || 0)}${cardMetric("CALL NOW ≤5 min", performanceRateLabel(row))}${cardMetric("Appointment", Number(row.appointments) || 0)}${cardMetric("Show Up", Number(row.show_ups) || 0)}</div>
+    <button type="button" class="performance-agent-link" data-performance-agent="${escapeHtml(row.agent_id)}">Lihat trend mingguan</button>
+  </details>`).join("") : '<p>Tiada ejen untuk penapis ini.</p>';
   const selected = rows.find((row) => row.agent_id === selectedPerformanceAgentId);
   elements.performanceDetail.hidden = !selected;
   if (!selected) return;
   elements.performanceDetailTitle.textContent = selected.agent_name;
   const weeks = (performanceReport.weeks || []).filter((item) => item.agent_id === selected.agent_id);
   elements.performanceWeeks.innerHTML = weeks.length
-    ? `<div class="performance-table-wrap"><table class="performance-table"><thead><tr><th>Minggu bermula</th><th>Lead ditugaskan</th><th>CALL NOW ≤5 min</th><th>Appointment</th><th>Show Up</th></tr></thead><tbody>${weeks.map((week) => `<tr><td>${escapeHtml(week.week_start)}</td><td>${week.assignments}</td><td>${performanceRateLabel(week)} (${week.within_five}/${week.assignments})</td><td>${week.appointments}</td><td>${week.show_ups}</td></tr>`).join("")}</tbody></table></div>`
+    ? `<div class="performance-table-wrap"><table class="performance-table"><thead><tr><th>Minggu bermula</th><th>Lead ditugaskan</th><th>Total Contacted</th><th>Total Follow Up</th><th>Total Potential</th><th>Total Cancelled &amp; Rejected</th><th>Total Client</th><th>CALL NOW ≤5 min</th><th>Appointment</th><th>Show Up</th></tr></thead><tbody>${weeks.map((week) => `<tr><td>${escapeHtml(week.week_start)}</td><td>${week.assignments}</td><td>${week.total_contacted || 0}</td><td>${week.total_follow_up || 0}</td><td>${week.total_potential || 0}</td><td>${week.total_cancelled_rejected || 0}</td><td>${week.total_client || 0}</td><td>${performanceRateLabel(week)} (${week.within_five}/${week.assignments})</td><td>${week.appointments}</td><td>${week.show_ups}</td></tr>`).join("")}</tbody></table></div>`
     : '<p>Tiada aktiviti dalam tempoh ini.</p>';
+  if (weeks.length) elements.performanceWeeks.innerHTML += `<div class="performance-week-cards">${weeks.map((week) => `<details class="performance-card"><summary><span class="performance-card-name">${escapeHtml(week.week_start)}</span><span class="performance-card-summary">${Number(week.assignments) || 0} lead</span></summary><div class="performance-card-grid">${cardMetric("Total Contacted", Number(week.total_contacted) || 0)}${cardMetric("Total Follow Up", Number(week.total_follow_up) || 0)}${cardMetric("Total Potential", Number(week.total_potential) || 0)}${cardMetric("Total Cancelled & Rejected", Number(week.total_cancelled_rejected) || 0)}${cardMetric("Total Client", Number(week.total_client) || 0)}${cardMetric("CALL NOW ≤5 min", performanceRateLabel(week))}${cardMetric("Appointment", Number(week.appointments) || 0)}${cardMetric("Show Up", Number(week.show_ups) || 0)}</div></details>`).join("")}</div>`;
 }
 
 async function loadPerformanceReport() {
@@ -6276,6 +6286,7 @@ async function loadPerformanceReport() {
     elements.performanceStatus.textContent = "Pilih julat tarikh yang sah, maksimum 366 hari.";
     elements.performanceDownload.disabled = true;
     elements.performanceRows.innerHTML = "";
+    elements.performanceCards.innerHTML = "";
     elements.performanceDetail.hidden = true;
     return;
   }
@@ -6303,6 +6314,7 @@ async function loadPerformanceReport() {
     console.error("Performance report load failed", error);
     elements.performanceStatus.textContent = "Laporan gagal dimuatkan. Cuba semula.";
     elements.performanceRows.innerHTML = "";
+    elements.performanceCards.innerHTML = "";
   }
 }
 
@@ -6315,17 +6327,17 @@ async function downloadPerformanceReport() {
   const safeName = (value) => /^[=+@-]/.test(String(value || "")) ? `'${value}` : String(value || "");
   summary.addRow(["Prestasi Ejen Lead Laju", `${report.from} hingga ${report.to}`]);
   summary.addRow(["Projek", elements.performanceProject.selectedOptions[0]?.textContent || "Semua projek", "Ejen", elements.performanceAgent.selectedOptions[0]?.textContent || "Semua ejen"]);
-  summary.addRow(["Ejen", "Lead ditugaskan", "CALL NOW ≤5 min", "Kadar ≤5 min", "Appointment", "Show Up", "Follow Up Due sekarang"]);
-  (report.rows || []).forEach((row) => summary.addRow([safeName(row.agent_name), row.assignments, row.within_five, performanceRate(row), row.appointments, row.show_ups, row.due_now]));
-  trend.addRow(["Minggu bermula", "Ejen", "Lead ditugaskan", "CALL NOW ≤5 min", "Kadar ≤5 min", "Appointment", "Show Up"]);
+  summary.addRow(["Ejen", "Lead ditugaskan", "Total Contacted", "Total Follow Up", "Total Potential", "Total Cancelled & Rejected", "Total Client", "CALL NOW ≤5 min", "Kadar ≤5 min", "Appointment", "Show Up", "Follow Up Due sekarang"]);
+  (report.rows || []).forEach((row) => summary.addRow([safeName(row.agent_name), row.assignments, row.total_contacted, row.total_follow_up, row.total_potential, row.total_cancelled_rejected, row.total_client, row.within_five, performanceRate(row), row.appointments, row.show_ups, row.due_now]));
+  trend.addRow(["Minggu bermula", "Ejen", "Lead ditugaskan", "Total Contacted", "Total Follow Up", "Total Potential", "Total Cancelled & Rejected", "Total Client", "CALL NOW ≤5 min", "Kadar ≤5 min", "Appointment", "Show Up"]);
   (report.weeks || []).forEach((week) => {
     const agent = (report.rows || []).find((row) => row.agent_id === week.agent_id);
-    trend.addRow([new Date(`${week.week_start}T00:00:00Z`), safeName(agent?.agent_name || ""), week.assignments, week.within_five, performanceRate(week), week.appointments, week.show_ups]);
+    trend.addRow([new Date(`${week.week_start}T00:00:00Z`), safeName(agent?.agent_name || ""), week.assignments, week.total_contacted, week.total_follow_up, week.total_potential, week.total_cancelled_rejected, week.total_client, week.within_five, performanceRate(week), week.appointments, week.show_ups]);
   });
   summary.getRow(3).font = { bold: true };
   trend.getRow(1).font = { bold: true };
-  summary.getColumn(4).numFmt = "0.0%";
-  trend.getColumn(5).numFmt = "0.0%";
+  summary.getColumn(9).numFmt = "0.0%";
+  trend.getColumn(10).numFmt = "0.0%";
   trend.getColumn(1).numFmt = "dd/mm/yyyy";
   [summary, trend].forEach((sheet) => sheet.columns.forEach((column) => { column.width = 22; }));
   const buffer = await workbook.xlsx.writeBuffer();
@@ -7733,13 +7745,15 @@ elements.performanceDownload?.addEventListener("click", () => {
     showToast("Excel gagal", "Cuba muat turun semula.", "error");
   });
 });
-elements.performanceRows?.addEventListener("click", (event) => {
+function openPerformanceAgent(event) {
   const button = event.target.closest("[data-performance-agent]");
   if (!button) return;
   selectedPerformanceAgentId = button.dataset.performanceAgent;
   renderPerformanceReport();
   elements.performanceDetail.scrollIntoView({ behavior: "smooth", block: "nearest" });
-});
+}
+elements.performanceRows?.addEventListener("click", openPerformanceAgent);
+elements.performanceCards?.addEventListener("click", openPerformanceAgent);
 elements.bulletinForm?.addEventListener("submit", saveBulletin);
 elements.bulletinCancelEdit?.addEventListener("click", resetBulletinForm);
 document.querySelector("#bulletins-view")?.addEventListener("click", (event) => {

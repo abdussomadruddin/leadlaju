@@ -5254,5 +5254,23 @@ td small {
 .performance-table td small { color: var(--ink-700); }
 .performance-agent-link { padding: 0; border: 0; background: none; color: var(--blue); font: inherit; font-weight: 800; cursor: pointer; }
 .performance-detail { margin-top: 18px; }
+.performance-cards, .performance-week-cards { display: none; }
+.performance-card { border: 1px solid var(--line); border-radius: 14px; background: #fff; padding: 0 14px 12px; }
+.performance-card + .performance-card { margin-top: 9px; }
+.performance-card summary { display: flex; justify-content: space-between; align-items: center; gap: 10px; min-height: 54px; cursor: pointer; list-style: none; }
+.performance-card summary::-webkit-details-marker { display: none; }
+.performance-card summary::after { content: "⌄"; color: var(--ink-700); font-size: 19px; transition: transform .2s; }
+.performance-card[open] summary::after { transform: rotate(180deg); }
+.performance-card-name { flex: 1; min-width: 0; color: var(--ink-900); font-weight: 800; }
+.performance-card-summary { color: var(--ink-700); font-size: 11px; white-space: nowrap; }
+.performance-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 4px 0 12px; }
+.performance-card-grid > div { min-width: 0; border-radius: 9px; background: var(--surface, #f5f7fa); padding: 8px 9px; }
+.performance-card-grid small { display: block; color: var(--ink-700); font-size: 10px; line-height: 1.3; }
+.performance-card-grid strong { display: block; margin-top: 3px; color: var(--ink-900); font-size: 17px; }
 @media (max-width: 850px) { .performance-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 560px) { .performance-filters label { width: 100%; } .performance-table-wrap.panel { padding: 8px; } }
+@media (max-width: 560px) {
+  .performance-filters label { width: 100%; }
+  #performance-view > .performance-table-wrap, #performance-weeks > .performance-table-wrap { display: none; }
+  .performance-cards, .performance-week-cards { display: block; }
+  .performance-detail { padding: 14px; }
+}
