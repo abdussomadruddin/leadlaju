@@ -58,3 +58,13 @@ test("status totals deduplicate leads, use current ownership and preserve report
   assert.match(html, /Total Cancelled &amp; Rejected/);
   assert.match(app, /trend\.addRow\(\["Minggu bermula"[\s\S]*"Total Client"/);
 });
+
+test("performance report uses expandable compact cards on desktop and phone", () => {
+  const css = fs.readFileSync(path.join(root, "styles.css"), "utf8");
+  assert.match(html, /id="performance-cards"/);
+  assert.match(app, /<details class="performance-card">/);
+  assert.match(app, /performance-week-cards/);
+  assert.match(app, /elements\.performanceCards\?\.addEventListener\("click", openPerformanceAgent\)/);
+  assert.match(css, /\.performance-cards, \.performance-week-cards \{ display: grid/);
+  assert.match(css, /grid-template-columns: minmax\(0, 1fr\)/);
+});
