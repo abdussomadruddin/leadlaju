@@ -25,9 +25,9 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260928-status-v101" />
+    <link rel="stylesheet" href="styles.css?v=20260928-status-v102" />
     <script src="vendor/exceljs.min.js?v=4.4.0" defer></script>
-    <script src="app.js?v=20260928-status-v101" defer></script>
+    <script src="app.js?v=20260928-status-v102" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -578,6 +578,9 @@
                 <tbody id="leads-table-body"></tbody>
               </table>
             </div>
+            <div class="lead-log-more-wrap" id="lead-log-more-wrap" hidden>
+              <button class="secondary-button compact" id="lead-log-more" type="button">Muat lagi</button>
+            </div>
           </div>
         </section>
 
@@ -695,7 +698,7 @@
           <div class="performance-cards" id="performance-cards"></div>
           <div class="performance-table-wrap panel"><table class="performance-table"><thead><tr><th>Ejen</th><th>Lead ditugaskan</th><th>Total Contacted</th><th>Total Follow Up</th><th>Total Potential</th><th>Total Cancelled &amp; Rejected</th><th>Total Client</th><th>CALL NOW ≤5 min</th><th>Appointment</th><th>Show Up</th><th>Follow Up Due sekarang</th></tr></thead><tbody id="performance-rows"></tbody></table></div>
           <section class="panel performance-detail" id="performance-detail" hidden><div class="panel-heading"><div><span class="section-kicker">Trend mingguan</span><h3 id="performance-detail-title">Prestasi ejen</h3></div></div><div id="performance-weeks"></div></section>
-          <p class="performance-note">Total status mengira lead unik yang ditugaskan dalam tempoh dipilih dan masih dimiliki ejen, mengikut status semasa. Total Follow Up merangkumi Need Follow Up dan All Offer Presented; Total Cancelled &amp; Rejected merangkumi kedua-dua status. Kadar respons menggunakan setiap assignment dalam tempoh dipilih. Follow Up Due ialah jumlah tertunggak sekarang dan tidak mengikut penapis tarikh. CALL NOW dan Follow Up ialah tindakan direkod, bukan bukti pelanggan berjaya dihubungi.</p>
+          <details class="performance-help"><summary>Cara angka dikira</summary><p>Total status mengira lead unik yang ditugaskan dalam tempoh dipilih dan masih dimiliki ejen, mengikut status semasa. Total Follow Up merangkumi Need Follow Up dan All Offer Presented; Total Cancelled &amp; Rejected merangkumi kedua-dua status. Kadar respons menggunakan setiap assignment dalam tempoh dipilih. Follow Up Due ialah jumlah tertunggak sekarang dan tidak mengikut penapis tarikh. CALL NOW dan Follow Up ialah tindakan direkod, bukan bukti pelanggan berjaya dihubungi.</p></details>
         </section>
 
         <section class="view admin-only-view" id="projects-view">

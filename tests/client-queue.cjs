@@ -207,7 +207,7 @@ test('admin log lead supports filtering by agent', () => {
   const html = fs.readFileSync('index.html', 'utf8');
   assert.match(html, /id="lead-agent-filter"/);
   assert.match(source, /agentFilter === "unassigned" \? !lead\.assignedAgentId : lead\.assignedAgentId === agentFilter/);
-  assert.match(source, /leadAgentFilter\?\.addEventListener\("change", renderLeadsTable\)/);
+  assert.match(source, /leadAgentFilter\?\.addEventListener\("change", resetLeadLogPage\)/);
 });
 
 test('lead and appointment lists support Kuala Lumpur month and year filters', () => {
@@ -221,7 +221,7 @@ test('lead and appointment lists support Kuala Lumpur month and year filters', (
   assert.match(source, /function matchesMonthYearFilter\(value, monthFilter, yearFilter\)/);
   assert.match(source, /matchesMonthYearFilter\(lead\.createdAt \|\| lead\.receivedAt, elements\.leadMonthFilter, elements\.leadYearFilter\)/);
   assert.match(source, /matchesMonthYearFilter\(appointment\.scheduledAt, elements\.appointmentMonthFilter, elements\.appointmentYearFilter\)/);
-  assert.match(source, /leadMonthFilter\?\.addEventListener\("change", renderLeadsTable\)/);
+  assert.match(source, /leadMonthFilter\?\.addEventListener\("change", resetLeadLogPage\)/);
   assert.match(source, /appointmentYearFilter\?\.addEventListener\("change", renderAppointments\)/);
 });
 

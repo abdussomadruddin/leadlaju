@@ -323,6 +323,8 @@ const elements = {
   leadMonthFilter: document.querySelector("#lead-month-filter"),
   leadYearFilter: document.querySelector("#lead-year-filter"),
   leadLogCount: document.querySelector("#lead-log-count"),
+  leadLogMoreWrap: document.querySelector("#lead-log-more-wrap"),
+  leadLogMore: document.querySelector("#lead-log-more"),
   navMonitorCount: document.querySelector("#nav-monitor-count"),
   monitorHealth: document.querySelector("#monitor-health"),
   monitorCriticalCount: document.querySelector("#monitor-critical-count"),
@@ -1739,18 +1741,20 @@ function clearExpiredLocalCooldowns(now = Date.now()) {
   return changed;
 }
 
+const MALAYSIA_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-GB", {
+  timeZone: MALAYSIA_TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+  hourCycle: "h23",
+});
+
 function malaysiaDateParts(value) {
-  return new Intl.DateTimeFormat("en-GB", {
-    timeZone: MALAYSIA_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-    hourCycle: "h23",
-  })
+  return MALAYSIA_DATE_TIME_FORMATTER
     .formatToParts(new Date(parseLeadTimestamp(value)))
     .reduce((parts, part) => {
       if (part.type !== "literal") parts[part.type] = part.value;
@@ -1779,6 +1783,11 @@ const MALAY_MONTH_NAMES = [
   "Julai", "Ogos", "September", "Oktober", "November", "Disember",
 ];
 
+function updateSelectOptions(select, markup, selectedValue) {
+  if (select.innerHTML !== markup) select.innerHTML = markup;
+  select.value = [...select.options].some((option) => option.value === selectedValue) ? selectedValue : "all";
+}
+
 function populateMonthYearFilters(monthFilter, yearFilter, records, getDate) {
   if (!monthFilter || !yearFilter) return;
   const selectedMonth = monthFilter.value || "all";
@@ -1793,16 +1802,16 @@ function populateMonthYearFilters(monthFilter, yearFilter, records, getDate) {
     years.add(parts.year);
     months.add(parts.month);
   });
-  monthFilter.innerHTML = [
+  const monthOptions = [
     '<option value="all">Semua bulan</option>',
     ...[...months].sort().map((month) => `<option value="${month}">${MALAY_MONTH_NAMES[Number(month) - 1]}</option>`),
   ].join("");
-  yearFilter.innerHTML = [
+  const yearOptions = [
     '<option value="all">Semua tahun</option>',
     ...[...years].sort((left, right) => Number(right) - Number(left)).map((year) => `<option value="${year}">${year}</option>`),
   ].join("");
-  monthFilter.value = [...monthFilter.options].some((option) => option.value === selectedMonth) ? selectedMonth : "all";
-  yearFilter.value = [...yearFilter.options].some((option) => option.value === selectedYear) ? selectedYear : "all";
+  updateSelectOptions(monthFilter, monthOptions, selectedMonth);
+  updateSelectOptions(yearFilter, yearOptions, selectedYear);
 }
 
 function matchesMonthYearFilter(value, monthFilter, yearFilter) {
@@ -2313,7 +2322,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20260928-status-v101")
+      .register("/sw.js?v=20260928-status-v102")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -5097,6 +5106,9 @@ function leadNoteDraftKey(leadId) {
 }
 
 const expandedLeadLogIds = new Set();
+const LEAD_LOG_PAGE_SIZE = 30;
+let leadLogVisibleLimit = LEAD_LOG_PAGE_SIZE;
+let leadLogSearchTimer = 0;
 
 function renderLeadFollowUpButton(lead, actionAttribute = "data-lead-follow-up") {
   const followUpCount = Math.min(6, Math.max(0, Number(lead?.followUpCount) || 0));
@@ -5166,7 +5178,7 @@ function renderLeadsTable() {
       unassignedCount += 1;
     }
   });
-  elements.leadFilter.innerHTML = [
+  const statusOptionsMarkup = [
     `<option value="all">Semua status (${visibleLeads.length})</option>`,
     ...LEAD_STATUS_OPTIONS.map(
       (status) => `<option value="${status.value}">${status.label} (${statusCounts[status.value] || 0})</option>`,
@@ -5174,10 +5186,10 @@ function renderLeadsTable() {
     ...(followUpCounts.size ? [`<option value="follow_up">Follow Up (${[...followUpCounts.values()].reduce((sum, count) => sum + count, 0)})</option>`] : []),
     ...[1, 2, 3, 4, 5, 6].filter((count) => followUpCounts.has(count)).map((count) => `<option value="follow_up_${count}">Follow Up ${count} (${followUpCounts.get(count)})</option>`),
   ].join("");
-  elements.leadFilter.value = [...elements.leadFilter.options].some((option) => option.value === selectedStatus) ? selectedStatus : "all";
+  updateSelectOptions(elements.leadFilter, statusOptionsMarkup, selectedStatus);
   const filter = elements.leadFilter.value || "all";
   if (elements.leadAgentFilter && isAdmin()) {
-    elements.leadAgentFilter.innerHTML = [
+    const agentOptionsMarkup = [
       `<option value="all">Semua ejen (${visibleLeads.length})</option>`,
       ...state.agents
         .filter((agent) => agent.role === "agent")
@@ -5187,10 +5199,7 @@ function renderLeadsTable() {
         ),
       `<option value="unassigned">Belum / tiada ejen (${unassignedCount})</option>`,
     ].join("");
-    elements.leadAgentFilter.value =
-      [...elements.leadAgentFilter.options].some((option) => option.value === selectedAgentId)
-        ? selectedAgentId
-        : "all";
+    updateSelectOptions(elements.leadAgentFilter, agentOptionsMarkup, selectedAgentId);
   }
   const agentFilter = elements.leadAgentFilter?.value || "all";
   populateMonthYearFilters(
@@ -5225,8 +5234,11 @@ function renderLeadsTable() {
   if (elements.leadLogCount) {
     elements.leadLogCount.textContent = `${rows.length} lead`;
   }
+  const shownRows = rows.slice(0, leadLogVisibleLimit);
+  elements.leadLogMoreWrap.hidden = shownRows.length >= rows.length;
+  if (!elements.leadLogMoreWrap.hidden) elements.leadLogMore.textContent = `Muat lagi ${Math.min(LEAD_LOG_PAGE_SIZE, rows.length - shownRows.length)} lead · ${shownRows.length}/${rows.length}`;
   elements.leadsTableBody.innerHTML = rows.length
-    ? rows
+    ? shownRows
         .map((lead) => {
           const visualStatus = getLeadVisualStatus(lead);
           const requiresCallNow = !isAdmin() && visualStatus === "new";
@@ -7621,11 +7633,23 @@ document.addEventListener("keydown", (event) => {
   setAccountMenuOpen(false);
   if (logoutConfirmationStep) closeLogoutConfirmation();
 });
-elements.leadSearch.addEventListener("input", renderLeadsTable);
-elements.leadFilter.addEventListener("change", renderLeadsTable);
-elements.leadAgentFilter?.addEventListener("change", renderLeadsTable);
-elements.leadMonthFilter?.addEventListener("change", renderLeadsTable);
-elements.leadYearFilter?.addEventListener("change", renderLeadsTable);
+function resetLeadLogPage() {
+  leadLogVisibleLimit = LEAD_LOG_PAGE_SIZE;
+  window.clearTimeout(leadLogSearchTimer);
+  renderLeadsTable();
+}
+elements.leadSearch.addEventListener("input", () => {
+  window.clearTimeout(leadLogSearchTimer);
+  leadLogSearchTimer = window.setTimeout(resetLeadLogPage, 120);
+});
+elements.leadFilter.addEventListener("change", resetLeadLogPage);
+elements.leadAgentFilter?.addEventListener("change", resetLeadLogPage);
+elements.leadMonthFilter?.addEventListener("change", resetLeadLogPage);
+elements.leadYearFilter?.addEventListener("change", resetLeadLogPage);
+elements.leadLogMore?.addEventListener("click", () => {
+  leadLogVisibleLimit += LEAD_LOG_PAGE_SIZE;
+  renderLeadsTable();
+});
 elements.appointmentStatusFilter?.addEventListener("change", renderAppointments);
 elements.appointmentProjectFilter?.addEventListener("change", renderAppointments);
 elements.appointmentMonthFilter?.addEventListener("change", renderAppointments);

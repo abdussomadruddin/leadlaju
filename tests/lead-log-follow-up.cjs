@@ -36,6 +36,23 @@ test('follow-up filter only shows nonempty counts through six', () => {
   assert.match(app, /filter\.startsWith\("follow_up_"\)/);
 });
 
+test('Log Lead filters avoid rebuilding unchanged dropdowns and render a bounded page', () => {
+  assert.match(html, /id="lead-log-more-wrap"/);
+  assert.match(app, /const LEAD_LOG_PAGE_SIZE = 30/);
+  assert.match(app, /const shownRows = rows\.slice\(0, leadLogVisibleLimit\)/);
+  assert.match(app, /leadLogVisibleLimit \+= LEAD_LOG_PAGE_SIZE/);
+  assert.match(app, /leadFilter\.addEventListener\("change", resetLeadLogPage\)/);
+  assert.match(app, /if \(select\.innerHTML !== markup\) select\.innerHTML = markup/);
+  const source = app.match(/function updateSelectOptions\(select, markup, selectedValue\) \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(source);
+  const update = vm.runInNewContext(`(${source})`);
+  let writes = 0;
+  const select = { options: [{ value: 'all' }, { value: 'contacted' }], value: 'all', get innerHTML() { return '<option value="all">All</option>'; }, set innerHTML(_) { writes += 1; } };
+  update(select, '<option value="all">All</option>', 'contacted');
+  assert.equal(writes, 0);
+  assert.equal(select.value, 'contacted');
+});
+
 test('server increments atomically and sets All Offer Presented exactly on third follow-up', () => {
   assert.match(migration, /where id = p_lead_id for update/);
   assert.match(migration, /v_lead\.follow_up_count <> p_expected_count/);
