@@ -25,9 +25,9 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260926-lead-copy-v98" />
+    <link rel="stylesheet" href="styles.css?v=20260928-performance-v99" />
     <script src="vendor/exceljs.min.js?v=4.4.0" defer></script>
-    <script src="app.js?v=20260926-lead-copy-v98" defer></script>
+    <script src="app.js?v=20260928-performance-v99" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -262,6 +262,10 @@
             </svg>
             Pengurusan Ejen
           </button>
+          <button class="nav-item admin-only" data-view="performance" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9m5 10V5m5 14v-7m5 7V3" /><path d="M3 21h18" /></svg>
+            Prestasi Ejen
+          </button>
           <button class="nav-item admin-only" data-view="projects" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M4 7h16M7 3v4m10-4v4M5 11h14v10H5z" />
@@ -471,6 +475,14 @@
             <div id="active-lead-container"></div>
           </section>
 
+          <section class="panel own-performance" id="own-performance" hidden>
+            <div class="panel-heading"><div><span class="section-kicker">7 hari terkini</span><h3>Prestasi Saya</h3></div></div>
+            <p id="own-performance-status">Memuatkan prestasi...</p>
+            <div class="performance-metrics" id="own-performance-metrics"></div>
+            <button class="secondary-button compact" data-view-link="follow-up-due" type="button">Lihat Follow Up Due</button>
+            <p class="performance-note">CALL NOW dan Follow Up ialah tindakan direkod, bukan bukti pelanggan berjaya dihubungi.</p>
+          </section>
+
           <div class="bottom-grid">
             <section class="panel">
               <div class="panel-heading">
@@ -665,6 +677,24 @@
             </div>
           </div>
           <div class="agents-grid" id="agents-grid"></div>
+        </section>
+
+        <section class="view admin-only-view" id="performance-view">
+          <div class="content-heading">
+            <div><span class="section-kicker">Admin sahaja</span><h2>Prestasi Ejen</h2><p>Semak tindakan direkod dan kemajuan appointment mengikut ejen.</p></div>
+            <button class="primary-button compact" id="performance-download" type="button" disabled>Download Excel</button>
+          </div>
+          <div class="performance-filters panel">
+            <label>Tempoh <select id="performance-period" aria-label="Tempoh prestasi"><option value="7">7 hari</option><option value="30">30 hari</option><option value="custom">Julat tarikh</option></select></label>
+            <label class="performance-custom-date" hidden>Dari <input id="performance-from" type="date" /></label>
+            <label class="performance-custom-date" hidden>Hingga <input id="performance-to" type="date" /></label>
+            <label>Projek <select id="performance-project" aria-label="Projek prestasi"><option value="">Semua projek</option></select></label>
+            <label>Ejen <select id="performance-agent" aria-label="Ejen prestasi"><option value="">Semua ejen</option></select></label>
+          </div>
+          <p class="performance-status" id="performance-status" role="status">Pilih Prestasi Ejen untuk memuatkan laporan.</p>
+          <div class="performance-table-wrap panel"><table class="performance-table"><thead><tr><th>Ejen</th><th>Lead ditugaskan</th><th>CALL NOW ≤5 min</th><th>Appointment</th><th>Show Up</th><th>Follow Up Due sekarang</th></tr></thead><tbody id="performance-rows"></tbody></table></div>
+          <section class="panel performance-detail" id="performance-detail" hidden><div class="panel-heading"><div><span class="section-kicker">Trend mingguan</span><h3 id="performance-detail-title">Prestasi ejen</h3></div></div><div id="performance-weeks"></div></section>
+          <p class="performance-note">Kadar respons menggunakan setiap assignment dalam tempoh dipilih. Follow Up Due ialah jumlah tertunggak sekarang dan tidak mengikut penapis tarikh. CALL NOW dan Follow Up ialah tindakan direkod, bukan bukti pelanggan berjaya dihubungi.</p>
         </section>
 
         <section class="view admin-only-view" id="projects-view">

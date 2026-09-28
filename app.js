@@ -188,6 +188,12 @@ let authoritativeStateGeneration = 0;
 const locallyExpiredAssignments = new Set();
 let leadLajuIntroShown = false;
 let introRevealComplete = false;
+let performanceReport = null;
+let performanceRequestVersion = 0;
+let selectedPerformanceAgentId = "";
+let performanceLoadedAt = 0;
+let ownPerformanceLoadedAt = 0;
+let ownPerformanceLoading = false;
 let initialDashboardSyncState = "idle";
 let resumeSyncPending = false;
 let runtimeWasHidden = false;
@@ -360,6 +366,20 @@ const elements = {
   contactFormError: document.querySelector("#contact-form-error"),
   contactStatus: document.querySelector("#contact-status"),
   agentsGrid: document.querySelector("#agents-grid"),
+  ownPerformance: document.querySelector("#own-performance"),
+  ownPerformanceStatus: document.querySelector("#own-performance-status"),
+  ownPerformanceMetrics: document.querySelector("#own-performance-metrics"),
+  performancePeriod: document.querySelector("#performance-period"),
+  performanceFrom: document.querySelector("#performance-from"),
+  performanceTo: document.querySelector("#performance-to"),
+  performanceProject: document.querySelector("#performance-project"),
+  performanceAgent: document.querySelector("#performance-agent"),
+  performanceStatus: document.querySelector("#performance-status"),
+  performanceRows: document.querySelector("#performance-rows"),
+  performanceDetail: document.querySelector("#performance-detail"),
+  performanceDetailTitle: document.querySelector("#performance-detail-title"),
+  performanceWeeks: document.querySelector("#performance-weeks"),
+  performanceDownload: document.querySelector("#performance-download"),
   projectsList: document.querySelector("#projects-list"),
   projectForm: document.querySelector("#project-form"),
   projectName: document.querySelector("#project-name"),
@@ -1006,6 +1026,8 @@ function startAuthenticatedApp(user, options = {}) {
 }
 
 function showLogin() {
+  performanceReport = null;
+  performanceRequestVersion += 1;
   window.clearInterval(tickTimer);
   window.clearInterval(syncTimer);
   window.clearInterval(followUpReminderTimer);
@@ -2092,7 +2114,7 @@ function getNotificationStartUrl(viewName = "") {
 function getRequestedStartView() {
   const params = new URLSearchParams(window.location.search);
   const requestedView = params.get("view") || window.location.hash.replace(/^#/, "");
-  return ["dashboard", "leads", "appointments", "follow-up-due", "bulletins", "agents", "projects", "lead-monitor", "import-leads", "integrations"].includes(requestedView) ? requestedView : "dashboard";
+  return ["dashboard", "leads", "appointments", "follow-up-due", "bulletins", "agents", "performance", "projects", "lead-monitor", "import-leads", "integrations"].includes(requestedView) ? requestedView : "dashboard";
 }
 
 async function syncNotificationLead(leadId) {
@@ -2290,7 +2312,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-    .register("/sw.js?v=20260926-lead-copy-v98")
+      .register("/sw.js?v=20260928-performance-v99")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -5635,6 +5657,7 @@ function renderUser() {
   elements.sidebarUserName.textContent = user.name;
   elements.sidebarUserRole.textContent = user.role === "admin" ? "Administrator" : "Property Agent";
   elements.logoutButton.hidden = true;
+  if (elements.ownPerformance) elements.ownPerformance.hidden = isAdmin();
   elements.viewTitle.innerHTML =
     activeView === "dashboard"
       ? `Selamat datang, <span>${escapeHtml(user.name.split(" ")[0])}</span>`
@@ -5643,7 +5666,7 @@ function renderUser() {
   document.querySelectorAll(".admin-only").forEach((item) => {
     item.style.display = isAdmin() ? (item.classList.contains("admin-only-block") ? "block" : "flex") : "none";
   });
-  if (!isAdmin() && ["agents", "projects", "lead-monitor", "import-leads", "integrations"].includes(activeView)) {
+  if (!isAdmin() && ["agents", "performance", "projects", "lead-monitor", "import-leads", "integrations"].includes(activeView)) {
     switchView("dashboard");
   }
 }
@@ -6137,6 +6160,178 @@ function renderFollowUpDue() {
   }).join("") : '<div class="follow-up-empty"><span aria-hidden="true">✓</span><strong>Semua follow up terkawal</strong><p>Tiada lead Contacted yang melebihi 2 hari tanpa kemas kini.</p></div>';
 }
 
+function performanceDateOffset(days) {
+  const date = new Date(`${todayKey()}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function performanceRange() {
+  const period = elements.performancePeriod?.value || "7";
+  if (period === "custom") {
+    const from = elements.performanceFrom?.value;
+    const to = elements.performanceTo?.value;
+    if (!from || !to || from > to || (Date.parse(to) - Date.parse(from)) / 86400000 > 366) return null;
+    return { from, to };
+  }
+  return { from: performanceDateOffset(1 - Number(period)), to: todayKey() };
+}
+
+function performanceRate(row) {
+  return Number(row.assignments) ? Number(row.within_five) / Number(row.assignments) : null;
+}
+
+function performanceRateLabel(row) {
+  const rate = performanceRate(row);
+  return rate === null ? "—" : `${(rate * 100).toFixed(1)}%`;
+}
+
+function performanceMetric(label, value, detail = "") {
+  return `<div class="performance-metric"><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong>${detail ? `<span>${escapeHtml(detail)}</span>` : ""}</div>`;
+}
+
+function renderOwnPerformance(current, previous) {
+  const row = current?.rows?.find((item) => item.agent_id === state.currentUserId);
+  const prior = previous?.rows?.find((item) => item.agent_id === state.currentUserId);
+  if (!row) {
+    elements.ownPerformanceStatus.textContent = "Prestasi belum tersedia.";
+    elements.ownPerformanceMetrics.innerHTML = "";
+    return;
+  }
+  elements.ownPerformanceStatus.textContent = `${current.from} hingga ${current.to} · Dibandingkan dengan 7 hari sebelumnya`;
+  elements.ownPerformanceMetrics.innerHTML = [
+    performanceMetric("Lead ditugaskan", row.assignments, `Sebelumnya ${prior?.assignments || 0}`),
+    performanceMetric("CALL NOW ≤5 min", performanceRateLabel(row), `Sebelumnya ${prior ? performanceRateLabel(prior) : "—"}`),
+    performanceMetric("Appointment", row.appointments, `Sebelumnya ${prior?.appointments || 0}`),
+    performanceMetric("Show Up", row.show_ups, `Sebelumnya ${prior?.show_ups || 0}`),
+    performanceMetric("Follow Up Due sekarang", row.due_now, "Perlu tindakan"),
+  ].join("");
+}
+
+async function loadOwnPerformance() {
+  if (isAdmin() || !elements.ownPerformance || !remoteDatabaseMode || !remoteDatabaseClient) {
+    if (!isAdmin() && elements.ownPerformanceStatus) elements.ownPerformanceStatus.textContent = "Prestasi hanya tersedia apabila tersambung ke Supabase.";
+    return;
+  }
+  if (ownPerformanceLoading) return;
+  ownPerformanceLoading = true;
+  ownPerformanceLoadedAt = Date.now();
+  const currentUserId = state.currentUserId;
+  const currentFrom = performanceDateOffset(-6);
+  const previousFrom = performanceDateOffset(-13);
+  try {
+    const [currentResult, previousResult] = await Promise.all([
+      remoteDatabaseClient.rpc("get_agent_performance_report", { p_from: currentFrom, p_to: todayKey(), p_agent_id: currentUserId }),
+      remoteDatabaseClient.rpc("get_agent_performance_report", { p_from: previousFrom, p_to: performanceDateOffset(-7), p_agent_id: currentUserId }),
+    ]);
+    if (currentResult.error || previousResult.error) throw currentResult.error || previousResult.error;
+    if (state.currentUserId === currentUserId && !isAdmin()) renderOwnPerformance(currentResult.data, previousResult.data);
+  } catch (error) {
+    console.error("Agent performance load failed", error);
+    elements.ownPerformanceStatus.textContent = "Prestasi belum dapat dimuatkan. Cuba refresh.";
+  } finally {
+    ownPerformanceLoading = false;
+  }
+}
+
+function populatePerformanceFilters() {
+  if (!isAdmin()) return;
+  const project = elements.performanceProject.value;
+  const agent = elements.performanceAgent.value;
+  elements.performanceProject.innerHTML = '<option value="">Semua projek</option>' + state.projects
+    .map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join("");
+  elements.performanceAgent.innerHTML = '<option value="">Semua ejen</option>' + state.agents
+    .filter((item) => item.role === "agent" && item.approvalStatus !== "rejected")
+    .map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join("");
+  elements.performanceProject.value = project;
+  elements.performanceAgent.value = agent;
+}
+
+function renderPerformanceReport() {
+  if (!isAdmin() || !performanceReport) return;
+  const rows = performanceReport.rows || [];
+  elements.performanceStatus.textContent = `${performanceReport.from} hingga ${performanceReport.to} · ${rows.length} ejen · Data semasa ${formatDateTime(new Date(performanceReport.generated_at).getTime())}`;
+  elements.performanceDownload.disabled = false;
+  elements.performanceRows.innerHTML = rows.length ? rows.map((row) => `<tr>
+    <td><button type="button" class="performance-agent-link" data-performance-agent="${escapeHtml(row.agent_id)}">${escapeHtml(row.agent_name)}</button></td>
+    <td>${Number(row.assignments) || 0}</td>
+    <td>${performanceRateLabel(row)} <small>(${Number(row.within_five) || 0}/${Number(row.assignments) || 0})</small></td>
+    <td>${Number(row.appointments) || 0}</td><td>${Number(row.show_ups) || 0}</td><td>${Number(row.due_now) || 0}</td>
+  </tr>`).join("") : '<tr><td colspan="6">Tiada ejen untuk penapis ini.</td></tr>';
+  const selected = rows.find((row) => row.agent_id === selectedPerformanceAgentId);
+  elements.performanceDetail.hidden = !selected;
+  if (!selected) return;
+  elements.performanceDetailTitle.textContent = selected.agent_name;
+  const weeks = (performanceReport.weeks || []).filter((item) => item.agent_id === selected.agent_id);
+  elements.performanceWeeks.innerHTML = weeks.length
+    ? `<div class="performance-table-wrap"><table class="performance-table"><thead><tr><th>Minggu bermula</th><th>Lead ditugaskan</th><th>CALL NOW ≤5 min</th><th>Appointment</th><th>Show Up</th></tr></thead><tbody>${weeks.map((week) => `<tr><td>${escapeHtml(week.week_start)}</td><td>${week.assignments}</td><td>${performanceRateLabel(week)} (${week.within_five}/${week.assignments})</td><td>${week.appointments}</td><td>${week.show_ups}</td></tr>`).join("")}</tbody></table></div>`
+    : '<p>Tiada aktiviti dalam tempoh ini.</p>';
+}
+
+async function loadPerformanceReport() {
+  if (!isAdmin() || !elements.performanceStatus) return;
+  const range = performanceRange();
+  if (!range) {
+    performanceReport = null;
+    elements.performanceStatus.textContent = "Pilih julat tarikh yang sah, maksimum 366 hari.";
+    elements.performanceDownload.disabled = true;
+    elements.performanceRows.innerHTML = "";
+    elements.performanceDetail.hidden = true;
+    return;
+  }
+  if (!remoteDatabaseMode || !remoteDatabaseClient) {
+    elements.performanceStatus.textContent = "Laporan memerlukan sambungan Supabase.";
+    return;
+  }
+  const requestVersion = ++performanceRequestVersion;
+  performanceReport = null;
+  elements.performanceDownload.disabled = true;
+  elements.performanceStatus.textContent = "Memuatkan laporan...";
+  try {
+    const { data, error } = await remoteDatabaseClient.rpc("get_agent_performance_report", {
+      p_from: range.from, p_to: range.to,
+      p_project_id: elements.performanceProject.value || null,
+      p_agent_id: elements.performanceAgent.value || null,
+    });
+    if (error) throw error;
+    if (requestVersion !== performanceRequestVersion || !isAdmin()) return;
+    performanceReport = data;
+    performanceLoadedAt = Date.now();
+    renderPerformanceReport();
+  } catch (error) {
+    if (requestVersion !== performanceRequestVersion) return;
+    console.error("Performance report load failed", error);
+    elements.performanceStatus.textContent = "Laporan gagal dimuatkan. Cuba semula.";
+    elements.performanceRows.innerHTML = "";
+  }
+}
+
+async function downloadPerformanceReport() {
+  if (!isAdmin() || !performanceReport || !window.ExcelJS) return;
+  const report = performanceReport;
+  const workbook = new window.ExcelJS.Workbook();
+  const summary = workbook.addWorksheet("Ringkasan Ejen");
+  const trend = workbook.addWorksheet("Trend Mingguan");
+  const safeName = (value) => /^[=+@-]/.test(String(value || "")) ? `'${value}` : String(value || "");
+  summary.addRow(["Prestasi Ejen Lead Laju", `${report.from} hingga ${report.to}`]);
+  summary.addRow(["Projek", elements.performanceProject.selectedOptions[0]?.textContent || "Semua projek", "Ejen", elements.performanceAgent.selectedOptions[0]?.textContent || "Semua ejen"]);
+  summary.addRow(["Ejen", "Lead ditugaskan", "CALL NOW ≤5 min", "Kadar ≤5 min", "Appointment", "Show Up", "Follow Up Due sekarang"]);
+  (report.rows || []).forEach((row) => summary.addRow([safeName(row.agent_name), row.assignments, row.within_five, performanceRate(row), row.appointments, row.show_ups, row.due_now]));
+  trend.addRow(["Minggu bermula", "Ejen", "Lead ditugaskan", "CALL NOW ≤5 min", "Kadar ≤5 min", "Appointment", "Show Up"]);
+  (report.weeks || []).forEach((week) => {
+    const agent = (report.rows || []).find((row) => row.agent_id === week.agent_id);
+    trend.addRow([new Date(`${week.week_start}T00:00:00Z`), safeName(agent?.agent_name || ""), week.assignments, week.within_five, performanceRate(week), week.appointments, week.show_ups]);
+  });
+  summary.getRow(3).font = { bold: true };
+  trend.getRow(1).font = { bold: true };
+  summary.getColumn(4).numFmt = "0.0%";
+  trend.getColumn(5).numFmt = "0.0%";
+  trend.getColumn(1).numFmt = "dd/mm/yyyy";
+  [summary, trend].forEach((sheet) => sheet.columns.forEach((column) => { column.width = 22; }));
+  const buffer = await workbook.xlsx.writeBuffer();
+  downloadFile(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), `leadlaju-prestasi-ejen-${report.from}-${report.to}.xlsx`);
+}
+
 function renderAll() {
   enforceSingleActiveLead();
   syncExpiryAssignmentTimer();
@@ -6153,8 +6348,11 @@ function renderAll() {
   renderIntegrationProjects();
   renderBulletins();
   renderFollowUpDue();
+  if (activeView === "performance" && isAdmin()) populatePerformanceFilters();
   renderLeadMonitor();
   updateLifecycleMutationGate();
+  if (remoteDatabaseMode && activeView === "dashboard" && !isAdmin() && Date.now() - ownPerformanceLoadedAt > 300000) loadOwnPerformance();
+  if (remoteDatabaseMode && activeView === "performance" && isAdmin() && performanceReport && Date.now() - performanceLoadedAt > 300000) loadPerformanceReport();
 }
 
 const viewTitles = {
@@ -6162,6 +6360,7 @@ const viewTitles = {
   appointments: "Appointment Tracker",
   "follow-up-due": "Follow Up Due",
   agents: "Pengurusan Ejen",
+  performance: "Prestasi Ejen",
   projects: "Projek",
   "lead-monitor": "Monitor Pergerakan Lead",
   "import-leads": "Import Lead",
@@ -6170,7 +6369,7 @@ const viewTitles = {
 };
 
 function switchView(viewName) {
-  if (["agents", "projects", "lead-monitor", "import-leads", "integrations"].includes(viewName) && !isAdmin()) return;
+  if (["agents", "performance", "projects", "lead-monitor", "import-leads", "integrations"].includes(viewName) && !isAdmin()) return;
   activeView = viewName;
   document.querySelectorAll(".view").forEach((view) => view.classList.remove("active"));
   document.querySelector(`#${viewName}-view`)?.classList.add("active");
@@ -6186,6 +6385,8 @@ function switchView(viewName) {
         }).format(new Date())
       : "LeadLaju";
   renderUser();
+  if (viewName === "performance") { populatePerformanceFilters(); loadPerformanceReport(); }
+  if (viewName === "dashboard" && !isAdmin()) loadOwnPerformance();
   if (viewName === "integrations") loadIntegrationStatus();
   if (viewName === "bulletins") {
     openRequestedBulletin();
@@ -7515,6 +7716,30 @@ elements.uploadLeadsButton?.addEventListener("click", uploadImportedLeads);
 elements.clearLeadImport?.addEventListener("click", resetLeadImport);
 elements.downloadSampleCsv?.addEventListener("click", downloadLeadSampleCsv);
 elements.downloadSampleXlsx?.addEventListener("click", downloadLeadSampleXlsx);
+elements.performancePeriod?.addEventListener("change", () => {
+  const custom = elements.performancePeriod.value === "custom";
+  document.querySelectorAll(".performance-custom-date").forEach((field) => { field.hidden = !custom; });
+  if (custom) {
+    elements.performanceFrom.value ||= performanceDateOffset(-6);
+    elements.performanceTo.value ||= todayKey();
+  }
+  loadPerformanceReport();
+});
+[elements.performanceFrom, elements.performanceTo, elements.performanceProject, elements.performanceAgent]
+  .forEach((field) => field?.addEventListener("change", loadPerformanceReport));
+elements.performanceDownload?.addEventListener("click", () => {
+  downloadPerformanceReport().catch((error) => {
+    console.error("Performance Excel download failed", error);
+    showToast("Excel gagal", "Cuba muat turun semula.", "error");
+  });
+});
+elements.performanceRows?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-performance-agent]");
+  if (!button) return;
+  selectedPerformanceAgentId = button.dataset.performanceAgent;
+  renderPerformanceReport();
+  elements.performanceDetail.scrollIntoView({ behavior: "smooth", block: "nearest" });
+});
 elements.bulletinForm?.addEventListener("submit", saveBulletin);
 elements.bulletinCancelEdit?.addEventListener("click", resetBulletinForm);
 document.querySelector("#bulletins-view")?.addEventListener("click", (event) => {

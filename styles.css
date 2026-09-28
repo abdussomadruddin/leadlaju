@@ -5236,3 +5236,23 @@ td small {
     grid-column: 1 / -1;
   }
 }
+
+.own-performance { margin-top: 20px; }
+.performance-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin: 16px 0; }
+.performance-metric { display: grid; gap: 5px; min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: #f8faff; }
+.performance-metric small, .performance-metric span { color: var(--ink-700); font-size: 11px; }
+.performance-metric strong { color: var(--ink-900); font-family: "Manrope", sans-serif; font-size: 23px; }
+.performance-note { margin: 14px 0 0; color: var(--ink-700); font-size: 11px; line-height: 1.6; }
+.performance-filters { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; }
+.performance-filters label { display: grid; gap: 5px; min-width: 150px; color: var(--ink-700); font-size: 11px; font-weight: 700; }
+.performance-filters select, .performance-filters input { min-height: 38px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 9px; background: #fff; color: var(--ink-900); font: inherit; }
+.performance-status { color: var(--ink-700); font-size: 12px; }
+.performance-table-wrap { overflow-x: auto; }
+.performance-table { width: 100%; border-collapse: collapse; text-align: left; }
+.performance-table th, .performance-table td { padding: 12px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; font-size: 12px; }
+.performance-table th { color: var(--ink-700); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+.performance-table td small { color: var(--ink-700); }
+.performance-agent-link { padding: 0; border: 0; background: none; color: var(--blue); font: inherit; font-weight: 800; cursor: pointer; }
+.performance-detail { margin-top: 18px; }
+@media (max-width: 850px) { .performance-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .performance-filters label { width: 100%; } .performance-table-wrap.panel { padding: 8px; } }
