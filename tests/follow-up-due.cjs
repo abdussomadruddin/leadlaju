@@ -4,6 +4,7 @@ const fs = require('node:fs');
 
 const migration = fs.readFileSync('supabase/migrations/20260923040344_follow_up_due.sql', 'utf8');
 const thresholdMigration = fs.readFileSync('supabase/migrations/20260928044220_follow_up_due_24h.sql', 'utf8');
+const noonMigration = fs.readFileSync('supabase/migrations/20260928044521_follow_up_due_noon_push.sql', 'utf8');
 const worker = fs.readFileSync('supabase/functions/process-notification-outbox/index.ts', 'utf8');
 const app = fs.readFileSync('app.js', 'utf8');
 const html = fs.readFileSync('index.html', 'utf8');
@@ -44,6 +45,17 @@ test('current Follow Up Due and push eligibility both begin after 24 hours', () 
   assert.doesNotMatch(thresholdMigration, /interval '(?:2|3) days'/);
   assert.match(html, /selama 24 jam/);
   assert.match(app, /melebihi 24 jam tanpa kemas kini/);
+});
+
+test('current push reminder slots are 8 AM, noon and 4 PM Malaysia time', () => {
+  assert.match(noonMigration, /p_now at time zone 'Asia\/Kuala_Lumpur'/);
+  assert.match(noonMigration, /not in \(8, 12, 16\)/);
+  assert.match(noonMigration, /when 8 then '08:00'/);
+  assert.match(noonMigration, /when 12 then '12:00'/);
+  assert.match(noonMigration, /else '16:00'/);
+  assert.match(noonMigration, /extract\(minute from v_local\) >= 15/);
+  assert.match(noonMigration, /l\.follow_up_activity_at <= p_now - interval '1 day'/);
+  assert.match(noonMigration, /'follow_up_due:' \|\| v_date_key \|\| ':' \|\| v_slot/);
 });
 
 test('worker suppresses stale grouped alerts and refreshes the canonical count', () => {
