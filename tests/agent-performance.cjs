@@ -6,7 +6,7 @@ const path = require("node:path");
 const root = path.resolve(__dirname, "..");
 const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
 const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
-const sql = fs.readFileSync(path.join(root, "supabase/migrations/20260928090000_agent_performance_report.sql"), "utf8");
+const sql = fs.readFileSync(path.join(root, "supabase/migrations/20260928035701_agent_performance_report.sql"), "utf8");
 
 test("performance report is server-owned and rejects cross-agent requests", () => {
   assert.match(sql, /security definer set search_path = ''/);
