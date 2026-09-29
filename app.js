@@ -322,9 +322,9 @@ const elements = {
   leadsTableBody: document.querySelector("#leads-table-body"),
   leadSearch: document.querySelector("#lead-search"),
   leadFilter: document.querySelector("#lead-filter"),
+  leadFollowUpFilter: document.querySelector("#lead-follow-up-filter"),
   leadAgentFilter: document.querySelector("#lead-agent-filter"),
-  leadMonthFilter: document.querySelector("#lead-month-filter"),
-  leadYearFilter: document.querySelector("#lead-year-filter"),
+  leadPeriodFilter: document.querySelector("#lead-period-filter"),
   leadLogCount: document.querySelector("#lead-log-count"),
   leadLogMoreWrap: document.querySelector("#lead-log-more-wrap"),
   leadLogMore: document.querySelector("#lead-log-more"),
@@ -342,8 +342,7 @@ const elements = {
   appointmentCount: document.querySelector("#appointment-count"),
   appointmentStatusFilter: document.querySelector("#appointment-status-filter"),
   appointmentProjectFilter: document.querySelector("#appointment-project-filter"),
-  appointmentMonthFilter: document.querySelector("#appointment-month-filter"),
-  appointmentYearFilter: document.querySelector("#appointment-year-filter"),
+  appointmentPeriodFilter: document.querySelector("#appointment-period-filter"),
   appointmentModal: document.querySelector("#appointment-modal"),
   appointmentForm: document.querySelector("#appointment-form"),
   appointmentModalKicker: document.querySelector("#appointment-modal-kicker"),
@@ -1827,6 +1826,33 @@ function matchesMonthYearFilter(value, monthFilter, yearFilter) {
     (yearFilter?.value === "all" || parts.year === yearFilter?.value);
 }
 
+function populateMonthPeriodFilter(filter, records, getDate) {
+  if (!filter) return;
+  const selected = filter.value || "all";
+  const periods = new Set();
+  records.forEach((record) => {
+    const value = getDate(record);
+    if (!value) return;
+    const { year, month } = malaysiaDateParts(value);
+    if (year && month) periods.add(`${year}-${month}`);
+  });
+  const options = [
+    '<option value="all">Semua bulan &amp; tahun</option>',
+    ...[...periods].sort().reverse().map((period) => {
+      const [year, month] = period.split("-");
+      return `<option value="${period}">${MALAY_MONTH_NAMES[Number(month) - 1]} ${year}</option>`;
+    }),
+  ].join("");
+  updateSelectOptions(filter, options, selected);
+}
+
+function matchesMonthPeriodFilter(value, filter) {
+  if (!value) return false;
+  if (!filter || filter.value === "all") return true;
+  const { year, month } = malaysiaDateParts(value);
+  return `${year}-${month}` === filter.value;
+}
+
 function relativeTime(value) {
   const seconds = Math.max(0, Math.floor((Date.now() - parseLeadTimestamp(value)) / 1000));
   if (seconds < 10) return "baru sahaja";
@@ -2328,7 +2354,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20260930-mobile-menu-v107")
+      .register("/sw.js?v=20260930-lead-filters-v108")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -5166,6 +5192,7 @@ function renderLeadsTable() {
   }
   const search = elements.leadSearch.value.trim().toLowerCase();
   const selectedStatus = elements.leadFilter.value || "all";
+  const selectedFollowUp = elements.leadFollowUpFilter.value || "all";
   const selectedAgentId = elements.leadAgentFilter?.value || "all";
   const visibleLeads = isAdmin()
     ? state.leads.filter((lead) => !isVisuallyExpiredAssignment(lead))
@@ -5190,11 +5217,16 @@ function renderLeadsTable() {
     ...LEAD_STATUS_OPTIONS.map(
       (status) => `<option value="${status.value}">${status.label} (${statusCounts[status.value] || 0})</option>`,
     ),
-    ...(followUpCounts.size ? [`<option value="follow_up">Follow Up (${[...followUpCounts.values()].reduce((sum, count) => sum + count, 0)})</option>`] : []),
-    ...[1, 2, 3, 4, 5, 6].filter((count) => followUpCounts.has(count)).map((count) => `<option value="follow_up_${count}">Follow Up ${count} (${followUpCounts.get(count)})</option>`),
   ].join("");
   updateSelectOptions(elements.leadFilter, statusOptionsMarkup, selectedStatus);
   const filter = elements.leadFilter.value || "all";
+  const followUpOptionsMarkup = [
+    '<option value="all">Semua Follow Up</option>',
+    `<option value="follow_up">Follow Up (${[...followUpCounts.values()].reduce((sum, count) => sum + count, 0)})</option>`,
+    ...[1, 2, 3, 4, 5, 6].map((count) => `<option value="follow_up_${count}">Follow Up ${count} (${followUpCounts.get(count) || 0})</option>`),
+  ].join("");
+  updateSelectOptions(elements.leadFollowUpFilter, followUpOptionsMarkup, selectedFollowUp);
+  const followUpFilter = elements.leadFollowUpFilter.value || "all";
   if (elements.leadAgentFilter && isAdmin()) {
     const agentOptionsMarkup = [
       `<option value="all">Semua ejen (${visibleLeads.length})</option>`,
@@ -5209,12 +5241,7 @@ function renderLeadsTable() {
     updateSelectOptions(elements.leadAgentFilter, agentOptionsMarkup, selectedAgentId);
   }
   const agentFilter = elements.leadAgentFilter?.value || "all";
-  populateMonthYearFilters(
-    elements.leadMonthFilter,
-    elements.leadYearFilter,
-    visibleLeads,
-    (lead) => lead.createdAt || lead.receivedAt,
-  );
+  populateMonthPeriodFilter(elements.leadPeriodFilter, visibleLeads, (lead) => lead.createdAt || lead.receivedAt);
   const rows = state.leads
     .filter((lead) => {
       if (isVisuallyExpiredAssignment(lead)) return false;
@@ -5233,8 +5260,9 @@ function renderLeadsTable() {
         String(lead.notes || "").toLowerCase().includes(search);
       const visualStatus = getLeadVisualStatus(lead);
       return matchesAgent && matchesSearch &&
-        (filter === "all" || visualStatus === filter || (filter === "follow_up" && Number(lead.followUpCount) > 0) || (filter.startsWith("follow_up_") && Number(lead.followUpCount) === Number(filter.slice(10)))) &&
-        matchesMonthYearFilter(lead.createdAt || lead.receivedAt, elements.leadMonthFilter, elements.leadYearFilter);
+        (filter === "all" || visualStatus === filter) &&
+        (followUpFilter === "all" || (followUpFilter === "follow_up" && Number(lead.followUpCount) > 0) || (followUpFilter.startsWith("follow_up_") && Number(lead.followUpCount) === Number(followUpFilter.slice(10)))) &&
+        matchesMonthPeriodFilter(lead.createdAt || lead.receivedAt, elements.leadPeriodFilter);
     })
     .sort((a, b) => (b.receivedAt || 0) - (a.receivedAt || 0));
 
@@ -5283,7 +5311,7 @@ function renderLeadsTable() {
               <td data-label="Call">${callButton}</td>
               <td data-label="Follow Up">${followUpButton}</td>
               <td data-label="Copy">${renderLeadCopyButton(lead)}</td>
-              <td data-label="Butiran"><button class="lead-log-toggle" type="button" data-lead-expand="${lead.id}" aria-expanded="${expanded}" aria-controls="lead-log-detail-${lead.id}" aria-label="${expanded ? "Tutup" : "Buka"} butiran ${escapeHtml(lead.name)}">${expanded ? "⌃" : "⌄"}</button></td>
+              <td data-label="Butiran"><button class="lead-log-toggle" type="button" data-lead-expand="${lead.id}" aria-expanded="${expanded}" aria-controls="lead-log-detail-${lead.id}" aria-label="${expanded ? "Tutup" : "Buka"} butiran ${escapeHtml(lead.name)}"><span>${expanded ? "Tutup" : "Lihat"}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></button></td>
             </tr>
             <tr class="lead-log-detail" id="lead-log-detail-${lead.id}" ${expanded ? "" : "hidden"}>
               <td colspan="7"><div class="lead-log-detail-grid">
@@ -5353,16 +5381,11 @@ function renderAppointments() {
     ...projects.map((project) => `<option value="${escapeHtml(project)}">${escapeHtml(project)}</option>`),
   ].join("");
   elements.appointmentProjectFilter.value = projects.includes(selectedProject) ? selectedProject : "all";
-  populateMonthYearFilters(
-    elements.appointmentMonthFilter,
-    elements.appointmentYearFilter,
-    visible,
-    (appointment) => appointment.scheduledAt,
-  );
+  populateMonthPeriodFilter(elements.appointmentPeriodFilter, visible, (appointment) => appointment.scheduledAt);
   const filtered = visible.filter((appointment) =>
     (selectedStatus === "all" || appointment.status === selectedStatus) &&
     (elements.appointmentProjectFilter.value === "all" || appointment.project === elements.appointmentProjectFilter.value) &&
-    matchesMonthYearFilter(appointment.scheduledAt, elements.appointmentMonthFilter, elements.appointmentYearFilter),
+    matchesMonthPeriodFilter(appointment.scheduledAt, elements.appointmentPeriodFilter),
   );
   elements.appointmentCount.textContent = `${filtered.length} appointment`;
   elements.appointmentList.innerHTML = filtered.length
@@ -7754,17 +7777,16 @@ elements.leadSearch.addEventListener("input", () => {
   leadLogSearchTimer = window.setTimeout(resetLeadLogPage, 120);
 });
 elements.leadFilter.addEventListener("change", resetLeadLogPage);
+elements.leadFollowUpFilter.addEventListener("change", resetLeadLogPage);
 elements.leadAgentFilter?.addEventListener("change", resetLeadLogPage);
-elements.leadMonthFilter?.addEventListener("change", resetLeadLogPage);
-elements.leadYearFilter?.addEventListener("change", resetLeadLogPage);
+elements.leadPeriodFilter?.addEventListener("change", resetLeadLogPage);
 elements.leadLogMore?.addEventListener("click", () => {
   leadLogVisibleLimit += LEAD_LOG_PAGE_SIZE;
   renderLeadsTable();
 });
 elements.appointmentStatusFilter?.addEventListener("change", renderAppointments);
 elements.appointmentProjectFilter?.addEventListener("change", renderAppointments);
-elements.appointmentMonthFilter?.addEventListener("change", renderAppointments);
-elements.appointmentYearFilter?.addEventListener("change", renderAppointments);
+elements.appointmentPeriodFilter?.addEventListener("change", renderAppointments);
 elements.followUpAgentFilter?.addEventListener("change", renderFollowUpDue);
 elements.followUpProjectFilter?.addEventListener("change", renderFollowUpDue);
 elements.followUpMonthFilter?.addEventListener("change", renderFollowUpDue);

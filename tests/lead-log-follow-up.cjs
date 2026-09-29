@@ -29,11 +29,14 @@ test('copy button uses the requested inquiry text and stays locked before CALL N
   assert.match(app, /data-lead-copy/);
 });
 
-test('follow-up filter only shows nonempty counts through six', () => {
-  assert.match(app, /\.filter\(\(count\) => followUpCounts\.has\(count\)\)/);
+test('follow-up has its own filter with all six counts including zero', () => {
+  assert.match(html, /id="lead-follow-up-filter"/);
   assert.match(app, /\[1, 2, 3, 4, 5, 6\]/);
-  assert.match(app, /filter === "follow_up"/);
-  assert.match(app, /filter\.startsWith\("follow_up_"\)/);
+  assert.match(app, /followUpCounts\.get\(count\) \|\| 0/);
+  assert.match(app, /followUpFilter === "follow_up"/);
+  assert.match(app, /followUpFilter\.startsWith\("follow_up_"\)/);
+  assert.match(app, /\(filter === "all" \|\| visualStatus === filter\) &&/);
+  assert.match(app, /leadFollowUpFilter\.addEventListener\("change", resetLeadLogPage\)/);
 });
 
 test('Log Lead filters avoid rebuilding unchanged dropdowns and render a bounded page', () => {

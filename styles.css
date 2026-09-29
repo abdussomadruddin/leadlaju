@@ -2894,6 +2894,19 @@ svg {
   font-size: 10px;
 }
 
+.table-toolbar select {
+  appearance: none;
+  padding-right: 32px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%234b6489' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-position: right 10px center;
+  background-repeat: no-repeat;
+}
+.table-toolbar select:focus-visible { outline: 3px solid #c9ddff; outline-offset: 1px; border-color: #83aef1; }
+.table-toolbar .period-filter { min-width: 180px; }
+.lead-toolbar { flex-wrap: wrap; justify-content: flex-start; }
+.lead-toolbar .search-box { flex: 1 1 260px; min-width: min(100%, 260px); }
+.lead-toolbar .queue-label { margin-left: auto; }
+
 .table-wrap {
   overflow-x: auto;
 }
@@ -4468,10 +4481,18 @@ td small {
 .lead-copy-button { min-width: 64px; min-height: 34px; border-color: #d5e1f5; color: #31588e; background: #fff; font-weight: 800; }
 .lead-copy-button:hover { border-color: #aac2e8; background: #f0f5ff; }
 .lead-copy-button:disabled { cursor: not-allowed; opacity: .5; }
-.lead-log-toggle { width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink-700); font-size: 23px; line-height: 1; cursor: pointer; }
+.lead-log-toggle { display: inline-flex; min-width: 76px; min-height: 38px; gap: 5px; align-items: center; justify-content: center; padding: 0 10px; border: 1px solid #c9dcfa; border-radius: 999px; color: #245db7; background: #edf4ff; font-size: 10px; font-weight: 800; white-space: nowrap; cursor: pointer; transition: background .18s ease, border-color .18s ease, box-shadow .18s ease, transform .18s ease; }
+.lead-log-toggle:hover { border-color: #a9c7f5; background: #e2eeff; box-shadow: 0 4px 10px #255da61c; }
+.lead-log-toggle:focus-visible { outline: 3px solid #bcd6ff; outline-offset: 2px; }
+.lead-log-toggle svg { width: 15px; height: 15px; flex: none; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2.2; transition: transform .2s ease; }
+.lead-log-toggle[aria-expanded="true"] { border-color: #2d6cdf; color: #fff; background: #2d6cdf; animation: lead-toggle-open .2s ease-out; }
+.lead-log-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+@keyframes lead-toggle-open { from { transform: scale(.92); } to { transform: scale(1); } }
 .lead-log-detail td { padding: 16px 18px; background: #f8fafc; white-space: normal; }
 .lead-log-detail[hidden] { display: none !important; }
 .lead-log-detail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.lead-log-detail:not([hidden]) .lead-log-detail-grid { animation: lead-detail-reveal .22s ease-out both; }
+@keyframes lead-detail-reveal { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
 .lead-log-detail-grid > div { min-width: 0; }
 .lead-log-detail-grid strong,
 .lead-log-detail-grid small { overflow-wrap: anywhere; }
@@ -5086,7 +5107,9 @@ td small {
   .lead-log-table .lead-log-summary td:nth-child(3) { grid-column: 1 / -1; }
   .lead-log-table .lead-log-summary td:nth-child(n+4) { grid-column: span 1; border-bottom: 0; }
   .lead-log-table .lead-log-summary td:last-child::before { display: none; }
-  .lead-log-table .lead-log-summary td:last-child { display: flex; align-items: flex-end; justify-content: center; }
+  .lead-log-table .lead-log-summary td:last-child { display: flex; align-items: flex-end; justify-content: center; padding-inline: 0; }
+  .lead-log-table .lead-log-summary .lead-log-toggle { min-width: 42px; width: 42px; min-height: 42px; padding: 0; border-radius: 12px; }
+  .lead-log-table .lead-log-summary .lead-log-toggle span { display: none; }
   .lead-log-table .lead-log-summary td::before { margin-bottom: 4px; }
   .lead-log-table .lead-log-summary .contact-edit-button,
   .lead-log-table .lead-log-summary .log-call-now-button { min-width: 0; width: 100%; padding: 5px; font-size: 11px; }
@@ -5441,5 +5464,7 @@ td small {
   .mobile-tab, .sidebar { transition: none; }
   .performance-card, .performance-card-toggle svg { transition: none; }
   .performance-card[open] .performance-card-content { animation: none; }
+  .lead-log-toggle, .lead-log-toggle svg { transition: none; }
+  .lead-log-toggle[aria-expanded="true"], .lead-log-detail:not([hidden]) .lead-log-detail-grid { animation: none; }
   .pulse::after { animation: none; }
 }

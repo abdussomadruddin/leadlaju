@@ -25,9 +25,9 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260930-mobile-menu-v107" />
+    <link rel="stylesheet" href="styles.css?v=20260930-lead-filters-v108" />
     <script src="vendor/exceljs.min.js?v=4.4.0" defer></script>
-    <script src="app.js?v=20260930-mobile-menu-v107" defer></script>
+    <script src="app.js?v=20260930-lead-filters-v108" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -537,7 +537,7 @@
             <button class="secondary-button admin-only" id="manual-lead-button-2" type="button">+ Manual lead baru</button>
           </div>
           <div class="table-card">
-            <div class="table-toolbar">
+            <div class="table-toolbar lead-toolbar">
               <label class="search-box">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <circle cx="11" cy="11" r="7" />
@@ -557,14 +557,14 @@
                 <option value="cancelled">Cancelled</option>
                 <option value="client">Client</option>
               </select>
+              <select id="lead-follow-up-filter" aria-label="Tapis tahap Follow Up lead">
+                <option value="all">Semua Follow Up</option>
+              </select>
               <select class="admin-only" id="lead-agent-filter" aria-label="Tapis ejen">
                 <option value="all">Semua ejen</option>
               </select>
-              <select id="lead-month-filter" aria-label="Tapis bulan lead">
-                <option value="all">Semua bulan</option>
-              </select>
-              <select id="lead-year-filter" aria-label="Tapis tahun lead">
-                <option value="all">Semua tahun</option>
+              <select class="period-filter" id="lead-period-filter" aria-label="Tapis bulan dan tahun lead">
+                <option value="all">Semua bulan &amp; tahun</option>
               </select>
               <span class="queue-label" id="lead-log-count">0 lead</span>
             </div>
@@ -610,11 +610,8 @@
               <select id="appointment-project-filter" aria-label="Tapis projek appointment">
                 <option value="all">Semua projek</option>
               </select>
-              <select id="appointment-month-filter" aria-label="Tapis bulan appointment">
-                <option value="all">Semua bulan</option>
-              </select>
-              <select id="appointment-year-filter" aria-label="Tapis tahun appointment">
-                <option value="all">Semua tahun</option>
+              <select class="period-filter" id="appointment-period-filter" aria-label="Tapis bulan dan tahun appointment">
+                <option value="all">Semua bulan &amp; tahun</option>
               </select>
               <span class="queue-label" id="appointment-count">0 appointment</span>
             </div>
