@@ -33,7 +33,6 @@
 
 html {
   scroll-behavior: smooth;
-  touch-action: manipulation;
 }
 
 body {
@@ -43,6 +42,10 @@ body {
   background: var(--canvas);
   font-family: "DM Sans", sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+html.installed-phone-app,
+html.installed-phone-app body {
   touch-action: manipulation;
 }
 
@@ -5310,4 +5313,73 @@ td small {
   .performance-cards, .performance-week-cards { grid-template-columns: minmax(0, 1fr); }
   .performance-card { padding-inline: 12px; }
   .performance-detail { padding: 14px; }
+}
+
+/* Phone shell: only navigation is translucent; operational content stays opaque. */
+.mobile-bottom-nav, .mobile-sidebar-close, .mobile-more-heading { display: none; }
+.mobile-greeting { display: none; }
+.view.active { animation: view-enter 180ms ease-out both; }
+@keyframes view-enter { from { opacity: .78; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+
+@media (max-width: 850px) {
+  .sidebar { z-index: 35; width: min(290px, calc(100vw - 48px)); padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
+  .sidebar .brand { padding-right: 42px; }
+  .mobile-sidebar-close { position: absolute; top: calc(22px + env(safe-area-inset-top, 0px)); right: 14px; display: grid; width: 44px; height: 44px; place-items: center; border: 0; border-radius: 12px; color: #fff; background: #ffffff20; font-size: 28px; }
+  .mobile-more-heading { display: block; margin: 28px 12px 8px; color: #a7b7d3; font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+  .sidebar .main-nav { min-height: 0; flex: 1; overflow-y: auto; margin-top: 0; overscroll-behavior: contain; }
+  .sidebar .nav-item[data-view="dashboard"], .sidebar .nav-item[data-view="leads"], .sidebar .nav-item[data-view="appointments"], .sidebar .nav-item[data-view="follow-up-due"] { display: none; }
+  .sidebar-account { flex: none; padding-top: 10px; }
+  .mobile-sidebar-scrim:not([hidden]) { position: fixed; z-index: 30; inset: 0; display: block; background: #0a152c75; }
+  body.mobile-sidebar-open { overflow: hidden; }
+  .mobile-menu { display: none; }
+  .main-content { padding-top: calc(66px + env(safe-area-inset-top, 0px)); padding-bottom: calc(105px + env(safe-area-inset-bottom, 0px)); }
+  .mobile-bottom-nav { position: fixed; z-index: 25; right: max(9px, env(safe-area-inset-right, 0px)); bottom: calc(8px + env(safe-area-inset-bottom, 0px)); left: max(9px, env(safe-area-inset-left, 0px)); display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 2px; min-height: 64px; padding: 5px; border: 1px solid #ffffffd1; border-radius: 19px; background: #f8fbffe6; box-shadow: 0 8px 28px #0f22452e, inset 0 1px #ffffffed; -webkit-backdrop-filter: blur(18px) saturate(1.25); backdrop-filter: blur(18px) saturate(1.25); }
+  .mobile-tab { position: relative; display: flex; min-width: 0; min-height: 52px; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 3px 0; border: 0; border-radius: 13px; color: #60738e; background: transparent; font-size: 10px; font-weight: 800; line-height: 1.1; transition: background 150ms ease, color 150ms ease, transform 150ms ease; }
+  .mobile-tab svg { width: 21px; height: 21px; flex: none; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+  .mobile-tab span { overflow: hidden; max-width: 100%; text-overflow: ellipsis; white-space: nowrap; }
+  .mobile-tab.active { color: #145ac4; background: #e7f0ff; }
+  .mobile-tab:active { transform: scale(.96); }
+  .mobile-tab-badge, .mobile-tab-dot { position: absolute; top: 0; right: 5px; min-width: 17px; height: 17px; padding: 1px 4px; border: 2px solid #f8fbff; border-radius: 999px; color: #fff; background: #376fbf; font-size: 8px; line-height: 13px; text-align: center; }
+  .mobile-tab-badge.alert, .mobile-tab-dot { background: #df4454; }
+  .mobile-tab-dot { width: 11px; min-width: 11px; height: 11px; padding: 0; }
+  .topbar { min-height: calc(66px + env(safe-area-inset-top, 0px)); padding: calc(9px + env(safe-area-inset-top, 0px)) 14px 9px; gap: 8px; }
+  .page-title { min-width: 0; flex: 1; }
+  .page-title h1 { overflow: hidden; font-size: 17px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+  .page-title h1 .desktop-greeting, .page-title h1 .user-name { display: none; }
+  .page-title h1 .mobile-greeting { display: inline; color: var(--ink-900); }
+  .page-title p { display: none; }
+  .topbar-actions { min-width: 0; gap: 6px; margin-left: 0; }
+  .live-sync-pill { display: flex; min-width: 0; max-width: 88px; padding: 6px 7px; white-space: nowrap; }
+  .live-sync-pill .pulse { flex: none; }
+  .live-sync-pill #live-sync-label { overflow: hidden; text-overflow: ellipsis; }
+  .notification-button, .refresh-button { width: 38px; height: 38px; flex: none; }
+  .view { min-width: 0; padding-right: max(12px, env(safe-area-inset-right, 0px)); padding-left: max(12px, env(safe-area-inset-left, 0px)); }
+  .view > *, .panel, .table-card, .content-heading { min-width: 0; }
+  .dashboard-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; gap: 8px; }
+  .dashboard-actions button { min-width: 0; padding-inline: 6px; font-size: 11px; white-space: nowrap; }
+  .stat-card small { overflow: visible; font-size: 10px; line-height: 1.25; text-overflow: clip; white-space: normal; }
+  .lead-import-table-wrap { overflow: auto; }
+  .view input, .view select, .view textarea, .modal input, .modal select, .modal textarea, .login-panel input { font-size: 16px; }
+  .agent-lead-control-buttons button { min-height: 52px; }
+  .lead-log-table .lead-log-summary .log-call-now-button { min-height: 46px; }
+  .call-button { min-height: 58px; }
+}
+
+@media (max-width: 380px) {
+  .topbar { padding-right: 10px; padding-left: 10px; gap: 5px; }
+  .topbar-actions { gap: 5px; }
+  .live-sync-pill { max-width: 76px; font-size: 9px; }
+  .mobile-tab { font-size: 9px; }
+  .mobile-tab svg { width: 20px; height: 20px; }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .mobile-bottom-nav { background: #f8fbff; -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .view.active { animation: none; }
+  .mobile-tab, .sidebar { transition: none; }
+  .pulse::after { animation: none; }
 }

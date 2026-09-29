@@ -207,6 +207,9 @@ const integrationSecretTimers = new Map();
 
 const elements = {
   sidebar: document.querySelector("#sidebar"),
+  mobileSidebarScrim: document.querySelector("#mobile-sidebar-scrim"),
+  mobileSidebarClose: document.querySelector("#mobile-sidebar-close"),
+  mobileMoreTab: document.querySelector("#mobile-more-tab"),
   loginScreen: document.querySelector("#login-screen"),
   appShell: document.querySelector("#app-shell"),
   loginForm: document.querySelector("#login-form"),
@@ -1011,7 +1014,7 @@ function startAuthenticatedApp(user, options = {}) {
   scheduleFollowUpReminders();
   loadBulletinFeed().then(() => { renderBulletins(); openRequestedBulletin(); }).catch((error) => console.warn("Bulletin feed failed", error));
   loadFollowUpDueFeed().then(renderFollowUpDue).catch((error) => console.warn("Follow-up feed failed", error));
-  switchView(getRequestedStartView());
+  switchView(getRequestedStartView(), { historyMode: "replace" });
   renderAll();
   enforceAgentNotificationAccess();
   showLatestCachedNotificationLead();
@@ -1052,6 +1055,9 @@ function setMobileSidebarOpen(open) {
   elements.sidebar.classList.toggle("open", open);
   elements.mobileMenu.setAttribute("aria-expanded", String(open));
   elements.mobileMenu.setAttribute("aria-label", open ? "Tutup menu" : "Buka menu");
+  elements.mobileMoreTab.setAttribute("aria-expanded", String(open));
+  elements.mobileSidebarScrim.hidden = !open;
+  document.body.classList.toggle("mobile-sidebar-open", open);
   if (!open) setAccountMenuOpen(false);
 }
 
@@ -2032,25 +2038,25 @@ function saveAdminReminderKeys(keySet, storageKey) {
 }
 
 function lockViewportZoom() {
-  let lastTouchEnd = 0;
+  const viewport = document.querySelector('meta[name="viewport"]');
+  const updateViewport = () => {
+    const installedPhone = isInstalledApp() && isPhonePushDevice();
+    viewport.content = `width=device-width, initial-scale=1.0, ${installedPhone ? "maximum-scale=1.0, user-scalable=no, " : ""}viewport-fit=cover`;
+    document.documentElement.classList.toggle("installed-phone-app", installedPhone);
+  };
+  updateViewport();
+  window.matchMedia?.("(display-mode: standalone)").addEventListener?.("change", updateViewport);
   document.addEventListener(
     "touchmove",
     (event) => {
-      if (event.touches?.length > 1) event.preventDefault();
-    },
-    { passive: false },
-  );
-  document.addEventListener(
-    "touchend",
-    (event) => {
-      const now = Date.now();
-      if (now - lastTouchEnd <= 300) event.preventDefault();
-      lastTouchEnd = now;
+      if (document.documentElement.classList.contains("installed-phone-app") && event.touches?.length > 1) event.preventDefault();
     },
     { passive: false },
   );
   ["gesturestart", "gesturechange"].forEach((eventName) => {
-    document.addEventListener(eventName, (event) => event.preventDefault(), { passive: false });
+    document.addEventListener(eventName, (event) => {
+      if (document.documentElement.classList.contains("installed-phone-app")) event.preventDefault();
+    }, { passive: false });
   });
 }
 
@@ -2322,7 +2328,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20260929-project-delete-v105")
+      .register("/sw.js?v=20260930-mobile-v106")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -4343,7 +4349,7 @@ function getCurrentAgentPotentialLeads() {
 function clearPotentialReminderRequest() {
   const url = new URL(window.location.href);
   url.searchParams.delete("reminder");
-  window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
 function openPotentialReminderModal() {
@@ -5680,7 +5686,7 @@ function renderUser() {
   if (elements.ownPerformance) elements.ownPerformance.hidden = isAdmin();
   elements.viewTitle.innerHTML =
     activeView === "dashboard"
-      ? `Selamat datang, <span>${escapeHtml(user.name.split(" ")[0])}</span>`
+      ? `<span class="desktop-greeting">Selamat datang, </span><span class="mobile-greeting">Dashboard</span><span class="user-name">${escapeHtml(user.name.split(" ")[0])}</span>`
       : viewTitles[activeView] || "LeadLaju";
 
   document.querySelectorAll(".admin-only").forEach((item) => {
@@ -6032,6 +6038,7 @@ function renderBulletins() {
     elements.bulletinProject.innerHTML = '<option value="">General - semua ejen aktif</option>' + state.projects.filter((project) => project.active).map((project) => `<option value="${project.id}">${escapeHtml(project.name)}</option>`).join("");
     elements.bulletinProject.value = [...elements.bulletinProject.options].some((option) => option.value === current) ? current : "";
   }
+  syncMobileNavigation();
 }
 
 async function openBulletin(id) {
@@ -6178,6 +6185,7 @@ function renderFollowUpDue() {
       </div>
     </article>`;
   }).join("") : '<div class="follow-up-empty"><span aria-hidden="true">✓</span><strong>Semua follow up terkawal</strong><p>Tiada lead Contacted yang melebihi 24 jam tanpa kemas kini.</p></div>';
+  syncMobileNavigation();
 }
 
 function performanceDateOffset(days) {
@@ -6382,6 +6390,7 @@ function renderAll() {
   if (activeView === "performance" && isAdmin()) populatePerformanceFilters();
   renderLeadMonitor();
   updateLifecycleMutationGate();
+  syncMobileNavigation();
   if (remoteDatabaseMode && activeView === "dashboard" && !isAdmin() && Date.now() - ownPerformanceLoadedAt > 300000) loadOwnPerformance();
   if (remoteDatabaseMode && activeView === "performance" && isAdmin() && performanceReport && Date.now() - performanceLoadedAt > 300000) loadPerformanceReport();
 }
@@ -6399,14 +6408,57 @@ const viewTitles = {
   bulletins: "Buletin News",
 };
 
-function switchView(viewName) {
+const primaryMobileViews = new Set(["dashboard", "leads", "follow-up-due", "appointments"]);
+
+function syncMobileNavigation() {
+  const counts = {
+    leads: elements.navLeadCount,
+    "follow-up-due": elements.navFollowUpCount,
+    appointments: elements.navAppointmentCount,
+  };
+  document.querySelectorAll("[data-mobile-badge]").forEach((badge) => {
+    const source = counts[badge.dataset.mobileBadge];
+    badge.textContent = source?.textContent || "";
+    badge.hidden = !source || source.hidden || !Number(source.textContent);
+  });
+  const needsAttention = [elements.navBulletinCount, elements.navMonitorCount]
+    .some((badge) => badge && !badge.hidden && Number(badge.textContent) > 0);
+  document.querySelector("#mobile-more-dot").hidden = !needsAttention;
+  document.querySelectorAll(".mobile-tab[data-view]").forEach((tab) => {
+    const selected = tab.dataset.view === activeView;
+    tab.classList.toggle("active", selected);
+    if (selected) tab.setAttribute("aria-current", "page");
+    else tab.removeAttribute("aria-current");
+  });
+  const moreSelected = !primaryMobileViews.has(activeView);
+  elements.mobileMoreTab.classList.toggle("active", moreSelected);
+  if (moreSelected) elements.mobileMoreTab.setAttribute("aria-current", "page");
+  else elements.mobileMoreTab.removeAttribute("aria-current");
+}
+
+function switchView(viewName, { historyMode = "push" } = {}) {
+  const targetView = document.getElementById(`${viewName}-view`);
+  if (!targetView) return;
   if (["agents", "performance", "projects", "lead-monitor", "import-leads", "integrations"].includes(viewName) && !isAdmin()) return;
+  const changed = activeView !== viewName;
+  if (changed && document.body.classList.contains("authenticated") && historyMode !== "none") {
+    window.history[historyMode === "replace" ? "replaceState" : "pushState"](
+      { ...window.history.state, leadLajuView: viewName }, "", window.location.href,
+    );
+  } else if (historyMode === "replace" && document.body.classList.contains("authenticated")) {
+    window.history.replaceState({ ...window.history.state, leadLajuView: viewName }, "", window.location.href);
+  }
+  if (!changed && historyMode !== "replace") {
+    setMobileSidebarOpen(false);
+    return;
+  }
   activeView = viewName;
   document.querySelectorAll(".view").forEach((view) => view.classList.remove("active"));
-  document.querySelector(`#${viewName}-view`)?.classList.add("active");
+  targetView.classList.add("active");
   document.querySelectorAll(".nav-item").forEach((item) => {
     item.classList.toggle("active", item.dataset.view === viewName);
   });
+  syncMobileNavigation();
   elements.todayLabel.textContent =
     viewName === "dashboard"
       ? new Intl.DateTimeFormat("ms-MY", {
@@ -6416,19 +6468,22 @@ function switchView(viewName) {
         }).format(new Date())
       : "LeadLaju";
   renderUser();
-  if (viewName === "performance") { populatePerformanceFilters(); loadPerformanceReport(); }
-  if (viewName === "dashboard" && !isAdmin()) loadOwnPerformance();
+  if (viewName === "performance") {
+    populatePerformanceFilters();
+    if (!performanceReport || Date.now() - performanceLoadedAt > 300000) loadPerformanceReport();
+  }
+  if (viewName === "dashboard" && !isAdmin() && Date.now() - ownPerformanceLoadedAt > 300000) loadOwnPerformance();
   if (viewName === "integrations") loadIntegrationStatus();
   if (viewName === "bulletins") {
     openRequestedBulletin();
     const latest = state.bulletins.find((bulletin) => bulletin.status === "published");
     if (latest) markBulletinRead(latest.id).catch(() => false);
   }
-  if (viewName === "follow-up-due") {
+  if (viewName === "follow-up-due" && Date.now() - state.followUpLoadedAt > 30000) {
     loadFollowUpDueFeed().then(renderFollowUpDue).catch((error) => console.warn("Follow-up feed failed", error));
   }
   setMobileSidebarOpen(false);
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  window.scrollTo({ top: 0, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
 }
 
 function openAgentModal(agentId = null) {
@@ -7605,10 +7660,17 @@ elements.dismissAdminReminderButton?.addEventListener("click", dismissAdminRemin
 elements.mobileMenu.addEventListener("click", () => {
   setMobileSidebarOpen(!elements.sidebar.classList.contains("open"));
 });
+elements.mobileMoreTab.addEventListener("click", () => setMobileSidebarOpen(!elements.sidebar.classList.contains("open")));
+elements.mobileSidebarClose.addEventListener("click", () => setMobileSidebarOpen(false));
+elements.mobileSidebarScrim.addEventListener("click", () => setMobileSidebarOpen(false));
+window.addEventListener("popstate", (event) => {
+  if (!document.body.classList.contains("authenticated")) return;
+  switchView(event.state?.leadLajuView || getRequestedStartView(), { historyMode: "none" });
+});
 document.addEventListener("click", (event) => {
   if (!isMobileSidebarViewport() || !elements.sidebar.classList.contains("open")) return;
   if (Date.now() - mobileSidebarLastGestureAt < 500) return;
-  if (elements.sidebar.contains(event.target) || elements.mobileMenu.contains(event.target)) return;
+  if (elements.sidebar.contains(event.target) || elements.mobileMenu.contains(event.target) || elements.mobileMoreTab.contains(event.target)) return;
   setMobileSidebarOpen(false);
 });
 
@@ -7632,10 +7694,6 @@ document.addEventListener("touchend", (event) => {
   if (deltaX < 0 && elements.sidebar.classList.contains("open")) {
     mobileSidebarLastGestureAt = Date.now();
     setMobileSidebarOpen(false);
-  }
-  if (deltaX > 0 && !elements.sidebar.classList.contains("open")) {
-    mobileSidebarLastGestureAt = Date.now();
-    setMobileSidebarOpen(true);
   }
 }, { passive: true });
 elements.loginForm.addEventListener("submit", handleLogin);

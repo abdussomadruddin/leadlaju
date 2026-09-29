@@ -1145,15 +1145,15 @@ test('legacy Google Sheet connection card is removed from the sidebar', () => {
   assert.doesNotMatch(source, /https:\/\/script\.google\.com/);
 });
 
-test('mobile sidebar closes on content tap or left swipe and opens on right swipe', () => {
+test('mobile sidebar closes on content tap or left swipe without hijacking the phone Back gesture', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const html = fs.readFileSync('index.html', 'utf8');
   assert.match(source, /function setMobileSidebarOpen\(open\)/);
   assert.match(source, /elements\.sidebar\.contains\(event\.target\)/);
   assert.match(source, /deltaX < 0 && elements\.sidebar\.classList\.contains\("open"\)/);
-  assert.match(source, /deltaX > 0 && !elements\.sidebar\.classList\.contains\("open"\)/);
+  assert.doesNotMatch(source, /deltaX > 0 && !elements\.sidebar\.classList\.contains\("open"\)/);
   assert.match(source, /Math\.abs\(deltaX\) < 64/);
-  assert.match(html, /aria-controls="sidebar"/);
+  assert.match(html, /id="mobile-more-tab"[^>]*aria-controls="sidebar"/);
 });
 
 test('project dropdown shows live lead totals for every official status', () => {
