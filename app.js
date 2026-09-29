@@ -2322,7 +2322,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20260929-project-v104")
+      .register("/sw.js?v=20260929-project-delete-v105")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -5647,6 +5647,13 @@ function renderProjects() {
                 <b>${statusCounts[status.value] || 0}</b>
               </span>`).join("")}
           </div>
+          <details class="project-danger-menu">
+            <summary>Pilihan lanjut</summary>
+            <div class="project-danger-actions">
+              <small>Hanya projek tanpa lead, buletin atau ejen yang dipautkan boleh dipadam.</small>
+              <button class="text-button danger-text" type="button" data-project-delete="${escapeHtml(project.id)}">Padam projek</button>
+            </div>
+          </details>
         </details>
       </article>`;
     }).join("")
@@ -6712,6 +6719,39 @@ async function toggleProject(projectId) {
   saveState();
   renderAll();
   showToast(project.active ? "Projek diaktifkan" : "Projek dinyahaktifkan", project.active ? `${project.name} menerima lead baharu.` : `${project.name} tidak menerima assignment baharu.`);
+}
+
+async function deleteProject(projectId, button) {
+  if (!guardLifecycleMutation() || !isAdmin()) return;
+  const project = state.projects.find((item) => item.id === projectId);
+  if (!project || !remoteDatabaseMode) return;
+  if (!confirmPermanentDelete("projek", project.name)) return;
+
+  button.disabled = true;
+  try {
+    const { data, error } = await remoteDatabaseClient.rpc("admin_delete_project", { p_project_id: projectId });
+    if (error) throw error;
+    if (!data?.ok) {
+      const reasons = {
+        has_leads: "Projek ini masih mempunyai lead. Nyahaktifkan projek jika tidak mahu menerima lead baharu.",
+        has_bulletins: "Projek ini masih digunakan oleh buletin. Alihkan atau arkibkan buletin dahulu.",
+        has_agents: "Projek ini masih dipautkan kepada ejen. Buang projek daripada ejen dahulu.",
+        not_found: "Projek ini sudah tiada. Muat semula senarai projek.",
+      };
+      showToast("Projek tidak dipadam", reasons[data?.code] || "Cuba lagi selepas menyemak pautan projek.", "error");
+      return;
+    }
+    state.projects = state.projects.filter((item) => item.id !== projectId);
+    expandedProjectStatusIds.delete(projectId);
+    saveState();
+    renderAll();
+    showToast("Projek dipadam", `${project.name} telah dibuang.`);
+  } catch (error) {
+    console.error("Project deletion failed", error);
+    showToast("Projek tidak dipadam", "Server belum dapat mengesahkan pemadaman. Cuba lagi.", "error");
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function rejectAgent(agentId) {
@@ -7934,6 +7974,8 @@ elements.agentsGrid.addEventListener("click", (event) => {
 elements.projectsList?.addEventListener("click", (event) => {
   const toggle = event.target.closest("[data-project-toggle]");
   if (toggle) toggleProject(toggle.dataset.projectToggle);
+  const remove = event.target.closest("[data-project-delete]");
+  if (remove) deleteProject(remove.dataset.projectDelete, remove);
 });
 
 elements.projectsList?.addEventListener("toggle", (event) => {

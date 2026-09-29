@@ -3226,6 +3226,34 @@ td small {
   font-size: 14px;
 }
 
+.project-danger-menu {
+  border-top: 1px solid var(--line);
+}
+
+.project-danger-menu summary {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  padding: 10px 0;
+  color: var(--ink-500);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.project-danger-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 4px 0 8px;
+}
+
+.project-danger-actions small {
+  max-width: 340px;
+}
+
 .agent-projects-fieldset {
   margin: 17px 0;
   padding: 13px;
