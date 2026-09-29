@@ -2322,7 +2322,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20260928-followup-v103")
+      .register("/sw.js?v=20260929-project-v104")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -6684,7 +6684,8 @@ async function addProject(event) {
     showToast("Projek sudah ada", "Gunakan nama projek lain.", "error");
     return;
   }
-  const project = { id: makeId("project"), name, active: true, createdAt: Date.now() };
+  // Supabase generates UUID project IDs; the local ID format is not a UUID.
+  const project = { id: remoteDatabaseMode ? null : makeId("project"), name, active: true, createdAt: Date.now() };
   if (!await saveProject(project)) {
     showToast("Projek tidak disimpan", "Semak sambungan Supabase.", "error");
     return;
