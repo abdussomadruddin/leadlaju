@@ -25,18 +25,16 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260930-lead-filters-v108" />
+    <link rel="stylesheet" href="styles.css?v=20260930-phone-compact-v110" />
     <script src="vendor/exceljs.min.js?v=4.4.0" defer></script>
-    <script src="app.js?v=20260930-lead-filters-v108" defer></script>
+    <script src="app.js?v=20260930-phone-compact-v110" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
       <div class="login-showcase">
         <a class="login-brand" href="#" aria-label="LeadLaju">
           <span class="brand-mark">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M13.2 2.8 5.1 13.2h6.2l-.5 8 8.1-10.5h-6.2l.5-7.9Z" />
-            </svg>
+            <img src="assets/icon.svg" alt="" />
           </span>
           <span>
             <strong>LeadLaju</strong>
@@ -72,9 +70,7 @@
         <div class="login-card">
           <div class="login-mobile-brand">
             <span class="brand-mark">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M13.2 2.8 5.1 13.2h6.2l-.5 8 8.1-10.5h-6.2l.5-7.9Z" />
-              </svg>
+              <img src="assets/icon.svg" alt="" />
             </span>
             <strong>LeadLaju</strong>
           </div>
@@ -206,9 +202,7 @@
         <button class="mobile-sidebar-close" id="mobile-sidebar-close" type="button" aria-label="Tutup menu">×</button>
         <a class="brand" href="#" aria-label="LeadLaju home">
           <span class="brand-mark">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M13.2 2.8 5.1 13.2h6.2l-.5 8 8.1-10.5h-6.2l.5-7.9Z" />
-            </svg>
+            <img src="assets/icon.svg" alt="" />
           </span>
           <span>
             <strong>LeadLaju</strong>
@@ -330,7 +324,7 @@
           <div class="topbar-actions">
             <div class="live-sync-pill">
               <span class="pulse"></span>
-              <span id="live-sync-label">Live sync aktif</span>
+              <span id="live-sync-label">LIVE</span>
             </div>
             <button class="notification-button" id="notification-button" type="button" aria-label="Notifikasi">
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -463,6 +457,8 @@
               </div>
             </div>
 
+            <div id="active-lead-container"></div>
+
             <div class="agent-lead-controls" id="agent-lead-controls" hidden aria-live="polite">
               <div class="agent-lead-control-status">
                 <span class="agent-lead-control-icon" aria-hidden="true">
@@ -478,7 +474,6 @@
               </div>
             </div>
 
-            <div id="active-lead-container"></div>
           </section>
 
           <section class="panel own-performance" id="own-performance" hidden>
@@ -543,7 +538,7 @@
                   <circle cx="11" cy="11" r="7" />
                   <path d="m20 20-4-4" />
                 </svg>
-                <input id="lead-search" type="search" placeholder="Cari nama, telefon, emel, projek atau nota" />
+                <input id="lead-search" type="search" placeholder="Cari lead..." aria-label="Cari nama, telefon, emel, projek atau nota" />
               </label>
               <select id="lead-filter" aria-label="Tapis status lead">
                 <option value="all">Semua status</option>
@@ -564,7 +559,7 @@
                 <option value="all">Semua ejen</option>
               </select>
               <select class="period-filter" id="lead-period-filter" aria-label="Tapis bulan dan tahun lead">
-                <option value="all">Semua bulan &amp; tahun</option>
+                <option value="all">Semua tarikh</option>
               </select>
               <span class="queue-label" id="lead-log-count">0 lead</span>
             </div>
@@ -611,7 +606,7 @@
                 <option value="all">Semua projek</option>
               </select>
               <select class="period-filter" id="appointment-period-filter" aria-label="Tapis bulan dan tahun appointment">
-                <option value="all">Semua bulan &amp; tahun</option>
+                <option value="all">Semua tarikh</option>
               </select>
               <span class="queue-label" id="appointment-count">0 appointment</span>
             </div>
@@ -636,8 +631,9 @@
               <select class="admin-only" id="follow-up-project-filter" aria-label="Tapis projek">
                 <option value="all">Semua projek</option>
               </select>
-              <select id="follow-up-month-filter" aria-label="Tapis bulan"></select>
-              <select id="follow-up-year-filter" aria-label="Tapis tahun"></select>
+              <select class="period-filter" id="follow-up-period-filter" aria-label="Tapis bulan dan tahun Follow Up Due">
+                <option value="all">Semua tarikh</option>
+              </select>
             </div>
             <div class="follow-up-due-list" id="follow-up-due-list"></div>
           </div>

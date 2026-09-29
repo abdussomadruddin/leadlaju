@@ -210,12 +210,13 @@ test('admin log lead supports filtering by agent', () => {
   assert.match(source, /leadAgentFilter\?\.addEventListener\("change", resetLeadLogPage\)/);
 });
 
-test('lead and appointment lists use one Kuala Lumpur month-year filter', () => {
+test('lead, appointment, and Follow Up Due lists use one Kuala Lumpur month-year filter', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const html = fs.readFileSync('index.html', 'utf8');
   assert.match(html, /id="lead-period-filter"/);
   assert.match(html, /id="appointment-period-filter"/);
-  assert.doesNotMatch(html, /id="(?:lead|appointment)-(?:month|year)-filter"/);
+  assert.match(html, /id="follow-up-period-filter"/);
+  assert.doesNotMatch(html, /id="(?:lead|appointment|follow-up)-(?:month|year)-filter"/);
   assert.match(source, /function populateMonthPeriodFilter\(filter, records, getDate\)/);
   assert.match(source, /function matchesMonthPeriodFilter\(value, filter\)/);
   assert.match(source, /MALAY_MONTH_NAMES\[Number\(month\) - 1\]\} \$\{year\}/);
@@ -223,9 +224,8 @@ test('lead and appointment lists use one Kuala Lumpur month-year filter', () => 
   assert.match(source, /matchesMonthPeriodFilter\(appointment\.scheduledAt, elements\.appointmentPeriodFilter\)/);
   assert.match(source, /leadPeriodFilter\?\.addEventListener\("change", resetLeadLogPage\)/);
   assert.match(source, /appointmentPeriodFilter\?\.addEventListener\("change", renderAppointments\)/);
-  // Follow Up Due keeps its independent month/year controls.
-  assert.match(source, /function populateMonthYearFilters\(monthFilter, yearFilter, records, getDate\)/);
-  assert.match(source, /function matchesMonthYearFilter\(value, monthFilter, yearFilter\)/);
+  assert.match(source, /matchesMonthPeriodFilter\(item\.followUpActivityAt, elements\.followUpPeriodFilter\)/);
+  assert.match(source, /followUpPeriodFilter\?\.addEventListener\("change", renderFollowUpDue\)/);
 });
 
 test('missed five-minute metric uses a warning icon instead of a success check', () => {

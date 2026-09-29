@@ -71,8 +71,9 @@ test('Follow Up Due navigation, filters and direct WhatsApp follow-up are wired 
   assert.match(html, /id="nav-follow-up-count"/);
   assert.match(html, /id="follow-up-agent-filter"/);
   assert.match(html, /id="follow-up-project-filter"/);
-  assert.match(html, /id="follow-up-month-filter"/);
-  assert.match(html, /id="follow-up-year-filter"/);
+  assert.match(html, /id="follow-up-period-filter"/);
+  assert.doesNotMatch(html, /id="follow-up-(?:month|year)-filter"/);
+  assert.match(app, /matchesMonthPeriodFilter\(item\.followUpActivityAt, elements\.followUpPeriodFilter\)/);
   assert.match(app, /rpc\("get_follow_up_due"\)/);
   assert.match(app, /data-follow-up-due-action/);
   assert.match(app, /data-follow-up-due-copy/);

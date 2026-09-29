@@ -64,3 +64,19 @@ test('agent phone dashboard keeps lead controls and personal performance promine
   assert.match(css, /\.agent-dashboard \.agent-lead-controls\.is-ready \.get-lead-button/);
   assert.match(css, /\.agent-dashboard \.performance-metric:last-child \{ grid-column: 1 \/ -1/);
 });
+
+test('agent dashboard prioritizes CALL NOW and reuses the installed app mark', () => {
+  const dashboard = html.slice(html.indexOf('<section class="view active" id="dashboard-view"'), html.indexOf('<section class="panel own-performance"'));
+  assert.ok(dashboard.indexOf('id="active-lead-container"') < dashboard.indexOf('id="agent-lead-controls"'));
+  assert.match(app, /class="mobile-dashboard-brand-mark"><img src="assets\/icon\.svg" alt=""/);
+  assert.equal((html.match(/<img src="assets\/icon\.svg" alt="" \/>/g) || []).length, 3);
+  assert.match(html, /id="live-sync-label">LIVE<\/span>/);
+});
+
+test('phone lead and follow-up filters use compact, bounded layouts', () => {
+  assert.match(css, /@media \(max-width: 600px\) \{[\s\S]*\.lead-toolbar \{ display: grid; grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(css, /\.lead-toolbar \.search-box \{[^}]*flex: none;[^}]*min-height: 42px/);
+  assert.match(css, /\.lead-toolbar \.period-filter \{ min-width: 0; \}/);
+  assert.match(css, /\.follow-up-toolbar \{ display: grid; grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(html, /id="follow-up-period-filter"/);
+});

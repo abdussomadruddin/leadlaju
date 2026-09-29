@@ -358,8 +358,7 @@ const elements = {
   followUpCount: document.querySelector("#follow-up-count"),
   followUpAgentFilter: document.querySelector("#follow-up-agent-filter"),
   followUpProjectFilter: document.querySelector("#follow-up-project-filter"),
-  followUpMonthFilter: document.querySelector("#follow-up-month-filter"),
-  followUpYearFilter: document.querySelector("#follow-up-year-filter"),
+  followUpPeriodFilter: document.querySelector("#follow-up-period-filter"),
   contactModal: document.querySelector("#contact-modal"),
   contactForm: document.querySelector("#contact-form"),
   contactName: document.querySelector("#contact-name"),
@@ -1793,39 +1792,6 @@ function updateSelectOptions(select, markup, selectedValue) {
   select.value = [...select.options].some((option) => option.value === selectedValue) ? selectedValue : "all";
 }
 
-function populateMonthYearFilters(monthFilter, yearFilter, records, getDate) {
-  if (!monthFilter || !yearFilter) return;
-  const selectedMonth = monthFilter.value || "all";
-  const selectedYear = yearFilter.value || "all";
-  const years = new Set();
-  const months = new Set();
-  records.forEach((record) => {
-    const value = getDate(record);
-    if (!value) return;
-    const parts = malaysiaDateParts(value);
-    if (!parts.year || !parts.month) return;
-    years.add(parts.year);
-    months.add(parts.month);
-  });
-  const monthOptions = [
-    '<option value="all">Semua bulan</option>',
-    ...[...months].sort().map((month) => `<option value="${month}">${MALAY_MONTH_NAMES[Number(month) - 1]}</option>`),
-  ].join("");
-  const yearOptions = [
-    '<option value="all">Semua tahun</option>',
-    ...[...years].sort((left, right) => Number(right) - Number(left)).map((year) => `<option value="${year}">${year}</option>`),
-  ].join("");
-  updateSelectOptions(monthFilter, monthOptions, selectedMonth);
-  updateSelectOptions(yearFilter, yearOptions, selectedYear);
-}
-
-function matchesMonthYearFilter(value, monthFilter, yearFilter) {
-  if (!value) return false;
-  const parts = malaysiaDateParts(value);
-  return (monthFilter?.value === "all" || parts.month === monthFilter?.value) &&
-    (yearFilter?.value === "all" || parts.year === yearFilter?.value);
-}
-
 function populateMonthPeriodFilter(filter, records, getDate) {
   if (!filter) return;
   const selected = filter.value || "all";
@@ -1837,7 +1803,7 @@ function populateMonthPeriodFilter(filter, records, getDate) {
     if (year && month) periods.add(`${year}-${month}`);
   });
   const options = [
-    '<option value="all">Semua bulan &amp; tahun</option>',
+    '<option value="all">Semua tarikh</option>',
     ...[...periods].sort().reverse().map((period) => {
       const [year, month] = period.split("-");
       return `<option value="${period}">${MALAY_MONTH_NAMES[Number(month) - 1]} ${year}</option>`;
@@ -2354,7 +2320,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20260930-lead-filters-v108")
+      .register("/sw.js?v=20260930-phone-compact-v110")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -5711,7 +5677,7 @@ function renderUser() {
   if (elements.ownPerformance) elements.ownPerformance.hidden = isAdmin();
   elements.viewTitle.innerHTML =
     activeView === "dashboard"
-      ? `<span class="desktop-greeting">Selamat datang, </span><span class="mobile-dashboard-brand"><span class="mobile-dashboard-brand-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.2 2.8 5.1 13.2h6.2l-.5 8 8.1-10.5h-6.2l.5-7.9Z" /></svg></span><span>LeadLaju</span></span><span class="user-name">${escapeHtml(user.name.split(" ")[0])}</span>`
+      ? `<span class="desktop-greeting">Selamat datang, </span><span class="mobile-dashboard-brand"><span class="mobile-dashboard-brand-mark"><img src="assets/icon.svg" alt="" /></span><span>LeadLaju</span></span><span class="user-name">${escapeHtml(user.name.split(" ")[0])}</span>`
       : viewTitles[activeView] || "LeadLaju";
 
   document.querySelectorAll(".admin-only").forEach((item) => {
@@ -6178,16 +6144,11 @@ function renderFollowUpDue() {
     elements.followUpProjectFilter.value = projects.includes(selectedProject) ? selectedProject : "all";
   }
 
-  populateMonthYearFilters(
-    elements.followUpMonthFilter,
-    elements.followUpYearFilter,
-    rows,
-    (item) => item.followUpActivityAt,
-  );
+  populateMonthPeriodFilter(elements.followUpPeriodFilter, rows, (item) => item.followUpActivityAt);
   const filtered = rows.filter((item) =>
     (!isAdmin() || elements.followUpAgentFilter?.value === "all" || item.assignedAgentId === elements.followUpAgentFilter.value) &&
     (!isAdmin() || elements.followUpProjectFilter?.value === "all" || item.project === elements.followUpProjectFilter.value) &&
-    matchesMonthYearFilter(item.followUpActivityAt, elements.followUpMonthFilter, elements.followUpYearFilter)
+    matchesMonthPeriodFilter(item.followUpActivityAt, elements.followUpPeriodFilter)
   );
 
   elements.navFollowUpCount.hidden = rows.length === 0;
@@ -7789,8 +7750,7 @@ elements.appointmentProjectFilter?.addEventListener("change", renderAppointments
 elements.appointmentPeriodFilter?.addEventListener("change", renderAppointments);
 elements.followUpAgentFilter?.addEventListener("change", renderFollowUpDue);
 elements.followUpProjectFilter?.addEventListener("change", renderFollowUpDue);
-elements.followUpMonthFilter?.addEventListener("change", renderFollowUpDue);
-elements.followUpYearFilter?.addEventListener("change", renderFollowUpDue);
+elements.followUpPeriodFilter?.addEventListener("change", renderFollowUpDue);
 elements.monitorSeverityFilter?.addEventListener("change", renderLeadMonitor);
 elements.monitorAgentFilter?.addEventListener("change", renderLeadMonitor);
 elements.monitorRefreshButton?.addEventListener("click", async () => {
