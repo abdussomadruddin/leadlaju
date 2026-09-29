@@ -2328,7 +2328,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20260930-mobile-v106")
+      .register("/sw.js?v=20260930-mobile-menu-v107")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -4830,6 +4830,7 @@ function displayLeadPhone(lead) {
 
 function renderActiveLead() {
   const lead = getVisibleActiveLead();
+  elements.activeLeadContainer.classList.toggle("has-active-lead", Boolean(lead));
   const visibleLeads = isAdmin()
     ? state.leads.filter((item) => !isVisuallyExpiredAssignment(item))
     : state.leads.filter((item) => item.assignedAgentId === state.currentUserId && !isVisuallyExpiredAssignment(item));
@@ -5679,6 +5680,7 @@ function renderUser() {
   const user = getCurrentUser();
   if (!user) return;
 
+  document.querySelector("#dashboard-view")?.classList.toggle("agent-dashboard", user.role === "agent");
   elements.sidebarAvatar.textContent = initials(user.name);
   elements.sidebarUserName.textContent = user.name;
   elements.sidebarUserRole.textContent = user.role === "admin" ? "Administrator" : "Property Agent";
@@ -5686,7 +5688,7 @@ function renderUser() {
   if (elements.ownPerformance) elements.ownPerformance.hidden = isAdmin();
   elements.viewTitle.innerHTML =
     activeView === "dashboard"
-      ? `<span class="desktop-greeting">Selamat datang, </span><span class="mobile-greeting">Dashboard</span><span class="user-name">${escapeHtml(user.name.split(" ")[0])}</span>`
+      ? `<span class="desktop-greeting">Selamat datang, </span><span class="mobile-dashboard-brand"><span class="mobile-dashboard-brand-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.2 2.8 5.1 13.2h6.2l-.5 8 8.1-10.5h-6.2l.5-7.9Z" /></svg></span><span>LeadLaju</span></span><span class="user-name">${escapeHtml(user.name.split(" ")[0])}</span>`
       : viewTitles[activeView] || "LeadLaju";
 
   document.querySelectorAll(".admin-only").forEach((item) => {
@@ -6214,8 +6216,15 @@ function performanceRateLabel(row) {
   return rate === null ? "—" : `${(rate * 100).toFixed(1)}%`;
 }
 
-function performanceMetric(label, value, detail = "") {
-  return `<div class="performance-metric"><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong>${detail ? `<span>${escapeHtml(detail)}</span>` : ""}</div>`;
+function performanceMetric(label, value, detail = "", icon = "lead") {
+  const icons = {
+    lead: '<circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M17 5a3 3 0 0 1 0 6m1 4a5 5 0 0 1 3 5"/>',
+    call: '<path d="M7 3h4l1 5-2 2a14 14 0 0 0 4 4l2-2 5 1v4c0 2-2 3-4 3C10 20 4 14 4 7c0-2 1-4 3-4Z"/>',
+    appointment: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 10h18m5 6 2 2 4-4"/>',
+    show: '<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
+    due: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  };
+  return `<div class="performance-metric metric-${icon}"><small>${escapeHtml(label)}</small><span class="performance-metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24">${icons[icon] || icons.lead}</svg></span><strong>${escapeHtml(value)}</strong>${detail ? `<span class="performance-metric-detail">${escapeHtml(detail)}</span>` : ""}</div>`;
 }
 
 function renderOwnPerformance(current, previous) {
@@ -6228,11 +6237,11 @@ function renderOwnPerformance(current, previous) {
   }
   elements.ownPerformanceStatus.textContent = `${current.from} hingga ${current.to} · Dibandingkan dengan 7 hari sebelumnya`;
   elements.ownPerformanceMetrics.innerHTML = [
-    performanceMetric("Lead ditugaskan", row.assignments, `Sebelumnya ${prior?.assignments || 0}`),
-    performanceMetric("CALL NOW ≤5 min", performanceRateLabel(row), `Sebelumnya ${prior ? performanceRateLabel(prior) : "—"}`),
-    performanceMetric("Appointment", row.appointments, `Sebelumnya ${prior?.appointments || 0}`),
-    performanceMetric("Show Up", row.show_ups, `Sebelumnya ${prior?.show_ups || 0}`),
-    performanceMetric("Follow Up Due sekarang", row.due_now, "Perlu tindakan"),
+    performanceMetric("Lead ditugaskan", row.assignments, `Sebelumnya ${prior?.assignments || 0}`, "lead"),
+    performanceMetric("CALL NOW ≤5 min", performanceRateLabel(row), `Sebelumnya ${prior ? performanceRateLabel(prior) : "—"}`, "call"),
+    performanceMetric("Appointment", row.appointments, `Sebelumnya ${prior?.appointments || 0}`, "appointment"),
+    performanceMetric("Show Up", row.show_ups, `Sebelumnya ${prior?.show_ups || 0}`, "show"),
+    performanceMetric("Follow Up Due", row.due_now, "Perlu tindakan", "due"),
   ].join("");
 }
 
@@ -6289,10 +6298,13 @@ function renderPerformanceReport() {
     <td>${Number(row.appointments) || 0}</td><td>${Number(row.show_ups) || 0}</td><td>${Number(row.due_now) || 0}</td>
   </tr>`).join("") : '<tr><td colspan="11">Tiada ejen untuk penapis ini.</td></tr>';
   const cardMetric = (label, value) => `<div><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></div>`;
+  const cardSummary = (name, meta) => `<summary><span class="performance-card-name">${escapeHtml(name)}</span><span class="performance-card-summary">${escapeHtml(meta)}</span><span class="performance-card-toggle"><span class="when-closed">Butiran</span><span class="when-open">Tutup</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></span></summary>`;
   elements.performanceCards.innerHTML = rows.length ? rows.map((row) => `<details class="performance-card">
-    <summary><span class="performance-card-name">${escapeHtml(row.agent_name)}</span><span class="performance-card-summary">${Number(row.assignments) || 0} lead · ${Number(row.due_now) || 0} due</span></summary>
+    ${cardSummary(row.agent_name, `${Number(row.assignments) || 0} lead · ${Number(row.due_now) || 0} due`)}
+    <div class="performance-card-content">
     <div class="performance-card-grid">${cardMetric("Total Contacted", Number(row.total_contacted) || 0)}${cardMetric("Total Follow Up", Number(row.total_follow_up) || 0)}${cardMetric("Total Potential", Number(row.total_potential) || 0)}${cardMetric("Total Cancelled & Rejected", Number(row.total_cancelled_rejected) || 0)}${cardMetric("Total Client", Number(row.total_client) || 0)}${cardMetric("CALL NOW ≤5 min", performanceRateLabel(row))}${cardMetric("Appointment", Number(row.appointments) || 0)}${cardMetric("Show Up", Number(row.show_ups) || 0)}</div>
     <button type="button" class="performance-agent-link" data-performance-agent="${escapeHtml(row.agent_id)}">Lihat trend mingguan</button>
+    </div>
   </details>`).join("") : '<p>Tiada ejen untuk penapis ini.</p>';
   const selected = rows.find((row) => row.agent_id === selectedPerformanceAgentId);
   elements.performanceDetail.hidden = !selected;
@@ -6302,7 +6314,7 @@ function renderPerformanceReport() {
   elements.performanceWeeks.innerHTML = weeks.length
     ? `<div class="performance-table-wrap"><table class="performance-table"><thead><tr><th>Minggu bermula</th><th>Lead ditugaskan</th><th>Total Contacted</th><th>Total Follow Up</th><th>Total Potential</th><th>Total Cancelled &amp; Rejected</th><th>Total Client</th><th>CALL NOW ≤5 min</th><th>Appointment</th><th>Show Up</th></tr></thead><tbody>${weeks.map((week) => `<tr><td>${escapeHtml(week.week_start)}</td><td>${week.assignments}</td><td>${week.total_contacted || 0}</td><td>${week.total_follow_up || 0}</td><td>${week.total_potential || 0}</td><td>${week.total_cancelled_rejected || 0}</td><td>${week.total_client || 0}</td><td>${performanceRateLabel(week)} (${week.within_five}/${week.assignments})</td><td>${week.appointments}</td><td>${week.show_ups}</td></tr>`).join("")}</tbody></table></div>`
     : '<p>Tiada aktiviti dalam tempoh ini.</p>';
-  if (weeks.length) elements.performanceWeeks.innerHTML += `<div class="performance-week-cards">${weeks.map((week) => `<details class="performance-card"><summary><span class="performance-card-name">${escapeHtml(week.week_start)}</span><span class="performance-card-summary">${Number(week.assignments) || 0} lead</span></summary><div class="performance-card-grid">${cardMetric("Total Contacted", Number(week.total_contacted) || 0)}${cardMetric("Total Follow Up", Number(week.total_follow_up) || 0)}${cardMetric("Total Potential", Number(week.total_potential) || 0)}${cardMetric("Total Cancelled & Rejected", Number(week.total_cancelled_rejected) || 0)}${cardMetric("Total Client", Number(week.total_client) || 0)}${cardMetric("CALL NOW ≤5 min", performanceRateLabel(week))}${cardMetric("Appointment", Number(week.appointments) || 0)}${cardMetric("Show Up", Number(week.show_ups) || 0)}</div></details>`).join("")}</div>`;
+  if (weeks.length) elements.performanceWeeks.innerHTML += `<div class="performance-week-cards">${weeks.map((week) => `<details class="performance-card">${cardSummary(week.week_start, `${Number(week.assignments) || 0} lead`)}<div class="performance-card-content"><div class="performance-card-grid">${cardMetric("Total Contacted", Number(week.total_contacted) || 0)}${cardMetric("Total Follow Up", Number(week.total_follow_up) || 0)}${cardMetric("Total Potential", Number(week.total_potential) || 0)}${cardMetric("Total Cancelled & Rejected", Number(week.total_cancelled_rejected) || 0)}${cardMetric("Total Client", Number(week.total_client) || 0)}${cardMetric("CALL NOW ≤5 min", performanceRateLabel(week))}${cardMetric("Appointment", Number(week.appointments) || 0)}${cardMetric("Show Up", Number(week.show_ups) || 0)}</div></div></details>`).join("")}</div>`;
 }
 
 async function loadPerformanceReport() {

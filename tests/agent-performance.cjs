@@ -68,5 +68,8 @@ test("performance report uses expandable compact cards on desktop and phone", ()
   assert.match(css, /\.performance-cards, \.performance-week-cards \{ display: grid/);
   assert.match(css, /grid-template-columns: minmax\(0, 1fr\)/);
   assert.match(css, /align-items: start/);
+  assert.match(app, /class="performance-card-toggle"/);
+  assert.match(css, /@keyframes performance-reveal/);
+  assert.match(css, /\.performance-card\[open\] \.performance-card-content \{ animation: none; \}/);
   assert.match(html, /class="performance-help"/);
 });

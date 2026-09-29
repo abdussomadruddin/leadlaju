@@ -25,9 +25,9 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260930-mobile-v106" />
+    <link rel="stylesheet" href="styles.css?v=20260930-mobile-menu-v107" />
     <script src="vendor/exceljs.min.js?v=4.4.0" defer></script>
-    <script src="app.js?v=20260930-mobile-v106" defer></script>
+    <script src="app.js?v=20260930-mobile-menu-v107" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -216,7 +216,7 @@
           </span>
         </a>
 
-        <p class="mobile-more-heading">Modul lain</p>
+        <p class="mobile-more-heading">Menu</p>
         <nav class="main-nav" aria-label="Navigasi utama">
           <button class="nav-item active" data-view="dashboard" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -451,6 +451,7 @@
             </article>
           </div>
 
+          <p class="agent-dashboard-intro">Lead milik anda sahaja.</p>
           <section class="new-lead-section">
             <div class="section-heading">
               <div>
@@ -464,7 +465,10 @@
 
             <div class="agent-lead-controls" id="agent-lead-controls" hidden aria-live="polite">
               <div class="agent-lead-control-status">
-                <span class="section-kicker" id="agent-lead-status-label">Status agihan</span>
+                <span class="agent-lead-control-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path d="M10 21h4" /></svg>
+                </span>
+                <span class="section-kicker" id="agent-lead-status-label">Giliran lead</span>
                 <strong id="agent-lead-status">Agihan lead dihentikan</strong>
                 <small id="agent-lead-status-message">Tekan GET LEAD untuk masuk giliran agihan.</small>
               </div>
