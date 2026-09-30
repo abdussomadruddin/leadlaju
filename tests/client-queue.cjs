@@ -1232,12 +1232,13 @@ test('appointments follow the current Log Lead owner and support edit and delete
   assert.match(source, /currentAgentMatches\(appointment\.assignedAgentId/);
 });
 
-test('appointment navigation badge counts appointments visible to the current user', () => {
+test('appointment navigation badge counts only upcoming scheduled appointments visible to the current user', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const html = fs.readFileSync('index.html', 'utf8');
   assert.match(html, /id="nav-appointment-count"/);
   assert.match(source, /navAppointmentCount: document\.querySelector\("#nav-appointment-count"\)/);
-  assert.match(source, /elements\.navAppointmentCount\.textContent = visible\.length/);
+  assert.match(source, /appointment\.status === "scheduled" && appointment\.scheduledAt > Date\.now\(\)/);
+  assert.match(source, /elements\.navAppointmentCount\.textContent = upcomingCount/);
 });
 
 test('appointment writes do not wait behind the lead distribution lock', () => {
