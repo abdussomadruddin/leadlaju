@@ -2329,7 +2329,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20260930-notification-gate-v113")
+      .register("/sw.js?v=20260930-floating-nav-v114")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -8113,6 +8113,70 @@ async function bootstrap() {
     });
 }
 
+function initializeFloatingNavigation() {
+  const nav = document.querySelector("#mobile-bottom-nav");
+  if (!nav) return;
+  let drag = null;
+  let suppressClick = false;
+  let previousY = window.scrollY;
+  let direction = 0;
+  let distance = 0;
+  const phone = () => window.matchMedia("(max-width: 850px)").matches;
+  nav.addEventListener("pointerdown", (event) => {
+    if (!phone() || event.button !== 0) return;
+    const rect = nav.getBoundingClientRect();
+    drag = { id: event.pointerId, x: event.clientX, y: event.clientY, left: rect.left, top: rect.top, moved: false };
+    suppressClick = false;
+  });
+  nav.addEventListener("pointermove", (event) => {
+    if (!drag || drag.id !== event.pointerId) return;
+    const dx = event.clientX - drag.x;
+    const dy = event.clientY - drag.y;
+    if (!drag.moved && Math.hypot(dx, dy) < 8) return;
+    if (!drag.moved) {
+      drag.moved = true;
+      nav.setPointerCapture(event.pointerId);
+      nav.classList.add("is-dragging");
+    }
+    const rect = nav.getBoundingClientRect();
+    const left = Math.max(10, Math.min(window.innerWidth - rect.width - 10, drag.left + dx));
+    const top = Math.max(80, Math.min(window.innerHeight - rect.height - 36, drag.top + dy));
+    nav.style.left = `${left}px`;
+    nav.style.top = `${top}px`;
+    nav.style.bottom = "auto";
+    nav.style.transform = "none";
+  });
+  const finishDrag = () => {
+    suppressClick = Boolean(drag?.moved);
+    drag = null;
+    nav.classList.remove("is-dragging");
+    window.setTimeout(() => { suppressClick = false; }, 0);
+  };
+  nav.addEventListener("pointerup", finishDrag);
+  nav.addEventListener("pointercancel", finishDrag);
+  nav.addEventListener("click", (event) => {
+    if (!suppressClick) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, true);
+  window.addEventListener("scroll", () => {
+    const y = Math.max(0, window.scrollY);
+    const delta = y - previousY;
+    previousY = y;
+    if (!phone() || drag || Math.abs(delta) < 1) return;
+    const nextDirection = Math.sign(delta);
+    distance = nextDirection === direction ? distance + Math.abs(delta) : Math.abs(delta);
+    direction = nextDirection;
+    if (y < 24 || (direction < 0 && distance >= 8)) nav.classList.remove("is-scroll-hidden");
+    else if (direction > 0 && distance >= 20) nav.classList.add("is-scroll-hidden");
+  }, { passive: true });
+  window.addEventListener("resize", () => {
+    nav.removeAttribute("style");
+    nav.classList.remove("is-scroll-hidden");
+  });
+}
+
+initializeFloatingNavigation();
 lockViewportZoom();
 window.addEventListener("online", flushContactOutbox);
 bootstrap();
