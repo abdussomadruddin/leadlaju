@@ -2201,7 +2201,28 @@ async function acceptAssignmentSnapshot(leadSnapshot, timing = {}) {
   )) return { accepted: false, terminal: false };
   logLeadTiming("APP_SNAPSHOT_START", leadSnapshot, timing);
   markAuthoritativeLeadCommit({ id: leadSnapshot.id });
-  const savePromise = addLead(leadSnapshot, {
+  // Supabase snapshots are already committed by the assignment transaction.
+  // Receiving one must never insert a duplicate lead or write its runtime back.
+  let savePromise;
+  if (typeof remoteDatabaseMode !== "undefined" && remoteDatabaseMode) {
+    const canonicalLead = mapLead(leadSnapshot);
+    const index = state.leads.findIndex((lead) => lead.id === canonicalLead.id);
+    if (index >= 0) {
+      const current = state.leads[index];
+      if ((Number(current.statusRevision) || 0) > canonicalLead.statusRevision || pendingLeadStatusUpdates.has(current.id)) {
+        canonicalLead.status = current.status;
+        canonicalLead.statusRevision = current.statusRevision;
+        canonicalLead.statusUpdatedAt = current.statusUpdatedAt;
+        canonicalLead.contactedAt = current.contactedAt;
+        canonicalLead.responseMs = current.responseMs;
+      }
+      if (pendingLeadNoteUpdates.has(current.id)) canonicalLead.notes = current.notes;
+      state.leads[index] = canonicalLead;
+    } else state.leads.unshift(canonicalLead);
+    saveState();
+    logLeadTiming("APP_STATE_COMMIT", leadSnapshot, timing);
+    savePromise = Promise.resolve(true);
+  } else savePromise = addLead(leadSnapshot, {
     silent: true,
     updateExisting: true,
     notify: false,
@@ -2329,7 +2350,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20260930-liquid-tabs-v115")
+      .register("/sw.js?v=20260930-snapshot-fix-v116")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });

@@ -1,12 +1,12 @@
-const CACHE_NAME = "leadlaju-pwa-v20260930-liquid-tabs-v115";
+const CACHE_NAME = "leadlaju-pwa-v20260930-snapshot-fix-v116";
 const LEAD_HANDOFF_CACHE = "leadlaju-notification-snapshots";
 const LEAD_HANDOFF_SCHEMA_VERSION = 1;
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20260930-liquid-tabs-v115",
+  "/styles.css?v=20260930-snapshot-fix-v116",
   "/vendor/exceljs.min.js?v=4.4.0",
-  "/app.js?v=20260930-liquid-tabs-v115",
+  "/app.js?v=20260930-snapshot-fix-v116",
   "/manifest.webmanifest?v=20260625-pwa-notifications",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",

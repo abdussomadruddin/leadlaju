@@ -860,6 +860,30 @@ test('notification timing instrumentation leaves the immediate snapshot render p
   assert.equal(await pending, true);
 });
 
+test('Supabase assignment delivery caches the canonical lead without a database write or duplicate', async () => {
+  const source = fs.readFileSync('app.js', 'utf8');
+  const start = source.indexOf('async function acceptAssignmentSnapshot(');
+  const end = source.indexOf('\nasync function showNotificationLeadImmediately', start);
+  let renders = 0;
+  const context = vm.createContext({
+    state: { leads: [] }, remoteDatabaseMode: true,
+    assignmentSnapshotDisposition: () => ({ accepted: true }),
+    currentAgentMatches: () => true, markAuthoritativeLeadCommit() {}, logLeadTiming() {},
+    mapLead: row => ({ id: row.id, status: 'new', statusRevision: 0, assignmentRevision: row.assignment_revision }),
+    pendingLeadStatusUpdates: new Map(), pendingLeadNoteUpdates: new Map(),
+    saveState() {}, switchView() {}, renderAll() { renders++; },
+    timingSnapshotLead: () => null, getVisibleActiveLead: () => null,
+    addLead() { throw new Error('A committed snapshot must not enter lead insertion'); },
+  });
+  vm.runInContext(source.slice(start, end), context);
+  const snapshot = { id: 'canonical-lead', assigned_agent_id: 'agent-a', assignment_revision: 4 };
+  assert.equal((await context.acceptAssignmentSnapshot(snapshot)).accepted, true);
+  assert.equal((await context.acceptAssignmentSnapshot(snapshot)).accepted, true);
+  assert.equal(context.state.leads.length, 1);
+  assert.equal(context.state.leads[0].id, snapshot.id);
+  assert.equal(renders, 2);
+});
+
 test('service worker timing logs only correlation and timing metadata', () => {
   const worker = fs.readFileSync('sw.js', 'utf8');
   const timingStart = worker.indexOf('function logLeadTiming(');
