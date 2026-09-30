@@ -25,9 +25,9 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260930-upcoming-badge-v120" />
+    <link rel="stylesheet" href="styles.css?v=20261001-master-brands-v121" />
     <script src="vendor/exceljs.min.js?v=4.4.0" defer></script>
-    <script src="app.js?v=20260930-upcoming-badge-v120" defer></script>
+    <script src="app.js?v=20261001-master-brands-v121" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -154,6 +154,7 @@
               <input id="signup-email" type="email" autocomplete="email" placeholder="nama@agency.com" required />
             </div>
 
+            <p id="signup-brand-label" class="section-kicker">Pendaftaran ejen · Safrich</p>
             <fieldset class="signup-projects-fieldset">
               <legend>Projek yang ingin diterima</legend>
               <p>Pilih sekurang-kurangnya satu projek sebelum menghantar permohonan.</p>
@@ -250,6 +251,9 @@
             Buletin News
             <span class="nav-count nav-count-alert" id="nav-bulletin-count" hidden>0</span>
           </button>
+          <button class="nav-item master-only" data-view="brands" type="button" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21V5h8v16M11 21V9h10v12M6 9h2M6 13h2M14 13h3M14 17h3" /></svg><span>Brand &amp; Admin</span>
+          </button>
           <button class="nav-item admin-only" data-view="agents" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
@@ -319,6 +323,7 @@
           </button>
           <div class="page-title">
             <p id="today-label">Dashboard</p>
+            <div class="brand-context"><span id="active-brand-label">Safrich</span><select id="master-brand-switcher" aria-label="Pilih brand" hidden></select></div>
             <h1 id="view-title">Selamat pagi, <span>Nur Aina</span></h1>
           </div>
           <div class="topbar-actions">
@@ -642,6 +647,30 @@
           </div>
         </section>
 
+        <section class="view" id="brands-view">
+          <div class="content-heading"><div><span class="section-kicker">Master sahaja</span><h2>Brand &amp; Admin</h2><p>Setiap brand mempunyai data dan pasukan berasingan.</p></div></div>
+          <p id="master-management-status" role="status"></p>
+          <div class="master-create-grid">
+            <form class="panel master-form" id="master-brand-form"><h3>Brand baharu</h3>
+              <label>Nama brand<input name="name" maxlength="100" required placeholder="Contoh: Safrich" /></label>
+              <label>Slug link pendaftaran<input name="slug" pattern="[a-z0-9]+(-[a-z0-9]+)*" maxlength="80" required placeholder="contoh-brand" /></label>
+              <button class="primary-button" type="submit">Cipta brand</button>
+            </form>
+            <form class="panel master-form" id="master-admin-form"><h3>Jemput Admin</h3>
+              <label>Brand<select id="master-admin-brand" name="brand_id" required></select></label>
+              <label>Nama<input name="name" maxlength="120" required /></label>
+              <label>Emel<input name="email" type="email" required /></label>
+              <label>Telefon<input name="phone" type="tel" /></label>
+              <button class="primary-button" type="submit">Hantar jemputan</button><small>Admin menetapkan kata laluan melalui emel sendiri.</small>
+            </form>
+          </div>
+          <h3 class="master-list-heading">Semua brand</h3><div id="master-brand-list" class="master-card-grid"></div>
+          <h3 class="master-list-heading">Semua Admin</h3><div id="master-admin-list" class="master-card-grid"></div>
+        </section>
+        <dialog id="brand-confirm-dialog" class="brand-confirm-dialog">
+          <h3>Nyahaktifkan brand?</h3><p id="brand-confirm-message"></p>
+          <div class="form-actions"><button id="brand-confirm-cancel" class="secondary-button" type="button">Batal</button><button id="brand-confirm-next" class="primary-button danger" type="button">Teruskan</button></div>
+        </dialog>
         <section class="view" id="bulletins-view">
           <div class="content-heading bulletin-page-heading">
             <div><span class="section-kicker">Makluman pasukan</span><h2>Buletin News</h2><p>Hebahan penting, kemas kini projek dan maklumat pasukan dalam satu tempat.</p></div>

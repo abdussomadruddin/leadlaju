@@ -1,8 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.116.0";
+import { actorBrand, signupBrand } from "../_shared/brand-access.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
+  "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info, x-leadlaju-brand",
 };
 
 function text(value: unknown): string {
@@ -27,13 +28,15 @@ Deno.serve(async (request) => {
 
   try {
     if (action === "list_projects") {
+      const brand = await signupBrand(body.brand_slug);
       const { data, error } = await admin.from("projects").select("id,name,active,created_at")
-        .eq("active", true).order("created_at");
+        .eq("brand_id", brand.id).eq("active", true).order("created_at");
       if (error) throw error;
-      return response({ ok: true, projects: data || [] });
+      return response({ ok: true, brand, projects: data || [] });
     }
 
     if (action === "signup_request") {
+      const brand = await signupBrand(body.brand_slug);
       const name = text(body.name);
       const phone = text(body.phone);
       const email = text(body.email).toLowerCase();
@@ -46,7 +49,7 @@ Deno.serve(async (request) => {
       }
 
       const { data: projects, error: projectError } = await admin.from("projects")
-        .select("id").in("id", projectIds).eq("active", true);
+        .select("id").eq("brand_id", brand.id).in("id", projectIds).eq("active", true);
       if (projectError) throw projectError;
       if ((projects || []).length !== projectIds.length) {
         return response({ ok: false, error: "Pilihan projek tidak sah." }, 400);
@@ -72,23 +75,25 @@ Deno.serve(async (request) => {
         role: "agent",
         approval_status: "pending",
         active: false,
+        brand_id: brand.id,
       });
       if (profileError) {
         await admin.auth.admin.deleteUser(userId);
         throw profileError;
       }
-      const eligibility = projectIds.map((projectId) => ({ agent_id: userId, project_id: projectId }));
+      const eligibility = projectIds.map((projectId) => ({ agent_id: userId, project_id: projectId, brand_id: brand.id }));
       const { error: eligibilityError } = await admin.from("agent_project_eligibility").insert(eligibility);
       if (eligibilityError) {
         await admin.auth.admin.deleteUser(userId);
         throw eligibilityError;
       }
-      await admin.from("agent_availability").insert({ agent_id: userId, lead_ready: false, notification_ready: false });
+      await admin.from("agent_availability").insert({ agent_id: userId, brand_id: brand.id, lead_ready: false, notification_ready: false });
       const { data: admins } = await admin.from("profiles").select("id")
-        .eq("role", "admin").eq("active", true).eq("approval_status", "approved");
+        .eq("brand_id", brand.id).eq("role", "admin").eq("active", true).eq("approval_status", "approved");
       if (admins?.length) {
         await admin.from("notification_outbox").insert(admins.map((item) => ({
           user_id: item.id,
+          brand_id: brand.id,
           notification_type: "agent_signup",
           dedupe_key: `agent_signup:${userId}:${item.id}`,
           payload: {
@@ -107,35 +112,46 @@ Deno.serve(async (request) => {
     const token = text(request.headers.get("Authorization")).replace(/^Bearer\s+/i, "");
     const { data: authData, error: authError } = await admin.auth.getUser(token);
     if (authError || !authData.user) return response({ ok: false, error: "Authentication required" }, 401);
-    const { data: actor } = await admin.from("profiles").select("role,active,approval_status")
+    const { data: actor } = await admin.from("profiles").select("role,brand_id,active,approval_status")
       .eq("id", authData.user.id).maybeSingle();
     if (action === "update_self_name") {
       const name = text(body.name);
       if (!actor || !actor.active || actor.approval_status !== "approved") {
         return response({ ok: false, error: "Akaun tidak aktif." }, 403);
       }
+      if (actor.role !== "master") await actorBrand(request, actor);
       if (!name || name.length > 120) return response({ ok: false, error: "Nama tidak sah." }, 400);
       const { data: profile, error } = await admin.from("profiles")
         .update({ name, updated_at: new Date().toISOString() })
         .eq("id", authData.user.id).select("id,name").single();
       if (error) throw error;
+      if (actor.role === "master") {
+        const audited = await admin.from("master_audit_log").insert({ actor_id: authData.user.id, action: "master_update_self_name", target_id: authData.user.id });
+        if (audited.error) throw audited.error;
+      }
       return response({ ok: true, profile });
     }
-    if (!actor || actor.role !== "admin" || !actor.active || actor.approval_status !== "approved") {
+    if (!actor || !["admin", "master"].includes(actor.role) || !actor.active || actor.approval_status !== "approved") {
       return response({ ok: false, error: "Admin required" }, 403);
     }
+    const brand = await actorBrand(request, actor);
+    const auditMaster = async (targetId: string) => {
+      if (actor.role !== "master") return;
+      const { error } = await admin.from("master_audit_log").insert({ actor_id: authData.user.id, brand_id: brand.id, action: `agent_${action}`, target_id: targetId });
+      if (error) throw error;
+    };
 
     const userId = text(body.userId);
     if (!userId || userId === authData.user.id) return response({ ok: false, error: "Invalid agent" }, 400);
     const { data: target } = await admin.from("profiles").select("id,email,role,approval_status")
-      .eq("id", userId).maybeSingle();
+      .eq("brand_id", brand.id).eq("id", userId).maybeSingle();
     if (!target || target.role !== "agent") return response({ ok: false, error: "Agent not found" }, 404);
 
     const actorClient = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_ANON_KEY")!,
       {
-        global: { headers: { Authorization: request.headers.get("Authorization") || "" } },
+        global: { headers: { Authorization: request.headers.get("Authorization") || "", "x-leadlaju-brand": brand.id } },
         auth: { persistSession: false, autoRefreshToken: false },
       },
     );
@@ -148,13 +164,14 @@ Deno.serve(async (request) => {
         approval_status: "approved",
         active: true,
         updated_at: new Date().toISOString(),
-      }).eq("id", userId).eq("approval_status", "pending").select("id").maybeSingle();
+      }).eq("brand_id", brand.id).eq("id", userId).eq("approval_status", "pending").select("id").maybeSingle();
       if (error) throw error;
       if (!approvedProfile) return response({ ok: false, error: "Status ejen sudah berubah. Sila sync semula." });
       const updated = await admin.auth.admin.updateUserById(userId, {
         app_metadata: { role: "agent", approval_status: "approved" },
       });
       if (updated.error) throw updated.error;
+      await auditMaster(userId);
       return response({ ok: true, userId, approval_status: "approved", active: true });
     }
 
@@ -163,6 +180,7 @@ Deno.serve(async (request) => {
       if (password.length < 8) return response({ ok: false, error: "Kata laluan mesti sekurang-kurangnya 8 aksara." }, 400);
       const updated = await admin.auth.admin.updateUserById(userId, { password });
       if (updated.error) throw updated.error;
+      await auditMaster(userId);
       return response({ ok: true, userId, password_updated: true });
     }
 
@@ -192,6 +210,7 @@ Deno.serve(async (request) => {
         if (authPatch) await admin.auth.admin.updateUserById(userId, { email: target.email });
         throw updated.error || new Error("Agent details could not be updated");
       }
+      await auditMaster(userId);
       return response({ ok: true, userId, profile: updated.data.profile });
     }
 
@@ -203,11 +222,13 @@ Deno.serve(async (request) => {
       if (!assignmentCount) {
         const deletion = await admin.auth.admin.deleteUser(userId);
         if (deletion.error) throw deletion.error;
+        await auditMaster(userId);
         return response({ ok: true, userId, deleted: true });
       }
 
       const retired = await actorClient.rpc("admin_retire_agent", { p_agent_id: userId });
       if (retired.error || !retired.data?.ok) throw retired.error || new Error("Agent could not be retired");
+      await auditMaster(userId);
       const updated = await admin.auth.admin.updateUserById(userId, {
         email: retired.data.tombstone_email,
         app_metadata: { role: "agent", approval_status: "rejected" },

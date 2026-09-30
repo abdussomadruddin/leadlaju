@@ -216,7 +216,8 @@ test('Supabase agent signup remains pending until an authenticated admin approve
   assert.match(manageAgent, /action === "signup_request"/);
   assert.match(manageAgent, /approval_status: "pending"/);
   assert.match(manageAgent, /active: false/);
-  assert.match(manageAgent, /actor\.role !== "admin"/);
+  assert.match(manageAgent, /!\["admin", "master"\]\.includes\(actor\.role\)/);
+  assert.match(manageAgent, /actorBrand\(request, actor\)/);
   assert.match(manageAgent, /action === "approve"/);
   assert.match(manageAgent, /approval_status: "approved"/);
   assert.match(manageAgent, /active: true/);
@@ -271,7 +272,8 @@ test('Supabase Realtime broadcasts canonical operational changes to private user
   assert.match(realtime, /'user:'\|\|v_user_id/);
   assert.match(realtime, /'admin:operations'/);
   assert.match(app, /channel\(topic, \{ config: \{ private: true \} \}\)/);
-  assert.match(app, /\.on\("broadcast", \{ event: "\*" \}, handleRemoteBroadcast\)/);
+  assert.match(app, /subscriptionBrandVersion === brandContextVersion\) handleRemoteBroadcast\(message\)/);
+  assert.match(app, /brand:\$\{activeBrandId\}:operations/);
 });
 
 test('an assigned lead is delivered as a canonical private snapshot before background reconciliation', () => {
@@ -371,11 +373,11 @@ test('production runtime config enables Supabase without requiring a query flag'
 
 test('all production devices invalidate the old app shell for the mandatory agent PWA gate', () => {
   const worker = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
-  assert.match(worker, /leadlaju-pwa-v20260930-upcoming-badge-v120/);
+  assert.match(worker, /leadlaju-pwa-v20261001-master-brands-v121/);
   assert.match(worker, /existingClient\.navigate\(targetUrl\)/);
-  assert.match(html, /app\.js\?v=20260930-upcoming-badge-v120/);
+  assert.match(html, /app\.js\?v=20261001-master-brands-v121/);
   assert.match(html, /vendor\/exceljs\.min\.js\?v=4\.4\.0/);
-  assert.match(app, /register\("\/sw\.js\?v=20260930-upcoming-badge-v120"\)/);
+  assert.match(app, /register\("\/sw\.js\?v=20261001-master-brands-v121"\)/);
   assert.doesNotMatch(app, /get\("backend"\) === "sheet"/);
   assert.match(app, /remoteDatabaseRequired = window\.location\.protocol !== "file:"/);
   assert.match(app, /if \(remoteDatabaseRequired\)[\s\S]*Operasi server lama tidak akan digunakan/);

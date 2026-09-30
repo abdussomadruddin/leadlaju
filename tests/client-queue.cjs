@@ -823,6 +823,7 @@ test('notification timing instrumentation leaves the immediate snapshot render p
   const logs = [];
   let releaseSave;
   const context = vm.createContext({
+    remoteDatabaseMode: false,
     state: { leads: [] },
     Date, Number, String, Boolean, console: { log: (...args) => logs.push(args) },
     performance: { now: () => 42 },

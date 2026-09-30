@@ -23,6 +23,34 @@
   --shadow-lg: 0 20px 50px rgba(28, 39, 66, 0.12);
 }
 
+[hidden].master-only { display: none !important; }
+.brand-context { display: flex; align-items: center; gap: 6px; min-width: 0; margin-top: 3px; font-size: 11px; color: var(--ink-500); }
+.brand-context select { max-width: 150px; min-height: 28px; padding: 3px 8px; font-size: 12px; border-radius: 8px; }
+.master-create-grid, .master-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
+.master-form, .master-card { padding: 16px; min-width: 0; }
+.master-form { display: grid; gap: 12px; align-content: start; }
+.master-form h3, .master-card h3 { margin: 0; font-size: 17px; }
+.master-form label, .master-admin-edit label { display: grid; gap: 5px; font-size: 12px; font-weight: 600; }
+.master-form input, .master-form select, .master-admin-edit input { min-width: 0; width: 100%; min-height: 42px; border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; background: var(--white); font: inherit; }
+.master-form small, .master-card p { color: var(--ink-500); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.master-card-heading, .master-card-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.master-card-heading { justify-content: space-between; }
+.master-card-actions { margin-top: 12px; }
+.master-card-actions button { min-height: 42px; padding: 8px 12px; font-size: 12px; }
+.master-list-heading { margin: 22px 0 12px; font-size: 17px; }
+.master-admin-edit { display: grid; gap: 10px; padding-top: 12px; }
+.master-admin-edit .master-active-label { display: flex; align-items: center; gap: 6px; }
+.master-active-label input { width: auto; min-height: 24px; }
+.brand-confirm-dialog { width: min(420px,calc(100% - 32px)); border: 1px solid var(--line); border-radius: 20px; padding: 22px; color: var(--ink-950); background: var(--white); }
+.brand-confirm-dialog::backdrop { background: #10182c80; }
+.brand-confirm-dialog p { font-size: 14px; line-height: 1.5; }
+@media (max-width: 600px) {
+ .master-create-grid, .master-card-grid { grid-template-columns: minmax(0,1fr); }
+ .master-form, .master-card { padding: 14px; }
+ .brand-context { font-size: 10px; }
+ .brand-context select { max-width: 115px; }
+}
+
 * {
   box-sizing: border-box;
 }

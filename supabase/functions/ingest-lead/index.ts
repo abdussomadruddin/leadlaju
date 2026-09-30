@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.116.0";
+import { serviceClient } from "../_shared/brand-access.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -27,17 +28,22 @@ Deno.serve(async (request) => {
     return Response.json({ ok: false, error: "Missing ingestion API key" }, { status: 401, headers: corsHeaders });
   }
 
-  const supabase = createClient(
+  let supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     { auth: { persistSession: false } },
   );
   const keyDigest = await sha256(apiKey);
   const { data: keyRecord } = await supabase.from("ingestion_api_keys")
-    .select("id,provider").eq("key_digest", keyDigest).eq("active", true).maybeSingle();
+    .select("id,provider,brand_id").eq("key_digest", keyDigest).eq("active", true).maybeSingle();
   if (!keyRecord) {
     return Response.json({ ok: false, error: "Invalid ingestion key" }, { status: 401, headers: corsHeaders });
   }
+  const { data: brand } = await supabase.from("brands").select("id").eq("id", keyRecord.brand_id).eq("active", true).maybeSingle();
+  if (!brand) return Response.json({ ok: false, error: "Brand is inactive" }, { status: 403, headers: corsHeaders });
+  supabase = serviceClient(brand.id);
+  const keyRecordId = keyRecord.id;
+  const keyBrandId = brand.id;
 
   async function markAttempt(result: "inserted" | "duplicate" | "failed", error = "") {
     const completedAt = new Date().toISOString();
@@ -46,7 +52,7 @@ Deno.serve(async (request) => {
       last_result_at: completedAt,
       last_result: result,
       last_error: error || null,
-    }).eq("id", keyRecord.id);
+    }).eq("id", keyRecordId).eq("brand_id", keyBrandId);
   }
 
   const body = await request.json().catch(() => null);

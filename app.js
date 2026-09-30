@@ -202,6 +202,14 @@ let lifecycleHideTimer = null;
 let lifecycleSyncPromise = null;
 let pendingLeadImportRows = [];
 let integrationStatus = [];
+let activeBrandId = "";
+let activeBrand = null;
+let masterBrands = [];
+let masterAdmins = [];
+let brandContextVersion = 0;
+let pendingBrandRequestCount = 0;
+let pendingBrandConfirmation = null;
+const signupBrandSlug = new URLSearchParams(window.location.search).get("brand") || "safrich";
 const integrationRawKeys = new Map();
 const integrationSecretTimers = new Map();
 
@@ -672,6 +680,13 @@ async function initRemoteDatabase() {
     ]);
     remoteDatabaseClient = createClient(config.supabaseUrl, config.supabasePublishableKey, {
       auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+      global: { fetch: async (url, options = {}) => {
+        const headers = new Headers(options.headers);
+        if (activeBrandId) headers.set("x-leadlaju-brand", activeBrandId);
+        pendingBrandRequestCount++;
+        try { return await fetch(url, { ...options, headers }); }
+        finally { pendingBrandRequestCount--; }
+      } },
     });
     return remoteDatabaseClient;
   } catch (error) {
@@ -688,6 +703,7 @@ function mapProfile(row) {
     phone: row.phone || "",
     email: row.email,
     role: row.role || "agent",
+    brandId: row.brand_id || null,
     approvalStatus: row.approval_status || (row.active ? "approved" : "pending"),
     active: row.active !== false && row.approval_status !== "pending" && row.approval_status !== "rejected",
     leadsHandled: row.leads_handled || 0,
@@ -704,6 +720,7 @@ function mapLead(row) {
   return {
     id: row.id,
     dedupeKey: row.dedupe_key || row.id,
+    brandId: row.brand_id || null,
     name: row.name,
     phone: row.phone || "",
     email: row.email || "",
@@ -740,6 +757,7 @@ function mapActivity(row) {
 
 async function loadRemoteState(userId) {
   if (!remoteDatabaseClient || !userId) return false;
+  const requestBrandVersion = brandContextVersion;
   const wasRemoteDatabaseMode = remoteDatabaseMode;
   const remoteLoadGeneration = authoritativeStateGeneration;
   const locallyCommittedLeads = state.leads.slice();
@@ -749,6 +767,30 @@ async function loadRemoteState(userId) {
   const previousLeadKeys = new Set(state.leads.map(leadNotificationKey));
   const shouldDetectNewLeads = false;
   try {
+    if (!activeBrandId || state.currentUserId !== userId) {
+      activeBrandId = "";
+      const { data: profile, error: profileError } = await remoteDatabaseClient.from("profiles").select("id,role,brand_id").eq("id", userId).single();
+      if (profileError) throw profileError;
+      if (profile.role === "master") {
+        const result = await remoteDatabaseClient.rpc("master_manage_brand", { p_action: "list" });
+        if (result.error) throw result.error;
+        masterBrands = result.data?.brands || [];
+        const remembered = sessionStorage.getItem(`leadlaju-master-brand:${userId}`);
+        activeBrandId = masterBrands.find(b => b.id === remembered && b.active)?.id || masterBrands.find(b => b.active)?.id || "";
+        if (!activeBrandId) {
+          const own = await remoteDatabaseClient.from("profiles").select("*").eq("id", userId).single();
+          if (own.error) throw own.error;
+          state = { ...structuredClone(defaultState), currentUserId: userId, agents: [mapProfile(own.data)], leads: [], projects: [], appointments: [], activities: [], bulletins: [], followUpDue: [] };
+          activeBrand = null;
+          remoteDatabaseMode = true;
+          return true;
+        }
+      } else activeBrandId = profile.brand_id;
+    }
+    const brandResult = await remoteDatabaseClient.from("brands").select("id,name,slug,active").eq("id", activeBrandId).single();
+    if (brandResult.error || !brandResult.data?.active) throw new Error("Brand tidak aktif. Hubungi Master.");
+    if (requestBrandVersion !== brandContextVersion) return false;
+    activeBrand = brandResult.data;
     const { data: snapshot, error } = await Promise.race([
       remoteDatabaseClient.rpc("get_dashboard_state"),
       new Promise((_, reject) => window.setTimeout(
@@ -757,6 +799,7 @@ async function loadRemoteState(userId) {
       )),
     ]);
     if (error) throw error;
+    if (requestBrandVersion !== brandContextVersion) return false;
     const profiles = (snapshot?.profiles || []).map(mapProfile);
     const currentUser = profiles.find((agent) => agent.id === userId);
     if (!currentUser) throw new Error("Profil pengguna belum tersedia.");
@@ -809,6 +852,7 @@ async function loadRemoteState(userId) {
     return true;
   } catch (error) {
     console.error("Remote load failed", error);
+    if (requestBrandVersion !== brandContextVersion) return false;
     remoteDatabaseMode = wasRemoteDatabaseMode;
     return false;
   }
@@ -820,11 +864,13 @@ async function subscribeToRemoteDatabase() {
   remoteRealtimeChannels = [];
   await remoteDatabaseClient.realtime.setAuth();
   const topics = [`user:${state.currentUserId}`];
-  if (isAdmin()) topics.push("admin:operations");
+  if (isAdmin() && activeBrandId) topics.push(`brand:${activeBrandId}:operations`);
+  const subscriptionBrandVersion = brandContextVersion;
   topics.forEach((topic) => {
     const channel = remoteDatabaseClient.channel(topic, { config: { private: true } })
-      .on("broadcast", { event: "*" }, handleRemoteBroadcast)
+      .on("broadcast", { event: "*" }, message => { if (subscriptionBrandVersion === brandContextVersion) handleRemoteBroadcast(message); })
       .subscribe((status) => {
+        if (subscriptionBrandVersion !== brandContextVersion) return;
         if (status === "SUBSCRIBED") {
           queueRemoteReload();
           loadBulletinFeed().then(() => renderBulletins()).catch((error) => console.warn("Realtime bulletin catch-up failed", error));
@@ -837,6 +883,11 @@ async function subscribeToRemoteDatabase() {
 }
 
 function handleRemoteBroadcast(message) {
+  if (message?.event === "brand_suspended" && !isMaster()) {
+    logout();
+    showToast("Brand dinyahaktifkan", "Hubungi Master untuk akses semula.", "error");
+    return;
+  }
   if (message?.event === "bulletin_changed") {
     loadBulletinFeed().then(() => renderBulletins()).catch((error) => console.warn("Realtime bulletin refresh failed", error));
     return;
@@ -1023,6 +1074,11 @@ function startAuthenticatedApp(user, options = {}) {
   switchView(getRequestedStartView(), { historyMode: "replace" });
   renderAll();
   enforceAgentNotificationAccess();
+  if (new URLSearchParams(window.location.search).get("setup") === "1") {
+    openOwnDetails();
+    elements.ownPassword.required = true;
+    elements.ownPasswordConfirm.required = true;
+  }
   showLatestCachedNotificationLead();
   if (getSheetEndpoint()) {
     if (pendingNotificationLeadId) {
@@ -1166,6 +1222,13 @@ async function saveOwnDetails(event) {
     saveState();
     renderUser();
     closeModal(elements.ownDetailsModal);
+    if (password && new URLSearchParams(location.search).has("setup")) {
+      elements.ownPassword.required = false;
+      elements.ownPasswordConfirm.required = false;
+      const cleanUrl = new URL(location.href);
+      cleanUrl.searchParams.delete("setup");
+      history.replaceState(history.state, "", cleanUrl);
+    }
     showToast("Details dikemas kini", "Maklumat akaun anda berjaya disimpan.");
   } catch (error) {
     elements.ownDetailsError.textContent = nameSaved
@@ -1206,10 +1269,11 @@ async function syncSignupProjects() {
   try {
     if (remoteDatabaseClient) {
       const { data, error } = await remoteDatabaseClient.functions.invoke("admin-manage-agent", {
-        body: { action: "list_projects" },
+        body: { action: "list_projects", brand_slug: signupBrandSlug },
       });
       if (error || !data?.ok || !Array.isArray(data.projects)) throw error || new Error(data?.error || "Senarai projek tidak sah");
       state.projects = normalizeProjects(data.projects);
+      document.querySelector("#signup-brand-label").textContent = `Pendaftaran ejen · ${data.brand?.name || signupBrandSlug}`;
       saveState();
       renderSignupProjectOptions();
       return true;
@@ -1281,8 +1345,8 @@ async function handleLogin(event) {
       return;
     }
     setLoginError("");
-    activeView = "dashboard";
-    switchView("dashboard");
+    activeView = isMaster() ? "brands" : "dashboard";
+    switchView(activeView, { historyMode: "replace" });
     startAuthenticatedApp(signedInUser, { freshLogin: true });
     subscribeToRemoteDatabase();
     flushContactOutbox();
@@ -1355,6 +1419,7 @@ async function handleAgentSignup(event) {
       const { data, error } = await remoteDatabaseClient.functions.invoke("admin-manage-agent", {
         body: {
           action: "signup_request",
+          brand_slug: signupBrandSlug,
           name,
           phone,
           email,
@@ -1482,6 +1547,8 @@ function logout() {
   integrationSecretTimers.forEach((timer) => window.clearTimeout(timer));
   integrationSecretTimers.clear();
   showLogin();
+  brandContextVersion++;
+  activeBrandId = ""; activeBrand = null; masterBrands = []; masterAdmins = [];
   const cleanup = cleanUpPushAfterLogout();
   if (remoteDatabaseClient && wasRemote) cleanup.finally(() => remoteDatabaseClient.auth.signOut().catch(() => {}));
   else if (remoteDatabaseClient) remoteDatabaseClient.auth.signOut().catch(() => {});
@@ -1664,8 +1731,10 @@ function getCurrentUser() {
 }
 
 function isAdmin() {
-  return getCurrentUser()?.role === "admin";
+  return ["admin", "master"].includes(getCurrentUser()?.role);
 }
+
+function isMaster() { return getCurrentUser()?.role === "master"; }
 
 function getActiveAgents() {
   return state.agents.filter((agent) => agent.role === "agent" && agent.active);
@@ -2131,7 +2200,7 @@ function getNotificationStartUrl(viewName = "") {
 function getRequestedStartView() {
   const params = new URLSearchParams(window.location.search);
   const requestedView = params.get("view") || window.location.hash.replace(/^#/, "");
-  return ["dashboard", "leads", "appointments", "follow-up-due", "bulletins", "agents", "performance", "projects", "lead-monitor", "import-leads", "integrations"].includes(requestedView) ? requestedView : "dashboard";
+  return ["dashboard", "leads", "appointments", "follow-up-due", "bulletins", "agents", "performance", "projects", "lead-monitor", "import-leads", "integrations", "brands"].includes(requestedView) ? requestedView : isMaster() ? "brands" : "dashboard";
 }
 
 async function syncNotificationLead(leadId) {
@@ -2188,6 +2257,7 @@ function assignmentSnapshotDisposition(leadSnapshot) {
 }
 
 async function acceptAssignmentSnapshot(leadSnapshot, timing = {}) {
+  if (remoteDatabaseMode && leadSnapshot?.brand_id && leadSnapshot.brand_id !== activeBrandId) return { accepted: false, terminal: true };
   const disposition = assignmentSnapshotDisposition(leadSnapshot);
   if (!disposition.accepted) {
     if (disposition.reconcile) syncGoogleSheetFresh({ silent: true, notifyNewLeads: false });
@@ -2350,7 +2420,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20260930-upcoming-badge-v120")
+      .register("/sw.js?v=20261001-master-brands-v121")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -5579,7 +5649,7 @@ async function deleteAppointment(appointmentId) {
 
 function renderAgents() {
   elements.agentsGrid.innerHTML = state.agents
-    .filter((agent) => agent.approvalStatus !== "rejected")
+    .filter((agent) => agent.role !== "master" && agent.approvalStatus !== "rejected")
     .map(
       (agent) => {
         const isPendingAgent = agent.role === "agent" && agent.approvalStatus === "pending";
@@ -5709,6 +5779,12 @@ function renderUser() {
   elements.sidebarAvatar.textContent = initials(user.name);
   elements.sidebarUserName.textContent = user.name;
   elements.sidebarUserRole.textContent = user.role === "admin" ? "Administrator" : "Property Agent";
+  if (isMaster()) elements.sidebarUserRole.textContent = "Master";
+  document.querySelector("#active-brand-label").textContent = activeBrand?.name || (isMaster() ? "Tiada brand aktif" : "Safrich");
+  const brandSwitcher = document.querySelector("#master-brand-switcher");
+  brandSwitcher.hidden = !isMaster();
+  brandSwitcher.innerHTML = masterBrands.filter(b => b.active).map(b => `<option value="${escapeHtml(b.id)}" ${b.id === activeBrandId ? "selected" : ""}>${escapeHtml(b.name)}</option>`).join("");
+  document.querySelectorAll(".master-only").forEach(item => { item.hidden = !isMaster(); });
   elements.logoutButton.hidden = true;
   if (elements.ownPerformance) elements.ownPerformance.hidden = isAdmin();
   elements.viewTitle.innerHTML =
@@ -5939,15 +6015,18 @@ function renderIntegrationConnectors() {
 async function loadIntegrationStatus() {
   if (!isAdmin() || !remoteDatabaseMode || !remoteDatabaseClient || !elements.integrationConnectors) return;
   elements.refreshIntegrations.disabled = true;
+  const requestBrandVersion = brandContextVersion;
   try {
     const { data, error } = await remoteDatabaseClient.functions.invoke("admin-manage-integration", {
       body: { action: "list" },
     });
     if (error || !data?.ok) throw error || new Error(data?.error || "Status integration tidak tersedia.");
+    if (requestBrandVersion !== brandContextVersion) return;
     integrationStatus = Array.isArray(data.integrations) ? data.integrations : [];
     renderIntegrationConnectors();
     renderIntegrationProjects();
   } catch (error) {
+    if (requestBrandVersion !== brandContextVersion) return;
     elements.integrationConnectors.innerHTML = `<p class="empty-state">${escapeHtml(error?.message || "Status integration gagal dimuatkan.")}</p>`;
   } finally {
     elements.refreshIntegrations.disabled = false;
@@ -6026,8 +6105,10 @@ function validBulletinUrl(value) {
 
 async function loadBulletinFeed() {
   if (!remoteDatabaseMode || !remoteDatabaseClient || !state.currentUserId) return false;
+  const requestBrandVersion = brandContextVersion;
   const { data, error } = await remoteDatabaseClient.rpc("get_bulletin_feed");
   if (error) throw error;
+  if (requestBrandVersion !== brandContextVersion) return false;
   state.bulletins = (data?.bulletins || []).map(normalizeBulletin);
   state.bulletinUnreadCount = Number(data?.unread_count) || 0;
   return true;
@@ -6139,8 +6220,10 @@ function normalizeFollowUpDue(row) {
 
 async function loadFollowUpDueFeed() {
   if (!remoteDatabaseClient || !remoteDatabaseMode || !state.currentUserId) return false;
+  const requestBrandVersion = brandContextVersion;
   const { data, error } = await remoteDatabaseClient.rpc("get_follow_up_due");
   if (error) throw error;
+  if (requestBrandVersion !== brandContextVersion) return false;
   state.followUpDue = (data?.leads || []).map(normalizeFollowUpDue);
   state.followUpServerNow = data?.server_now ? new Date(data.server_now).getTime() : Date.now();
   state.followUpLoadedAt = Date.now();
@@ -6301,6 +6384,124 @@ async function loadOwnPerformance() {
   }
 }
 
+async function loadMasterManagement() {
+  if (!isMaster() || !remoteDatabaseClient) return;
+  const status = document.querySelector("#master-management-status");
+  try {
+    const [brands, admins] = await Promise.all([
+      remoteDatabaseClient.rpc("master_manage_brand", { p_action: "list" }),
+      remoteDatabaseClient.functions.invoke("master-manage-account", { body: { action: "list_admins" } }),
+    ]);
+    if (brands.error || admins.error || !admins.data?.ok) throw brands.error || admins.error || new Error(admins.data?.error);
+    if (!isMaster()) return;
+    masterBrands = brands.data?.brands || [];
+    masterAdmins = admins.data?.admins || [];
+    status.textContent = `${masterBrands.length} brand · ${masterAdmins.length} Admin`;
+    document.querySelector("#master-admin-brand").innerHTML = masterBrands.filter(b => b.active).map(b => `<option value="${escapeHtml(b.id)}">${escapeHtml(b.name)}</option>`).join("");
+    document.querySelector("#master-brand-list").innerHTML = masterBrands.map(b => `<article class="panel master-card">
+      <div class="master-card-heading"><h3>${escapeHtml(b.name)}</h3><span class="integration-status ${b.active ? "active" : "inactive"}">${b.active ? "Aktif" : "Tidak aktif"}</span></div>
+      <p>${escapeHtml(new URL(`/?brand=${encodeURIComponent(b.slug)}`,window.location.origin).href)}</p>
+      <div class="master-card-actions"><button class="primary-button" data-master-open="${b.id}" ${b.active ? "" : "disabled"}>Buka brand</button><button class="secondary-button" data-master-copy="${b.id}">Salin link daftar</button><button class="secondary-button" data-master-rename="${b.id}">Edit nama</button></div>
+      <details><summary>Kawalan brand</summary><div class="master-card-actions"><button class="secondary-button ${b.active ? "danger" : ""}" data-master-toggle="${b.id}">${b.active ? "Nyahaktif brand" : "Aktifkan semula"}</button></div></details></article>`).join("");
+    document.querySelector("#master-admin-list").innerHTML = masterAdmins.length ? masterAdmins.map(a => `<article class="panel master-card">
+      <div class="master-card-heading"><h3>${escapeHtml(a.name)}</h3><span class="integration-status ${a.active ? "active" : "inactive"}">${a.active ? "Aktif" : "Tidak aktif"}</span></div>
+      <p>${escapeHtml(masterBrands.find(b => b.id === a.brand_id)?.name || "")} · ${escapeHtml(a.email)}</p>
+      <details><summary>Edit Admin</summary><form class="master-admin-edit" data-master-admin="${a.id}"><label>Nama<input name="name" value="${escapeHtml(a.name)}" maxlength="120" required /></label><label>Telefon<input name="phone" value="${escapeHtml(a.phone || "")}" /></label><label class="master-active-label"><input type="checkbox" name="active" ${a.active ? "checked" : ""} />Akaun aktif</label><button class="primary-button" type="submit">Simpan</button></form><button class="secondary-button" data-master-reset="${a.id}" type="button">Hantar reset kata laluan</button></details></article>`).join("") : '<p class="empty-state">Belum ada Admin.</p>';
+    renderUser();
+  } catch (e) { status.textContent = e?.message || "Pengurusan Master belum dapat dimuatkan."; }
+}
+
+function clearBrandOperationalState() {
+  const current = getCurrentUser();
+  const integration = state.integration;
+  brandContextVersion++;
+  performanceRequestVersion++;
+  performanceReport = null;
+  performanceLoadedAt = ownPerformanceLoadedAt = 0;
+  integrationStatus = [];
+  integrationRawKeys.clear();
+  integrationSecretTimers.forEach(timer => clearTimeout(timer));
+  integrationSecretTimers.clear();
+  pendingLeadImportRows = [];
+  pendingLeadStatusUpdates.clear(); pendingLeadNoteUpdates.clear(); leadStatusWriteTimes.clear();
+  authoritativeLeadGenerations.clear(); locallyExpiredAssignments.clear(); expandedProjectStatusIds.clear();
+  selectedContactId = selectedAgentId = editingAgentId = selectedAppointmentLeadId = reschedulingAppointmentId = editingAppointmentId = null;
+  selectedPerformanceAgentId = "";
+  latestAdminReminder = null;
+  clearTimeout(remoteReloadTimer);
+  remoteRealtimeChannels.forEach(channel => remoteDatabaseClient.removeChannel(channel));
+  remoteRealtimeChannels = [];
+  document.querySelectorAll(".modal.open").forEach(closeModal);
+  state = { ...structuredClone(defaultState), integration, currentUserId: current?.id, agents: current ? [current] : [], leads: [], projects: [], appointments: [], activities: [], bulletins: [], followUpDue: [] };
+  // Remove old rows and dropdown choices before fetching the next brand.
+  for (const id of ["performance-rows", "performance-cards", "performance-weeks", "integration-connectors"]) document.getElementById(id)?.replaceChildren();
+  for (const id of ["lead-status-filter", "lead-agent-filter", "lead-period-filter", "follow-up-agent-filter", "follow-up-period-filter", "appointment-agent-filter", "appointment-period-filter", "performance-project", "performance-agent"]) {
+    const select=document.getElementById(id); if(select) select.value="";
+  }
+  renderAll();
+}
+
+async function changeMasterBrand(id) {
+  if (!isMaster() || id === activeBrandId) return;
+  if (globalLoadingCount || pendingBrandRequestCount || syncInProgress) { renderUser(); showToast("Tunggu sebentar", "Operasi semasa masih berjalan.", "error"); return; }
+  const brand = masterBrands.find(b => b.id === id && b.active);
+  if (!brand) return;
+  clearBrandOperationalState();
+  activeBrandId = brand.id; activeBrand = brand;
+  sessionStorage.setItem(`leadlaju-master-brand:${state.currentUserId}`, id);
+  setGlobalLoading(true, "Menukar brand...");
+  try {
+    if (!await loadRemoteState(state.currentUserId)) throw new Error("Data brand belum dapat dimuatkan.");
+    await subscribeToRemoteDatabase();
+    switchView("dashboard", { historyMode: "replace" });
+    renderAll();
+    await Promise.all([loadBulletinFeed(),loadFollowUpDueFeed()]); renderAll();
+  } catch (e) { switchView("brands", { historyMode: "replace" }); showToast("Brand belum dimuatkan", e.message, "error"); }
+  finally { setGlobalLoading(false); }
+}
+
+async function masterOperation(operation) {
+  if (!isMaster() || !remoteDatabaseClient) return;
+  setGlobalLoading(true,"Menyimpan perubahan...");
+  try { await operation(); await loadMasterManagement(); }
+  catch(e) { showToast("Perubahan tidak disimpan", e?.message || "Cuba lagi.", "error"); }
+  finally { setGlobalLoading(false); }
+}
+
+document.querySelector("#master-brand-switcher").addEventListener("change",event=>changeMasterBrand(event.target.value));
+document.querySelector("#master-brand-form").addEventListener("submit",event=>{
+  event.preventDefault(); const form=event.currentTarget; const fields=new FormData(form);
+  masterOperation(async()=>{const result=await remoteDatabaseClient.rpc("master_manage_brand",{p_action:"create",p_brand:{name:fields.get("name"),slug:fields.get("slug")}});if(result.error)throw result.error;form.reset();});
+});
+document.querySelector("#master-admin-form").addEventListener("submit",event=>{
+  event.preventDefault(); const form=event.currentTarget; const fields=Object.fromEntries(new FormData(form));
+  masterOperation(async()=>{const result=await remoteDatabaseClient.functions.invoke("master-manage-account",{body:{action:"create_admin",...fields}});if(result.error||!result.data?.ok)throw result.error||new Error(result.data?.error);form.reset();showToast("Jemputan dihantar","Admin boleh menetapkan kata laluan melalui emel.","success");});
+});
+document.querySelector("#master-admin-list").addEventListener("submit",event=>{
+  event.preventDefault(); const form=event.target.closest("[data-master-admin]"); if(!form)return;
+  masterOperation(async()=>{const result=await remoteDatabaseClient.functions.invoke("master-manage-account",{body:{action:"update_admin",userId:form.dataset.masterAdmin,...Object.fromEntries(new FormData(form)),active:form.elements.active.checked}});if(result.error||!result.data?.ok)throw result.error||new Error(result.data?.error);});
+});
+document.querySelector("#master-admin-list").addEventListener("click",event=>{
+  const button=event.target.closest("[data-master-reset]");if(!button)return;
+  masterOperation(async()=>{const result=await remoteDatabaseClient.functions.invoke("master-manage-account",{body:{action:"reset_admin_password",userId:button.dataset.masterReset}});if(result.error||!result.data?.ok)throw result.error||new Error(result.data?.error);showToast("Emel dihantar","Pautan reset dihantar kepada Admin.","success");});
+});
+document.querySelector("#master-brand-list").addEventListener("click",async event=>{
+  if(!isMaster())return;const button=event.target.closest("button");if(!button)return;
+  if(button.dataset.masterOpen){await changeMasterBrand(button.dataset.masterOpen);return;}
+  if(button.dataset.masterCopy){const brand=masterBrands.find(b=>b.id===button.dataset.masterCopy);await navigator.clipboard.writeText(new URL(`/?brand=${encodeURIComponent(brand.slug)}`,window.location.origin).href);showToast("Link disalin",brand.name,"success");return;}
+  if(button.dataset.masterRename){const brand=masterBrands.find(b=>b.id===button.dataset.masterRename);const name=window.prompt("Nama brand",brand.name);if(name?.trim())masterOperation(async()=>{const result=await remoteDatabaseClient.rpc("master_manage_brand",{p_action:"update",p_brand:{id:brand.id,name:name.trim()}});if(result.error)throw result.error;if(activeBrandId===brand.id)activeBrand={...activeBrand,name:name.trim()};});return;}
+  if(button.dataset.masterToggle){pendingBrandConfirmation={brand:masterBrands.find(b=>b.id===button.dataset.masterToggle),step:1};document.querySelector("#brand-confirm-message").textContent=pendingBrandConfirmation.brand.active?"Semua Admin dan Ejen brand ini hilang akses. Ingestion, agihan dan push baharu dihentikan. Data tidak dipadam.":"Akses brand dibuka semula. Ejen perlu mengaktifkan GET LEAD semula.";document.querySelector("#brand-confirm-next").textContent="Teruskan";document.querySelector("#brand-confirm-dialog").showModal();}
+});
+document.querySelector("#brand-confirm-cancel").addEventListener("click",()=>{pendingBrandConfirmation=null;document.querySelector("#brand-confirm-dialog").close();});
+document.querySelector("#brand-confirm-next").addEventListener("click",()=>{
+  if(!pendingBrandConfirmation)return; const {brand,step}=pendingBrandConfirmation;
+  if(step===1){pendingBrandConfirmation.step=2;document.querySelector("#brand-confirm-message").textContent=`Pengesahan terakhir: ${brand.active?"nyahaktifkan":"aktifkan semula"} ${brand.name}?`;document.querySelector("#brand-confirm-next").textContent="Sahkan perubahan";return;}
+  pendingBrandConfirmation=null;document.querySelector("#brand-confirm-dialog").close();
+  masterOperation(async()=>{const result=await remoteDatabaseClient.rpc("master_manage_brand",{p_action:"set_active",p_brand:{id:brand.id,active:!brand.active,confirmation:brand.id}});if(result.error)throw result.error;
+    if(brand.id===activeBrandId&&brand.active){clearBrandOperationalState();activeBrandId="";activeBrand=null;switchView("brands",{historyMode:"replace"});}
+  });
+});
+
 function populatePerformanceFilters() {
   if (!isAdmin()) return;
   const project = elements.performanceProject.value;
@@ -6438,6 +6639,7 @@ function renderAll() {
 }
 
 const viewTitles = {
+  brands: "Pengurusan Brand",
   leads: "Log Lead",
   appointments: "Appointment Tracker",
   "follow-up-due": "Follow Up Due",
@@ -6481,6 +6683,7 @@ function syncMobileNavigation() {
 function switchView(viewName, { historyMode = "push" } = {}) {
   const targetView = document.getElementById(`${viewName}-view`);
   if (!targetView) return;
+  if (viewName === "brands" && !isMaster()) return;
   if (["agents", "performance", "projects", "lead-monitor", "import-leads", "integrations"].includes(viewName) && !isAdmin()) return;
   const changed = activeView !== viewName;
   if (changed && document.body.classList.contains("authenticated") && historyMode !== "none") {
@@ -6516,6 +6719,7 @@ function switchView(viewName, { historyMode = "push" } = {}) {
   }
   if (viewName === "dashboard" && !isAdmin() && Date.now() - ownPerformanceLoadedAt > 300000) loadOwnPerformance();
   if (viewName === "integrations") loadIntegrationStatus();
+  if (viewName === "brands") loadMasterManagement();
   if (viewName === "bulletins") {
     openRequestedBulletin();
     const latest = state.bulletins.find((bulletin) => bulletin.status === "published");
@@ -6617,7 +6821,7 @@ async function addAgent(event) {
         }
       } else {
         const signup = await remoteDatabaseClient.functions.invoke("admin-manage-agent", {
-          body: { action: "signup_request", name, phone, email: email.toLowerCase(), password, eligible_project_ids: eligibleProjectIds },
+          body: { action: "signup_request", brand_slug: activeBrand?.slug || "safrich", name, phone, email: email.toLowerCase(), password, eligible_project_ids: eligibleProjectIds },
         });
         if (signup.error || !signup.data?.ok) throw signup.error || new Error(signup.data?.error || "Ejen gagal didaftarkan.");
       }

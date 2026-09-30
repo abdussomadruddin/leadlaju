@@ -1,8 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.116.0";
+import { actorBrand, serviceClient } from "../_shared/brand-access.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
+  "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info, x-leadlaju-brand",
 };
 const providers = new Set(["meta_ads", "tiktok_ads"]);
 
@@ -37,7 +38,7 @@ Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
   if (request.method !== "POST") return response({ ok: false, error: "Method not allowed" }, 405);
 
-  const admin = createClient(
+  let admin = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     { auth: { persistSession: false, autoRefreshToken: false } },
@@ -45,9 +46,9 @@ Deno.serve(async (request) => {
   const token = clean(request.headers.get("Authorization")).replace(/^Bearer\s+/i, "");
   const { data: authData, error: authError } = await admin.auth.getUser(token);
   if (authError || !authData.user) return response({ ok: false, error: "Authentication required" }, 401);
-  const { data: actor } = await admin.from("profiles").select("role,active,approval_status")
+  const { data: actor } = await admin.from("profiles").select("role,brand_id,active,approval_status")
     .eq("id", authData.user.id).maybeSingle();
-  if (!actor || actor.role !== "admin" || !actor.active || actor.approval_status !== "approved") {
+  if (!actor || !["admin", "master"].includes(actor.role) || !actor.active || actor.approval_status !== "approved") {
     return response({ ok: false, error: "Admin required" }, 403);
   }
 
@@ -56,10 +57,17 @@ Deno.serve(async (request) => {
   const provider = clean(body.provider).toLowerCase();
 
   try {
+    const brand = await actorBrand(request, actor);
+    admin = serviceClient(brand.id);
+    const auditMaster = async () => {
+      if (actor.role !== "master") return;
+      const { error } = await admin.from("master_audit_log").insert({ actor_id: authData.user.id, brand_id: brand.id, action: `integration_${action}`, details: { provider } });
+      if (error) throw error;
+    };
     if (action === "list") {
       const { data: keys, error: keyError } = await admin.from("ingestion_api_keys")
         .select("id,name,provider,active,last_used_at,last_result,last_error,last_result_at,created_at,revoked_at")
-        .in("provider", [...providers]).order("created_at", { ascending: false });
+        .eq("brand_id", brand.id).in("provider", [...providers]).order("created_at", { ascending: false });
       if (keyError) throw keyError;
       const activeKeys = new Map<string, Record<string, unknown>>();
       for (const key of keys || []) {
@@ -87,6 +95,7 @@ Deno.serve(async (request) => {
         p_actor: authData.user.id,
       });
       if (error) throw error;
+      await auditMaster();
       return response({ ok: true, integration: data, apiKey: rawKey });
     }
 
@@ -96,6 +105,7 @@ Deno.serve(async (request) => {
         p_actor: authData.user.id,
       });
       if (error) throw error;
+      await auditMaster();
       return response({ ok: true, result: data });
     }
 

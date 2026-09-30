@@ -31,7 +31,8 @@ test('provider keys are hashed, provider-scoped, atomically rotated and revocabl
 
 test('integration administration requires an approved active admin and returns a raw key once', () => {
   assert.match(admin, /admin\.auth\.getUser\(token\)/);
-  assert.match(admin, /actor\.role !== "admin" \|\| !actor\.active \|\| actor\.approval_status !== "approved"/);
+  assert.match(admin, /!\["admin", "master"\]\.includes\(actor\.role\) \|\| !actor\.active \|\| actor\.approval_status !== "approved"/);
+  assert.match(admin, /actorBrand\(request, actor\)/);
   assert.match(admin, /createRawKey\(provider\)/);
   assert.match(admin, /await sha256\(rawKey\)/);
   assert.match(admin, /apiKey: rawKey/);

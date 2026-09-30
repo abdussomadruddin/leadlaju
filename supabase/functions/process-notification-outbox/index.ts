@@ -46,6 +46,17 @@ Deno.serve(async (request) => {
   let failed = 0;
   for (const [outboxId, rows] of groups) {
     const first = rows[0];
+    const brandId = String(first.payload?.brandId || "");
+    const canDeliver = async () => {
+      if (!brandId) return false;
+      const { data: brand } = await admin.from("brands").select("id").eq("id", brandId).eq("active", true).maybeSingle();
+      const { data: recipient } = await admin.from("profiles").select("id").eq("id", first.user_id).eq("brand_id", brandId).eq("active", true).eq("approval_status", "approved").maybeSingle();
+      return Boolean(brand && recipient);
+    };
+    if (!await canDeliver()) {
+      await admin.rpc("finish_notification_outbox", { p_outbox_id: outboxId, p_success: true, p_error: null });
+      continue;
+    }
     if (first.notification_type !== "new_lead") {
       if (first.notification_type === "follow_up_due") {
         const { data: countData, error: followUpError } = await admin
@@ -85,6 +96,7 @@ Deno.serve(async (request) => {
       const deliveryErrors: string[] = [];
       for (const row of rows) {
         if (!row.endpoint || !row.p256dh || !row.auth_secret) continue;
+        if (!await canDeliver()) break;
         try {
           await webpush.sendNotification({ endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth_secret } }, notification, { TTL: first.notification_type === "bulletin" ? 86400 : 300, urgency: first.notification_type === "bulletin" ? "normal" : "high" });
           delivered += 1;
@@ -106,7 +118,8 @@ Deno.serve(async (request) => {
     const leadId = String(first.payload?.lead_id || "");
     const revision = Number(first.payload?.assignment_revision) || 0;
     const { data: lead, error: leadError } = await admin.from("leads")
-      .select("id,name,phone,email,city,source,notes,status,queue_state,assigned_agent_id,received_at,expires_at,assignment_revision,status_revision,created_at,projects(name)")
+      .select("id,brand_id,name,phone,email,city,source,notes,status,queue_state,assigned_agent_id,received_at,expires_at,assignment_revision,status_revision,created_at,projects(name)")
+      .eq("brand_id", brandId)
       .eq("id", leadId)
       .eq("assigned_agent_id", first.user_id)
       .eq("assignment_revision", revision)
@@ -144,6 +157,7 @@ Deno.serve(async (request) => {
     const deliveryErrors: string[] = [];
     for (const row of rows) {
       if (!row.endpoint || !row.p256dh || !row.auth_secret) continue;
+      if (!await canDeliver()) break;
       try {
         await webpush.sendNotification({
           endpoint: row.endpoint,
