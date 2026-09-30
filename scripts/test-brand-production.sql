@@ -43,6 +43,7 @@ select set_config('request.jwt.claims','{"sub":"91000000-0000-4000-8000-00000000
 set local role authenticated;
 do $$ begin
  if (select count(*) from public.leads)<>0 then raise exception 'Agent read unowned leads'; end if;
+ if jsonb_array_length(public.get_dashboard_state()->'profiles')<>1 then raise exception 'Agent dashboard leaked other profiles'; end if;
  begin perform public.admin_upsert_project('{"name":"Forbidden"}'); raise exception 'Agent accessed admin RPC'; exception when others then
    if sqlerrm='Agent accessed admin RPC' then raise; end if;
  end;

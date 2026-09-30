@@ -102,7 +102,11 @@ try {
  const revision=(await client.query('select assignment_revision from public.leads where id=$1',[la])).rows[0].assignment_revision;
  await rejects(()=>asUser(agentB,sb,()=>client.query('select public.contact_assignment(gen_random_uuid(),$1,$2)',[la,revision])),'CALL NOW cannot claim another brand');
  await commitUser(agentA,sa,'select public.contact_assignment(gen_random_uuid(),$1,$2)',[la,revision]);
- await asUser(agentA,sa,async()=>{check((await client.query('select id from public.leads')).rows.length===1,'Agent sees own assigned lead');});
+ await asUser(agentA,sa,async()=>{
+   check((await client.query('select id from public.leads')).rows.length===1,'Agent sees own assigned lead');
+   const profiles=(await client.query('select public.get_dashboard_state() x')).rows[0].x.profiles;
+   check(profiles.length===1&&profiles[0].id===agentA,'Agent dashboard returns no other profile or performance counters');
+ });
  await rejects(()=>asUser(agentA,sa,()=>client.query(`select public.get_agent_performance_report(current_date-7,current_date,null,$1)`,[agentB])),'Cross-agent performance denied');
  await rejects(()=>asUser(adminA,sa,()=>client.query(`select public.get_agent_performance_report(current_date-7,current_date,null,$1)`,[agentB])),'Cross-brand admin agent report filter denied');
  await rejects(()=>asUser(master,sb,()=>client.query(`select public.get_agent_performance_report(current_date-7,current_date,$1)`,[pa])),'Cross-brand Master project report filter denied');
