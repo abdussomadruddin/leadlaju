@@ -2329,7 +2329,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20260930-floating-nav-v114")
+      .register("/sw.js?v=20260930-liquid-tabs-v115")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -8122,40 +8122,46 @@ function initializeFloatingNavigation() {
   let direction = 0;
   let distance = 0;
   const phone = () => window.matchMedia("(max-width: 850px)").matches;
-  nav.addEventListener("pointerdown", (event) => {
-    if (!phone() || event.button !== 0) return;
+  const preview = (x, y) => {
     const rect = nav.getBoundingClientRect();
-    drag = { id: event.pointerId, x: event.clientX, y: event.clientY, left: rect.left, top: rect.top, moved: false };
+    const tabs = [...nav.querySelectorAll(".mobile-tab")];
+    const tab = y >= rect.top - 28 && y <= rect.bottom + 28 && x >= rect.left && x <= rect.right
+      ? tabs.find((item) => { const box = item.getBoundingClientRect(); return x >= box.left && x <= box.right; }) : null;
+    tabs.forEach((item) => item.classList.toggle("is-gesture-target", item === tab));
+    if (tab) {
+      const box = tab.getBoundingClientRect();
+      nav.style.setProperty("--glass-x", `${box.left - rect.left}px`);
+      nav.style.setProperty("--glass-width", `${box.width}px`);
+    }
+    nav.classList.toggle("has-gesture-target", Boolean(tab));
+    return tab;
+  };
+  nav.addEventListener("pointerdown", (event) => {
+    if (!phone() || event.button !== 0 || !event.target.closest(".mobile-tab")) return;
+    drag = { id: event.pointerId, target: preview(event.clientX, event.clientY) };
+    nav.setPointerCapture(event.pointerId);
+    nav.classList.add("is-selecting");
     suppressClick = false;
   });
   nav.addEventListener("pointermove", (event) => {
     if (!drag || drag.id !== event.pointerId) return;
-    const dx = event.clientX - drag.x;
-    const dy = event.clientY - drag.y;
-    if (!drag.moved && Math.hypot(dx, dy) < 8) return;
-    if (!drag.moved) {
-      drag.moved = true;
-      nav.setPointerCapture(event.pointerId);
-      nav.classList.add("is-dragging");
-    }
-    const rect = nav.getBoundingClientRect();
-    const left = Math.max(10, Math.min(window.innerWidth - rect.width - 10, drag.left + dx));
-    const top = Math.max(80, Math.min(window.innerHeight - rect.height - 36, drag.top + dy));
-    nav.style.left = `${left}px`;
-    nav.style.top = `${top}px`;
-    nav.style.bottom = "auto";
-    nav.style.transform = "none";
+    drag.target = preview(event.clientX, event.clientY);
   });
-  const finishDrag = () => {
-    suppressClick = Boolean(drag?.moved);
+  const finishDrag = (event) => {
+    if (!drag || drag.id !== event.pointerId) return;
+    const target = event.type === "pointerup" ? preview(event.clientX, event.clientY) : null;
+    suppressClick = true;
     drag = null;
-    nav.classList.remove("is-dragging");
-    window.setTimeout(() => { suppressClick = false; }, 0);
+    nav.classList.remove("is-selecting", "has-gesture-target");
+    nav.querySelectorAll(".is-gesture-target").forEach((item) => item.classList.remove("is-gesture-target"));
+    if (target?.dataset.view) switchView(target.dataset.view);
+    else if (target === elements.mobileMoreTab) setMobileSidebarOpen(!elements.sidebar.classList.contains("open"));
+    window.setTimeout(() => { suppressClick = false; }, 400);
   };
   nav.addEventListener("pointerup", finishDrag);
   nav.addEventListener("pointercancel", finishDrag);
   nav.addEventListener("click", (event) => {
-    if (!suppressClick) return;
+    if (!suppressClick || event.detail === 0) return;
     event.preventDefault();
     event.stopImmediatePropagation();
   }, true);
