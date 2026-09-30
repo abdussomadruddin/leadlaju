@@ -36,5 +36,5 @@ test('Supabase deployment disables the old arbitrary-recipient push relay',()=>{
  const relay=fs.readFileSync('api/push.js','utf8');
  assert.match(relay,/process\.env\.LEADLAJU_BACKEND === "supabase"/);
  assert.match(relay,/response\.status\(410\)/);
- assert.ok(relay.indexOf('Legacy push relay disabled')<relay.indexOf('String(payload.secret')));
+ assert.ok(relay.indexOf('Legacy push relay disabled')<relay.indexOf('String(payload.secret'));
 });
