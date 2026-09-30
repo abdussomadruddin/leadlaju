@@ -12,10 +12,12 @@ test('agent access requires a phone, installed web app, permission and push subs
   assert.match(app, /agentPushAccessReady = await syncPushSubscription\(force\)/);
 });
 
-test('agent gate cannot be dismissed to reveal the app', () => {
-  assert.match(app, /function closeNotificationReminder\(\)[\s\S]*getCurrentUser\(\)\?\.role === "agent"[\s\S]*requestLogout\(\)/);
+test('agent gate has no logout control and cannot be dismissed to reveal the app', () => {
   assert.match(css, /body\.agent-access-locked \.app-shell[\s\S]*pointer-events: none/);
-  assert.match(html, /id="close-notification-reminder"[^>]*>Log keluar</);
+  const gate = html.slice(html.indexOf('id="notification-required-modal"'), html.indexOf('id="potential-reminder-modal"'));
+  assert.doesNotMatch(gate, /Log keluar|close-notification-reminder/);
+  assert.doesNotMatch(app, /function closeNotificationReminder\(/);
+  assert.match(gate, /id="enable-required-notifications"/);
 });
 
 test('admin remains exempt from the mandatory agent app gate', () => {
@@ -24,8 +26,8 @@ test('admin remains exempt from the mandatory agent app gate', () => {
 });
 
 test('new cache version distributes the mandatory access gate', () => {
-  assert.match(html, /20260930-smooth-refresh-v112/);
-  assert.match(sw, /leadlaju-pwa-v20260930-smooth-refresh-v112/);
+  assert.match(html, /20260930-notification-gate-v113/);
+  assert.match(sw, /leadlaju-pwa-v20260930-notification-gate-v113/);
 });
 
 test('manual refresh syncs in place without a page reload or icon flash', () => {

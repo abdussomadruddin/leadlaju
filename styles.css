@@ -4373,20 +4373,13 @@ td small {
   gap: 10px;
 }
 
-.notification-home-screen-button,
-.notification-close-button {
+.notification-home-screen-button {
   width: 100%;
   margin-top: 10px;
 }
 
 .notification-home-screen-button {
   min-height: 48px;
-}
-
-.notification-close-button {
-  min-height: 36px;
-  color: var(--ink-500);
-  font-size: 11px;
 }
 
 .notification-enable-button svg {

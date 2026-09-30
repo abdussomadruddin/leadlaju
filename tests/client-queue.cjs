@@ -653,11 +653,11 @@ test('every device blocks agent access until its own notification permission is 
   assert.match(html, /Buka LeadLaju melalui ikon aplikasi/);
   assert.match(html, /id="enable-required-notifications"/);
   assert.match(html, /id="add-to-home-screen"/);
-  assert.match(html, /id="close-notification-reminder"/);
+  assert.doesNotMatch(html, /id="close-notification-reminder"/);
   assert.match(source, /enableRequiredNotifications\.addEventListener\("click", requestNotifications\)/);
   assert.match(source, /function addToHomeScreen\(\)/);
   assert.match(source, /beforeinstallprompt/);
-  assert.match(source, /function closeNotificationReminder\(\)/);
+  assert.doesNotMatch(source, /function closeNotificationReminder\(\)/);
 });
 
 test('dashboard and Google Sheet use one official lead status list', () => {

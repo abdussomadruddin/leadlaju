@@ -288,7 +288,6 @@ const elements = {
   lifecycleSyncOverlay: document.querySelector("#lifecycle-sync-overlay"),
   enableRequiredNotifications: document.querySelector("#enable-required-notifications"),
   addToHomeScreen: document.querySelector("#add-to-home-screen"),
-  closeNotificationReminder: document.querySelector("#close-notification-reminder"),
   homeScreenHelp: document.querySelector("#home-screen-help"),
   homeScreenHelpTitle: document.querySelector("#home-screen-help-title"),
   homeScreenHelpMessage: document.querySelector("#home-screen-help-message"),
@@ -2330,7 +2329,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20260930-smooth-refresh-v112")
+      .register("/sw.js?v=20260930-notification-gate-v113")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -3819,15 +3818,6 @@ async function addToHomeScreen() {
     return;
   }
   showHomeScreenHelp();
-}
-
-function closeNotificationReminder() {
-  if (getCurrentUser()?.role === "agent") {
-    requestLogout();
-    return;
-  }
-  elements.notificationRequiredModal.classList.remove("open");
-  elements.notificationRequiredModal.setAttribute("aria-hidden", "true");
 }
 
 async function upsertAgentToSheet(agent) {
@@ -7660,7 +7650,6 @@ elements.getLeadButton?.addEventListener("click", () => setAgentLeadAvailability
 elements.stopLeadButton?.addEventListener("click", () => setAgentLeadAvailability(false));
 elements.enableRequiredNotifications.addEventListener("click", requestNotifications);
 elements.addToHomeScreen?.addEventListener("click", addToHomeScreen);
-elements.closeNotificationReminder?.addEventListener("click", closeNotificationReminder);
 elements.remindAgentsButton?.addEventListener("click", remindAllAgentsForFollowUp);
 elements.dismissAdminReminderButton?.addEventListener("click", dismissAdminReminder);
 elements.mobileMenu.addEventListener("click", () => {
