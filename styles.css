@@ -518,6 +518,17 @@ svg {
   text-align: center;
 }
 
+.dashboard-follow-up { margin-top: 16px; }
+.dashboard-follow-up-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); }
+.dashboard-follow-up-item > div:first-child { min-width: 0; }
+.dashboard-follow-up-item strong { display: block; font-size: 13px; overflow-wrap: anywhere; }
+.dashboard-follow-up-item small { display: block; margin-top: 4px; font-size: 11px; color: var(--ink-500); }
+.dashboard-follow-up-empty { color: var(--ink-500); font-size: 12px; }
+@media (max-width: 560px) {
+  .dashboard-follow-up-item { flex-wrap: wrap; gap: 8px; }
+  .dashboard-follow-up-item .follow-up-due-actions { width: 100%; justify-content: flex-start; }
+}
+
 .app-shell {
   min-height: 100vh;
   min-height: 100dvh;

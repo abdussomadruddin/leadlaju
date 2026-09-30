@@ -2350,7 +2350,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20260930-hide-zero-v118")
+      .register("/sw.js?v=20260930-dashboard-due-v119")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -6163,6 +6163,16 @@ function followUpOverdueLabel(item) {
 function renderFollowUpDue() {
   if (!elements.followUpDueList) return;
   const rows = Array.isArray(state.followUpDue) ? state.followUpDue : [];
+  const dashboardPanel = document.querySelector("#dashboard-follow-up");
+  if (dashboardPanel) {
+    dashboardPanel.hidden = isAdmin() || getCurrentUser()?.role !== "agent";
+    const ownRows = rows.filter((item) => item.assignedAgentId === state.currentUserId);
+    document.querySelector("#dashboard-follow-up-count").textContent = `${ownRows.length} lead`;
+    document.querySelector("#dashboard-follow-up-list").innerHTML = ownRows.length ? ownRows.map((item) => {
+      const lead = state.leads.find((row) => row.id === item.id);
+      return `<article class="dashboard-follow-up-item"><div><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.project)} · ${followUpOverdueLabel(item)}</small></div><div class="follow-up-due-actions">${renderLeadFollowUpButton(lead, "data-follow-up-due-action")}${renderLeadCopyButton(lead, "data-follow-up-due-copy")}</div></article>`;
+    }).join("") : '<p class="dashboard-follow-up-empty">Tiada lead Follow Up Due buat masa ini.</p>';
+  }
   const selectedAgent = elements.followUpAgentFilter?.value || "all";
   const selectedProject = elements.followUpProjectFilter?.value || "all";
 
@@ -7853,12 +7863,14 @@ elements.appointmentList?.addEventListener("click", (event) => {
   }
   if (remove) deleteAppointment(remove.dataset.appointmentDelete);
 });
-elements.followUpDueList?.addEventListener("click", (event) => {
+function handleFollowUpDueClick(event) {
   const copy = event.target.closest("[data-follow-up-due-copy]");
   if (copy) { copyLeadDetails(copy.dataset.followUpDueCopy); return; }
   const action = event.target.closest("[data-follow-up-due-action]");
   if (action) recordLeadFollowUp(action.dataset.followUpDueAction, action);
-});
+}
+elements.followUpDueList?.addEventListener("click", handleFollowUpDueClick);
+document.querySelector("#dashboard-follow-up-list")?.addEventListener("click", handleFollowUpDueClick);
 elements.leadsTableBody.addEventListener("change", (event) => {
   const statusField = event.target.closest("[data-lead-status]");
   if (statusField) updateLeadStatusFromLog(statusField.dataset.leadStatus, statusField.value, statusField);

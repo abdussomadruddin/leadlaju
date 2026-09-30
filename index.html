@@ -25,9 +25,9 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260930-hide-zero-v118" />
+    <link rel="stylesheet" href="styles.css?v=20260930-dashboard-due-v119" />
     <script src="vendor/exceljs.min.js?v=4.4.0" defer></script>
-    <script src="app.js?v=20260930-hide-zero-v118" defer></script>
+    <script src="app.js?v=20260930-dashboard-due-v119" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -480,6 +480,11 @@
             <p id="own-performance-status">Memuatkan prestasi...</p>
             <div class="performance-metrics" id="own-performance-metrics"></div>
             <button class="secondary-button compact" data-view-link="follow-up-due" type="button">Lihat Follow Up Due</button>
+          </section>
+
+          <section class="panel dashboard-follow-up" id="dashboard-follow-up" hidden>
+            <div class="panel-heading"><div><span class="section-kicker">Tindakan seterusnya</span><h3>Follow Up Due</h3></div><span class="queue-label" id="dashboard-follow-up-count"></span></div>
+            <div id="dashboard-follow-up-list"></div>
           </section>
 
           <div class="bottom-grid">
