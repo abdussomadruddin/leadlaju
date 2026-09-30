@@ -25,9 +25,9 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260930-lead-badge-v117" />
+    <link rel="stylesheet" href="styles.css?v=20260930-hide-zero-v118" />
     <script src="vendor/exceljs.min.js?v=4.4.0" defer></script>
-    <script src="app.js?v=20260930-lead-badge-v117" defer></script>
+    <script src="app.js?v=20260930-hide-zero-v118" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -227,7 +227,7 @@
               <path d="M9 8h6M9 12h6M9 16h4" />
             </svg>
             Log Lead
-            <span class="nav-count" id="nav-lead-count">0</span>
+            <span class="nav-count" id="nav-lead-count" hidden>0</span>
           </button>
           <button class="nav-item" data-view="appointments" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -235,7 +235,7 @@
               <path d="M7 3v4m10-4v4M3 10h18M8 14h3m2 0h3m-8 3h3" />
             </svg>
             Appointment
-            <span class="nav-count" id="nav-appointment-count">0</span>
+            <span class="nav-count" id="nav-appointment-count" hidden>0</span>
           </button>
           <button class="nav-item" data-view="follow-up-due" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true">

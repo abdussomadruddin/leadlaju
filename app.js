@@ -2350,7 +2350,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20260930-lead-badge-v117")
+      .register("/sw.js?v=20260930-hide-zero-v118")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -5375,6 +5375,7 @@ function renderAppointments() {
     })
     .sort((left, right) => left.scheduledAt - right.scheduledAt);
   elements.navAppointmentCount.textContent = visible.length;
+  elements.navAppointmentCount.hidden = visible.length === 0;
   const projects = [...new Set(visible.map((appointment) => appointment.project).filter(Boolean))].sort();
   elements.appointmentProjectFilter.innerHTML = [
     '<option value="all">Semua projek</option>',
