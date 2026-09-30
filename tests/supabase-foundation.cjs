@@ -247,7 +247,7 @@ test('deleting an experienced agent preserves history and safely requeues an act
   assert.match(safeAgentRetirement, /assignment_revision = assignment_revision \+ 1/);
   assert.match(safeAgentRetirement, /approval_status = 'rejected'/);
   assert.match(safeAgentRetirement, /perform leadlaju_private\.dispatch_available_leads\(now\(\)\)/);
-  assert.match(app, /filter\(\(agent\) => agent\.approvalStatus !== "rejected"\)/);
+  assert.match(app, /filter\(\(agent\) => agent\.role !== "master" && agent\.approvalStatus !== "rejected"\)/);
 });
 
 test('Supabase CALL NOW starts durable agent-scoped capture before preserving the tel user gesture', () => {
