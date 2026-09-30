@@ -7,6 +7,15 @@ const source = fs.readFileSync('app.js', 'utf8');
 const html = fs.readFileSync('index.html', 'utf8');
 const css = fs.readFileSync('styles.css', 'utf8');
 
+test('fresh login covers the shell swap before dashboard becomes visible', () => {
+  const start = source.indexOf('function startAuthenticatedApp(');
+  const end = source.indexOf('\nfunction showLogin()', start);
+  const handler = source.slice(start, end);
+  assert.ok(handler.indexOf('showLifecycleSyncOverlay("cinematic")') < handler.indexOf('document.body.classList.add("authenticated")'));
+  assert.match(handler, /requestAnimationFrame\(\(\) => elements\.lifecycleSyncOverlay\.classList\.remove\("login-transition-cover"\)\)/);
+  assert.match(css, /\.lifecycle-sync-overlay\.login-transition-cover\s*\{[^}]*opacity: 1;[^}]*visibility: visible;[^}]*transition: none;/);
+});
+
 function createClassList(initial = []) {
   const values = new Set(initial);
   return {

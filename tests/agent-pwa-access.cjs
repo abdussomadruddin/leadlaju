@@ -24,6 +24,16 @@ test('admin remains exempt from the mandatory agent app gate', () => {
 });
 
 test('new cache version distributes the mandatory access gate', () => {
-  assert.match(html, /20260930-agent-copy-v111/);
-  assert.match(sw, /leadlaju-pwa-v20260930-agent-copy-v111/);
+  assert.match(html, /20260930-smooth-refresh-v112/);
+  assert.match(sw, /leadlaju-pwa-v20260930-smooth-refresh-v112/);
+});
+
+test('manual refresh syncs in place without a page reload or icon flash', () => {
+  const handler = app.slice(app.indexOf('elements.refreshButton?.addEventListener("click"'), app.indexOf('if ("serviceWorker" in navigator)', app.indexOf('elements.refreshButton?.addEventListener("click"')));
+  assert.match(handler, /if \(button\.disabled\) return/);
+  assert.match(handler, /await syncGoogleSheetFresh\(\{ silent: true \}\)/);
+  assert.doesNotMatch(handler, /location\.reload/);
+  assert.match(handler, /button\.classList\.remove\("is-syncing"\)/);
+  assert.match(css, /\.refresh-button:disabled\s*\{[^}]*opacity: 1/);
+  assert.match(css, /prefers-reduced-motion: reduce[\s\S]*\.refresh-button\.is-syncing svg\s*\{ animation: none/);
 });

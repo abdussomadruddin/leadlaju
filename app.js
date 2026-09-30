@@ -985,8 +985,17 @@ function startAuthenticatedApp(user, options = {}) {
   state.currentUserId = user.id;
   if (user.role === "agent") agentPresenceSessionStartedAt = Date.now();
   saveState();
+  // Cover the login screen before swapping shells, so the first dashboard paint
+  // happens behind the intro instead of briefly exposing an unrendered view.
+  if (options.freshLogin) {
+    elements.lifecycleSyncOverlay.classList.add("login-transition-cover");
+    showLifecycleSyncOverlay("cinematic");
+  }
   document.body.classList.remove("auth-pending", "logged-out");
   document.body.classList.add("authenticated");
+  if (options.freshLogin) {
+    window.requestAnimationFrame(() => elements.lifecycleSyncOverlay.classList.remove("login-transition-cover"));
+  }
   elements.appShell.setAttribute("aria-hidden", "false");
   elements.loginError.textContent = "";
   elements.loginForm.reset();
@@ -1030,6 +1039,7 @@ function startAuthenticatedApp(user, options = {}) {
 }
 
 function showLogin() {
+  elements.lifecycleSyncOverlay.classList.remove("login-transition-cover");
   performanceReport = null;
   performanceRequestVersion += 1;
   window.clearInterval(tickTimer);
@@ -2320,7 +2330,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20260930-agent-copy-v111")
+      .register("/sw.js?v=20260930-smooth-refresh-v112")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -7885,10 +7895,25 @@ document.querySelector("#bulletins-view")?.addEventListener("click", (event) => 
 });
 elements.closePotentialReminder?.addEventListener("click", () => closeModal(elements.potentialReminderModal));
 elements.closeLeadAvailability?.addEventListener("click", () => closeModal(elements.leadAvailabilityModal));
-elements.refreshButton?.addEventListener("click", () => {
-  elements.refreshButton.disabled = true;
-  elements.refreshButton.classList.add("is-syncing");
-  window.location.reload();
+elements.refreshButton?.addEventListener("click", async () => {
+  const button = elements.refreshButton;
+  if (button.disabled) return;
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  button.classList.add("is-syncing");
+  const startedAt = Date.now();
+  try {
+    const refreshed = await syncGoogleSheetFresh({ silent: true });
+    if (!refreshed) showToast("Refresh gagal", "Data belum dapat disegerakkan. Cuba lagi sebentar.", "error");
+  } catch (error) {
+    console.error("Manual refresh failed", error);
+    showToast("Refresh gagal", "Data belum dapat disegerakkan. Cuba lagi sebentar.", "error");
+  } finally {
+    await new Promise((resolve) => window.setTimeout(resolve, Math.max(0, 650 - (Date.now() - startedAt))));
+    button.classList.remove("is-syncing");
+    button.removeAttribute("aria-busy");
+    button.disabled = false;
+  }
 });
 
 if ("serviceWorker" in navigator) {

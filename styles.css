@@ -1079,12 +1079,16 @@ svg {
 }
 
 .refresh-button.is-syncing svg {
-  animation: refresh-spin 750ms linear infinite;
+  animation: refresh-spin 900ms linear infinite;
 }
 
 .refresh-button:disabled {
   cursor: wait;
-  opacity: 0.6;
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .refresh-button.is-syncing svg { animation: none; }
 }
 
 @keyframes refresh-spin {
@@ -4049,6 +4053,12 @@ td small {
   opacity: 1;
   visibility: visible;
   transition-delay: 0s;
+}
+
+.lifecycle-sync-overlay.login-transition-cover {
+  opacity: 1;
+  visibility: visible;
+  transition: none;
 }
 
 .lifecycle-sync-content {
