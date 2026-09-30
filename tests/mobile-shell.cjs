@@ -55,7 +55,9 @@ test('phone shell respects safe area and reduced motion', () => {
 });
 
 test('agent phone dashboard keeps lead controls and personal performance prominent', () => {
-  assert.match(html, /class="agent-dashboard-intro">Lead milik anda sahaja/);
+  assert.doesNotMatch(html, /Lead milik anda sahaja\./);
+  assert.doesNotMatch(html, /class="performance-note"/);
+  assert.match(html, /<details class="performance-help">[\s\S]*CALL NOW dan Follow Up ialah tindakan direkod/);
   assert.match(html, /class="agent-lead-control-icon"/);
   assert.match(app, /class="mobile-dashboard-brand"/);
   assert.match(app, /classList\.toggle\("agent-dashboard", user\.role === "agent"\)/);
