@@ -67,6 +67,13 @@ module.exports = async function handler(request, response) {
     return;
   }
 
+  // Supabase's canonical outbox validates the recipient and active brand.
+  // The retired Sheet-era relay must not accept arbitrary subscriptions.
+  if (process.env.LEADLAJU_BACKEND === "supabase") {
+    response.status(410).json({ ok: false, error: "Legacy push relay disabled. Use the brand-scoped Supabase outbox." });
+    return;
+  }
+
   let payload = request.body || {};
   if (typeof payload === "string") {
     try {

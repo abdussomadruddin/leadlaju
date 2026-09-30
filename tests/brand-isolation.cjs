@@ -32,3 +32,9 @@ test('signup resolves its brand and never accepts a requested profile role',()=>
  assert.match(edge,/role: "agent"/);
  assert.match(edge,/\.eq\("brand_id", brand.id\)\.in\("id", projectIds\)/);
 });
+test('Supabase deployment disables the old arbitrary-recipient push relay',()=>{
+ const relay=fs.readFileSync('api/push.js','utf8');
+ assert.match(relay,/process\.env\.LEADLAJU_BACKEND === "supabase"/);
+ assert.match(relay,/response\.status\(410\)/);
+ assert.ok(relay.indexOf('Legacy push relay disabled')<relay.indexOf('String(payload.secret')));
+});
