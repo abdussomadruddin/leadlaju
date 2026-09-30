@@ -2350,7 +2350,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20260930-snapshot-fix-v116")
+      .register("/sw.js?v=20260930-lead-badge-v117")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -4841,6 +4841,17 @@ function displayLeadPhone(lead) {
   return canViewLeadPhone(lead) && lead.phone ? lead.phone : "•••• •••• ••••";
 }
 
+function countsTowardLeadBadge(lead) {
+  return ["contacted", "all_offer_presented", "need_follow_up", "potential"].includes(getLeadVisualStatus(lead));
+}
+
+function compareLeadLogOrder(left, right) {
+  const bottomStatuses = ["passed", "rejected", "cancelled"];
+  const leftBottom = Number(bottomStatuses.includes(getLeadVisualStatus(left)));
+  const rightBottom = Number(bottomStatuses.includes(getLeadVisualStatus(right)));
+  return leftBottom - rightBottom || (right.receivedAt || 0) - (left.receivedAt || 0);
+}
+
 function renderActiveLead() {
   const lead = getVisibleActiveLead();
   elements.activeLeadContainer.classList.toggle("has-active-lead", Boolean(lead));
@@ -4849,7 +4860,9 @@ function renderActiveLead() {
     : state.leads.filter((item) => item.assignedAgentId === state.currentUserId && !isVisuallyExpiredAssignment(item));
   const newLeadCount = visibleLeads.filter(isPendingLead).length;
   elements.queueLabel.textContent = `${newLeadCount} lead menunggu`;
-  elements.navLeadCount.textContent = visibleLeads.length;
+  const badgeCount = visibleLeads.filter(countsTowardLeadBadge).length;
+  elements.navLeadCount.textContent = badgeCount;
+  elements.navLeadCount.hidden = badgeCount === 0;
   elements.notificationCount.textContent = newLeadCount;
   elements.notificationCount.style.display = newLeadCount ? "grid" : "none";
   renderAgentLeadControls();
@@ -5251,7 +5264,7 @@ function renderLeadsTable() {
         (followUpFilter === "all" || (followUpFilter === "follow_up" && Number(lead.followUpCount) > 0) || (followUpFilter.startsWith("follow_up_") && Number(lead.followUpCount) === Number(followUpFilter.slice(10)))) &&
         matchesMonthPeriodFilter(lead.createdAt || lead.receivedAt, elements.leadPeriodFilter);
     })
-    .sort((a, b) => (b.receivedAt || 0) - (a.receivedAt || 0));
+    .sort(compareLeadLogOrder);
 
   if (elements.leadLogCount) {
     elements.leadLogCount.textContent = `${rows.length} lead`;

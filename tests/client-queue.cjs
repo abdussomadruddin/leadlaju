@@ -238,9 +238,10 @@ test('missed five-minute metric uses a warning icon instead of a success check',
   assert.match(styles, /\.stat-icon\.red \{\s+color: var\(--red-dark\);\s+background: var\(--red-soft\);/);
 });
 
-test('log lead navigation badge counts all visible records', () => {
+test('log lead navigation badge counts actionable visible records', () => {
   const source = fs.readFileSync('app.js', 'utf8');
-  assert.match(source, /navLeadCount\.textContent = visibleLeads\.length/);
+  assert.match(source, /visibleLeads\.filter\(countsTowardLeadBadge\)\.length/);
+  assert.match(source, /navLeadCount\.textContent = badgeCount/);
   assert.doesNotMatch(source, /navLeadCount\.textContent = isAdmin\(\) \? newLeadCount/);
 });
 
