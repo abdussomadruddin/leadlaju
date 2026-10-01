@@ -33,6 +33,7 @@ test('new Supabase projects let the server generate a UUID and retain its return
     saveState: () => {},
     renderAll: () => {},
     showToast: () => {},
+    systemWorkerText: text => text,
   };
   vm.runInNewContext(projectFunctions, context);
   await context.addProject({ preventDefault() {} });

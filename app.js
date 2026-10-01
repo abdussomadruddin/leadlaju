@@ -209,6 +209,7 @@ let signupBrand = null;
 const salesContactStates = new Map();
 function isTeamSales() { return activeBrand?.distribution_mode === "team_sales"; }
 function workerLabel() { return isTeamSales() ? "Team Sales" : "Ejen"; }
+function signupWorkerLabel() { return signupBrand?.distribution_mode === "team_sales" ? "Team Sales" : "ejen"; }
 function systemWorkerText(text, sales = isTeamSales()) {
   return sales ? String(text).replace(/\bProperty Agent\b|\bEjen\b|\bejen\b|\bAgent\b|\bagent\b/g, "Team Sales") : text;
 }
@@ -228,7 +229,7 @@ function updateWorkerLabels() {
   ['#lead-agent-filter','#follow-up-agent-filter','#monitor-agent-filter','#performance-agent','#bulletin-project'].forEach(selector => {
     const select = document.querySelector(selector);
     select?.querySelectorAll('option').forEach(option => {
-      if (!option.value || option.value === 'all') {
+      if (!option.value || option.value === 'all' || option.value === 'unassigned') {
         option.dataset.agentLabel ||= option.textContent;
         option.textContent = systemWorkerText(option.dataset.agentLabel);
       }
@@ -1349,6 +1350,8 @@ async function syncSignupProjects() {
       signupBrandReady = true;
       signupBrand = data.brand;
       updateWorkerLabels();
+      document.querySelector(".login-card > .section-kicker").textContent = `Pendaftaran ${signupWorkerLabel()}`;
+      document.querySelector("#login-title").textContent = `Daftar sebagai ${signupWorkerLabel()}`;
       document.querySelector("#signup-brand-label").textContent = `Pendaftaran ${signupBrand?.distribution_mode === "team_sales" ? "Team Sales" : "ejen"} · ${data.brand?.name || signupBrandSlug}`;
       renderSignupProjectOptions();
       if (!wasReady) setSignupError("");
@@ -1506,7 +1509,7 @@ async function handleAgentSignup(event) {
   submitButton.disabled = true;
   submitButton.classList.add("is-loading");
   submitButton.setAttribute("aria-busy", "true");
-  setGlobalLoading(true, "Menyimpan pendaftaran ejen...");
+  setGlobalLoading(true, `Menyimpan pendaftaran ${signupWorkerLabel()}...`);
   let signupAgent = null;
   try {
     let result;
@@ -2543,7 +2546,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261001-team-sales-v124")
+      .register("/sw.js?v=20261001-team-sales-v125")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -3303,7 +3306,7 @@ async function addManualLead(event) {
     }
     const result = await addLead(leadInput, { silent: true, updateExisting: true, notify: true, queueIfBlocked: true });
     if (!result) {
-      elements.manualLeadError.textContent = "Lead sudah disimpan, tetapi dashboard belum dapat sync. Semak ejen aktif.";
+      elements.manualLeadError.textContent = systemWorkerText("Lead sudah disimpan, tetapi dashboard belum dapat sync. Semak ejen aktif.");
       return;
     }
   }
@@ -4280,7 +4283,7 @@ async function sendSystemNotification(lead, options = {}) {
   markLeadNotificationSeen(lead);
   saveNotifiedLeadKeys();
   if (options.toast) {
-    showToast("Lead baru masuk", `${lead.name} menunggu tindakan dalam 5 minit.`);
+    showToast("Lead baru masuk", isTeamSales() ? `${lead.name} tersedia untuk Call atau WhatsApp.` : `${lead.name} menunggu tindakan dalam 5 minit.`);
   }
   await playNotificationSound();
 
@@ -4289,8 +4292,8 @@ async function sendSystemNotification(lead, options = {}) {
   const agent = getAgent(lead.assignedAgentId);
   const title = `Lead baru: ${lead.project || "Projek baru"}`;
   const notificationOptions = {
-    body: `${lead.name}\nNombor dibuka selepas CALL NOW. Diberikan kepada ${agent?.name || "ejen"}.`,
-    tag: `leadlaju-active-${lead.assignedAgentId}`,
+    body: isTeamSales() ? `${lead.name}\nLead baharu tersedia untuk Call atau WhatsApp.` : `${lead.name}\nNombor dibuka selepas CALL NOW. Diberikan kepada ${agent?.name || "ejen"}.`,
+    tag: isTeamSales() ? `leadlaju-sales-${lead.id}` : `leadlaju-active-${lead.assignedAgentId}`,
     renotify: true,
     requireInteraction: true,
     icon: NOTIFICATION_ICON,
@@ -5284,7 +5287,7 @@ function renderStats() {
     ? responseValues.reduce((total, value) => total + value, 0) / responseValues.length
     : null;
 
-  elements.statToday.textContent = resolvedAssignments.length;
+  elements.statToday.textContent = isTeamSales() ? assignments.length : resolvedAssignments.length;
   elements.statContacted.textContent = missed.length;
   elements.contactRate.textContent = resolvedAssignments.length
     ? `${Math.round((contacted.length / resolvedAssignments.length) * 100)}%`
@@ -5356,7 +5359,7 @@ function renderTeam() {
         </div>`,
     )
     .join("")
-    : '<div class="table-empty">Tiada ejen sedang aktif.</div>';
+    : `<div class="table-empty">${systemWorkerText("Tiada ejen sedang aktif.")}</div>`;
 
   elements.leadReadyCount.textContent = `${leadReadyAgents.length} dalam giliran`;
   elements.leadReadyList.innerHTML = leadReadyAgents.length
@@ -5541,7 +5544,7 @@ function renderLeadsTable() {
             : "";
           const actionButtons = [editButton, appointmentButton, deleteButton].filter(Boolean).join("");
           const assignedAgentLabel = lead.assignedAgentId
-            ? getAgent(lead.assignedAgentId)?.name || lead.assignedAgentName || "Tiada ejen"
+            ? getAgent(lead.assignedAgentId)?.name || lead.assignedAgentName || systemWorkerText("Tiada ejen")
             : "Belum diagih";
           const activeTime = lead.receivedAt
             ? `<small>Aktif ${formatDateTime(lead.receivedAt)}</small>`
@@ -5638,8 +5641,8 @@ function renderAppointments() {
     ? filtered.map((appointment) => {
       const lead = findLeadForAppointment(appointment);
       const owner = lead?.assignedAgentId
-        ? getAgent(lead.assignedAgentId)?.name || lead.assignedAgentName || appointment.assignedAgentName || "Tiada ejen"
-        : appointment.assignedAgentName || "Tiada ejen";
+        ? getAgent(lead.assignedAgentId)?.name || lead.assignedAgentName || appointment.assignedAgentName || systemWorkerText("Tiada ejen")
+        : appointment.assignedAgentName || systemWorkerText("Tiada ejen");
       const statusButtons = appointment.status === "scheduled"
         ? `
             <button class="contact-edit-button success" type="button" data-appointment-status="show_up" data-appointment-id="${appointment.id}">Show Up</button>
@@ -5926,14 +5929,14 @@ function renderProjects() {
           <details class="project-danger-menu">
             <summary>Pilihan lanjut</summary>
             <div class="project-danger-actions">
-              <small>Hanya projek tanpa lead, buletin atau ejen yang dipautkan boleh dipadam.</small>
+              <small>${systemWorkerText("Hanya projek tanpa lead, buletin atau ejen yang dipautkan boleh dipadam.")}</small>
               <button class="text-button danger-text" type="button" data-project-delete="${escapeHtml(project.id)}">Padam projek</button>
             </div>
           </details>
         </details>
       </article>`;
     }).join("")
-    : '<p class="empty-state">Belum ada projek. Tambah projek sebelum meluluskan ejen.</p>';
+    : `<p class="empty-state">${systemWorkerText("Belum ada projek. Tambah projek sebelum meluluskan ejen.")}</p>`;
 }
 
 function escapeHtml(value) {
@@ -5980,7 +5983,6 @@ function renderUser() {
 }
 
 function inspectLeadMovement(now = Date.now()) {
-  if (isTeamSales()) return [];
   const issues = [];
   const agentsById = new Map(state.agents.map((agent) => [String(agent.id), agent]));
   const activeByAgent = new Map();
@@ -5989,9 +5991,9 @@ function inspectLeadMovement(now = Date.now()) {
     lead,
     severity,
     code,
-    title,
-    detail,
-    expected,
+    title: systemWorkerText(title),
+    detail: systemWorkerText(detail),
+    expected: systemWorkerText(expected),
     agentId: String(lead.assignedAgentId || ""),
   });
 
@@ -6012,11 +6014,11 @@ function inspectLeadMovement(now = Date.now()) {
       const active = activeByAgent.get(lead.assignedAgentId) || [];
       active.push(lead);
       activeByAgent.set(lead.assignedAgentId, active);
-      if (!Number.isFinite(lead.receivedAt) || !Number.isFinite(lead.expiresAt)) {
+      if (!isTeamSales() && (!Number.isFinite(lead.receivedAt) || !Number.isFinite(lead.expiresAt))) {
         addIssue(lead, "critical", "missing-runtime", "Masa assignment tidak lengkap",
           "Lead New mempunyai ejen tetapi tiada masa diterima atau masa tamat yang sah.",
           "Server perlu membina semula runtime assignment 5 minit.");
-      } else if (lead.expiresAt <= now) {
+      } else if (!isTeamSales() && lead.expiresAt <= now) {
         addIssue(lead, "critical", "expired-active", "Assignment sudah tamat tetapi masih aktif",
           `Masa CALL NOW tamat ${relativeTime(lead.expiresAt)}, tetapi lead masih berada pada ejen.`,
           "Lead perlu ditanda missed, dikeluarkan daripada ejen ini dan masuk semula ke queue.");
@@ -6045,7 +6047,7 @@ function inspectLeadMovement(now = Date.now()) {
   });
 
   activeByAgent.forEach((leads, agentId) => {
-    if (leads.length < 2) return;
+    if (isTeamSales() || leads.length < 2) return;
     leads.forEach((lead) => addIssue(lead, "critical", "multiple-active", "Ejen memegang lebih satu lead aktif",
       `${agentsById.get(String(agentId))?.name || "Ejen"} sedang memegang ${leads.length} lead New serentak.`,
       "Kekalkan satu lead aktif sahaja dan pulangkan selebihnya ke queue."));
@@ -6389,7 +6391,7 @@ function normalizeFollowUpDue(row) {
     projectId: String(row.project_id || ""),
     project: String(row.project || "Tidak dinyatakan"),
     assignedAgentId: String(row.assigned_agent_id || ""),
-    assignedAgentName: String(row.assigned_agent_name || "Tiada ejen"),
+    assignedAgentName: String(row.assigned_agent_name || systemWorkerText("Tiada ejen")),
     assignmentRevision: Number(row.assignment_revision) || 0,
     statusRevision: Number(row.status_revision) || 0,
     contactedAt: row.contacted_at ? new Date(row.contacted_at).getTime() : null,
@@ -6718,7 +6720,7 @@ function renderPerformanceReport() {
     <td>${Number(row.total_potential) || 0}</td><td>${Number(row.total_cancelled_rejected) || 0}</td><td>${Number(row.total_client) || 0}</td>
     ${isTeamSales() ? "" : `<td>${performanceRateLabel(row)} <small>(${Number(row.within_five) || 0}/${Number(row.assignments) || 0})</small></td>`}
     <td>${Number(row.appointments) || 0}</td><td>${Number(row.show_ups) || 0}</td><td>${Number(row.due_now) || 0}</td>
-  </tr>`).join("") : '<tr><td colspan="11">Tiada ejen untuk penapis ini.</td></tr>';
+  </tr>`).join("") : `<tr><td colspan="11">${systemWorkerText("Tiada ejen untuk penapis ini.")}</td></tr>`;
   const cardMetric = (label, value) => `<div><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></div>`;
   const cardSummary = (name, meta) => `<summary><span class="performance-card-name">${escapeHtml(name)}</span><span class="performance-card-summary">${escapeHtml(meta)}</span><span class="performance-card-toggle"><span class="when-closed">Butiran</span><span class="when-open">Tutup</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></span></summary>`;
   elements.performanceCards.innerHTML = rows.length ? rows.map((row) => `<details class="performance-card">
@@ -6932,7 +6934,7 @@ function openAgentModal(agentId = null) {
   elements.agentPasswordLabel.textContent = agent ? "Kata laluan baru (optional)" : "Kata laluan sementara";
   elements.agentPassword.required = !agent;
   elements.agentPassword.placeholder = agent ? "Biarkan kosong jika tidak mahu tukar" : "Minimum 8 aksara";
-  elements.agentSubmitButton.textContent = agent ? "Simpan perubahan" : "Daftar ejen";
+  elements.agentSubmitButton.textContent = agent ? "Simpan perubahan" : systemWorkerText("Daftar ejen");
   const selectedProjectIds = new Set(normalizeProjectIds(agent?.eligibleProjectIds));
   const activeProjects = state.projects.filter((project) => project.active);
   elements.agentProjectCheckboxes.innerHTML = activeProjects.length
@@ -6970,7 +6972,7 @@ async function addAgent(event) {
   if (!name || !phone || !email) return;
   if (!editingAgent && password.length < 8) return;
   if (!eligibleProjectIds.length) {
-    showToast("Pilih projek", "Pilih sekurang-kurangnya satu projek untuk ejen ini.", "error");
+    showToast("Pilih projek", systemWorkerText("Pilih sekurang-kurangnya satu projek untuk ejen ini."), "error");
     return;
   }
   if (editingAgent && password && password.length < 8) {
@@ -6982,12 +6984,12 @@ async function addAgent(event) {
       (agent) => agent.id !== editingAgentId && agent.email.toLowerCase() === email.toLowerCase(),
     )
   ) {
-    showToast("Emel telah digunakan", "Gunakan alamat emel lain untuk ejen ini.", "error");
+    showToast("Emel telah digunakan", systemWorkerText("Gunakan alamat emel lain untuk ejen ini."), "error");
     return;
   }
 
   if (remoteDatabaseMode) {
-    setGlobalLoading(true, editingAgent ? "Mengemas kini ejen..." : "Mendaftarkan ejen...");
+    setGlobalLoading(true, systemWorkerText(editingAgent ? "Mengemas kini ejen..." : "Mendaftarkan ejen..."));
     try {
       if (editingAgent) {
         const { data, error } = await remoteDatabaseClient.functions.invoke("admin-manage-agent", {
@@ -7193,7 +7195,7 @@ async function addProject(event) {
   elements.projectForm.reset();
   saveState();
   renderAll();
-  showToast("Projek ditambah", `${name} kini boleh dipilih untuk ejen.`);
+  showToast("Projek ditambah", `${name} ${systemWorkerText("kini boleh dipilih untuk ejen.")}`);
 }
 
 async function toggleProject(projectId) {
@@ -7227,7 +7229,7 @@ async function deleteProject(projectId, button) {
       const reasons = {
         has_leads: "Projek ini masih mempunyai lead. Nyahaktifkan projek jika tidak mahu menerima lead baharu.",
         has_bulletins: "Projek ini masih digunakan oleh buletin. Alihkan atau arkibkan buletin dahulu.",
-        has_agents: "Projek ini masih dipautkan kepada ejen. Buang projek daripada ejen dahulu.",
+        has_agents: systemWorkerText("Projek ini masih dipautkan kepada ejen. Buang projek daripada ejen dahulu."),
         not_found: "Projek ini sudah tiada. Muat semula senarai projek.",
       };
       showToast("Projek tidak dipadam", reasons[data?.code] || "Cuba lagi selepas menyemak pautan projek.", "error");
@@ -7344,7 +7346,7 @@ async function toggleAgent(agentId) {
 async function removeAgent(agentId) {
   const agent = getAgent(agentId);
   if (!agent) return;
-  if (!confirmPermanentDelete("ejen", agent.name)) return;
+  if (!confirmPermanentDelete(systemWorkerText("ejen"), agent.name)) return;
   await deleteAgentWithLoading(agent);
 }
 
@@ -7680,7 +7682,7 @@ async function updateLeadStatusFromLog(leadId, nextStatus, field = null) {
   }
   if (getCurrentUser()?.role === "agent" && normalizedStatus === "new") {
     if (field) field.value = getLeadVisualStatus(lead);
-    showToast("CALL NOW diperlukan", "Ejen tidak boleh menukar status lead kembali kepada New.", "error");
+    showToast(isTeamSales() ? "Status New tidak dibenarkan" : "CALL NOW diperlukan", systemWorkerText("Ejen tidak boleh menukar status lead kembali kepada New."), "error");
     return false;
   }
   if (getLeadVisualStatus(lead) === normalizedStatus) return true;
@@ -8204,7 +8206,7 @@ elements.monitorRefreshButton?.addEventListener("click", async () => {
     await waitForCurrentSync();
     await syncGoogleSheet({ silent: true });
     renderLeadMonitor();
-    showToast("Pemeriksaan selesai", "Status queue, assignment dan ejen telah diperiksa.");
+    showToast("Pemeriksaan selesai", systemWorkerText("Status queue, assignment dan ejen telah diperiksa."));
   } finally {
     elements.monitorRefreshButton.disabled = false;
     setGlobalLoading(false);
@@ -8282,7 +8284,7 @@ elements.manualLeadPhone.addEventListener("input", () => {
 elements.addAgentButton.addEventListener("click", () => openAgentModal());
 document.querySelector("#copy-agent-registration-link").addEventListener("click", () => {
   if (!isAdmin() || !activeBrand?.slug || activeBrand.active === false) return;
-  copyIntegrationText(agentRegistrationUrl(activeBrand), `Link daftar agent · ${activeBrand.name}`);
+  copyIntegrationText(agentRegistrationUrl(activeBrand), `${systemWorkerText("Link daftar agent")} · ${activeBrand.name}`);
 });
 elements.getLeadAllAgentsButton?.addEventListener("click", () => setAdminAllAgentLeadAvailability(true));
 elements.stopLeadAllAgentsButton?.addEventListener("click", () => setAdminAllAgentLeadAvailability(false));

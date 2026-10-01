@@ -52,7 +52,9 @@ try {
    if(role==='agent')await page.evaluate(()=>{getAgentAppAccessState=()=> 'ready';ensureAgentPushAccess=async()=>true;agentPushAccessReady=true;renderAgentAccessGate('ready');renderAll();});
    assert.equal(await page.locator('.sales-lead-card').count(),3);checks++;
    assert.equal(await page.locator('#agent-lead-controls').isVisible(),false);checks++;
-   assert.equal(await page.locator('#dashboard-view').innerText().then(t=>/CALL NOW|GET LEAD|STOP LEAD|≤5 min/.test(t)),false);checks++;
+   assert.equal(await page.locator('#dashboard-view').innerText().then(t=>/CALL NOW|GET LEAD|STOP LEAD|≤5 min|5 minit|Sasaran 5m|Giliran agihan/.test(t)),false);checks++;
+   await page.evaluate(()=>{playNotificationSound=async()=>{};return sendSystemNotification(state.leads[0],{force:true,toast:true});});
+   assert.equal(await page.locator('#toast-message').innerText().then(t=>/CALL NOW|5 minit/.test(t)),false);checks++;
    assert.equal(await page.locator('#nav-lead-count').innerText(),'3');checks++;
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,`${name}: no overflow`);checks++;
    const call=page.locator('.sales-lead-card [data-sales-contact="call"]').first();

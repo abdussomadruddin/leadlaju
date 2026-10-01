@@ -26,7 +26,7 @@ try {
         if (body.brand_slug === 'unknown') return { data: { ok: false, error: 'Brand tidak ditemui atau tidak aktif.' } };
         if (body.action === 'signup_request') return { data: { ok: false, error: 'Mock rejection: duplicate email' } };
         await new Promise(resolve => setTimeout(resolve, 200));
-        return { data: { ok: true, brand: { name: body.brand_slug === 'safrich' ? 'Safrich' : 'Brand B', slug: body.brand_slug }, projects: [{ id: 'project-' + body.brand_slug, name: body.brand_slug === 'safrich' ? 'Safrich Project' : 'Brand B Project', active: true }] } };
+        return { data: { ok: true, brand: { name: body.brand_slug === 'safrich' ? 'Safrich' : 'Brand B', slug: body.brand_slug, distribution_mode: body.brand_slug === 'brand-b' ? 'team_sales' : 'agent' }, projects: [{ id: 'project-' + body.brand_slug, name: body.brand_slug === 'safrich' ? 'Safrich Project' : 'Brand B Project', active: true }] } };
       } } };
     });
     await page.goto(origin);
@@ -45,6 +45,8 @@ try {
       assert.equal(await page.locator('.login-card').evaluate(el => getComputedStyle(el).fontFamily.length > 0), true); checks++;
       await page.screenshot({ path: path.join(artifacts, `${name}-${slug}.png`), fullPage: true });
       if (slug === 'brand-b') {
+        assert.equal(await page.locator('#login-title').innerText(),'Daftar sebagai Team Sales'); checks++;
+        assert.equal(await page.locator('.login-card > .section-kicker').textContent(),'Pendaftaran Team Sales'); checks++;
         await page.locator('#signup-name').fill('Test Agent'); await page.locator('#signup-phone').fill('60120000000');
         await page.locator('#signup-email').fill('fixture@example.test'); await page.locator('#signup-password').fill('fixture-password');
         await page.locator('#signup-confirm-password').fill('fixture-password'); await page.locator('#signup-project-checkboxes input').check();

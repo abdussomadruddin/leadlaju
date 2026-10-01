@@ -270,7 +270,7 @@ test('agent signup stays loading until a complete persisted agent is confirmed',
   const html = fs.readFileSync('index.html', 'utf8');
   const start = source.indexOf('async function handleAgentSignup(');
   const body = source.slice(start, source.indexOf('\nfunction sendAgentLogoutState', start));
-  assert.match(body, /setGlobalLoading\(true, "Menyimpan pendaftaran ejen\.\.\."\)/);
+  assert.match(body, /setGlobalLoading\(true, `Menyimpan pendaftaran \$\{signupWorkerLabel\(\)\}\.\.\.`\)/);
   assert.match(body, /await submitAgentSignupToSheet\(signupAgent\)/);
   assert.match(body, /persistedAgent\?\.id[\s\S]*persistedAgent\?\.name[\s\S]*persistedAgent\?\.phone[\s\S]*persistedAgent\?\.email/);
   assert.ok(body.indexOf('setGlobalLoading(false)') < body.indexOf('signupSuccessModal.classList.add("open")'));
@@ -422,7 +422,7 @@ test('lead and agent deletion require two confirmations', () => {
   const helperEnd = source.indexOf('\nasync function ', helperStart + 1);
   const helper = source.slice(helperStart, helperEnd);
   assert.equal((helper.match(/window\.confirm\(/g) || []).length, 2);
-  assert.match(source, /if \(!confirmPermanentDelete\("ejen", agent\.name\)\) return/);
+  assert.match(source, /if \(!confirmPermanentDelete\(systemWorkerText\("ejen"\), agent\.name\)\) return/);
   assert.match(source, /if \(!confirmPermanentDelete\("lead", lead\.name\)\) return/);
 });
 
@@ -682,7 +682,7 @@ test('daily pickup stats exclude pending assignments from the completed lead tot
   const start = source.indexOf('function renderStats(');
   const body = source.slice(start, source.indexOf('\nfunction ', start + 1));
   assert.match(body, /const resolvedAssignments = assignments\.filter/);
-  assert.match(body, /elements\.statToday\.textContent = resolvedAssignments\.length/);
+  assert.match(body, /elements\.statToday\.textContent = isTeamSales\(\) \? assignments\.length : resolvedAssignments\.length/);
   assert.match(body, /contacted\.length \/ resolvedAssignments\.length/);
   assert.match(body, /elements\.pickupDetails\.textContent/);
   assert.match(html, /Pickup rate hari ini/);

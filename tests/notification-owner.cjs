@@ -37,7 +37,7 @@ test('closed-app lead distribution only assigns agents with a push subscription'
 test('all lead pushes for an agent share one replaceable notification slot', () => {
   const appSource = fs.readFileSync('app.js', 'utf8');
   const sheetSource = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
-  assert.match(appSource, /tag: `leadlaju-active-\$\{lead\.assignedAgentId\}`/);
+  assert.match(appSource, /tag: isTeamSales\(\) \? `leadlaju-sales-\$\{lead\.id\}` : `leadlaju-active-\$\{lead\.assignedAgentId\}`/);
   assert.match(sheetSource, /tag: `leadlaju-active-\$\{agent\.id\}`/);
   assert.match(fs.readFileSync('sw.js', 'utf8'), /notification\.tag\.startsWith\("leadlaju-lead-"\)/);
 });

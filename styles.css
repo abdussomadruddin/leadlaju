@@ -5671,7 +5671,11 @@ td small {
 .sales-contact-state.failed { color: var(--red); }
 .master-mode-label { color: var(--ink-500); font-size: 12px; margin: 0; }
 .team-sales-brand #performance-view > .performance-table-wrap th:nth-child(8),
-.team-sales-brand .stat-card:has(#stat-contacted) { display: none; }
+.team-sales-brand .stat-card:has(#stat-contacted),
+.team-sales-brand .stat-card:has(#stat-response),
+.team-sales-brand .stat-card:has(#stat-conversion),
+.team-sales-brand .team-panel:has(#lead-ready-list) { display: none; }
+.team-sales-brand .stats-grid { grid-template-columns: repeat(auto-fit,minmax(160px,1fr)); }
 .team-sales-brand .lead-log-summary td[data-label="Follow Up"] { display: flex; flex-wrap: wrap; gap: 6px; }
 @media (max-width: 850px) {
   .sales-lead-card { padding: 12px; gap: 10px; border-radius: 15px; }
