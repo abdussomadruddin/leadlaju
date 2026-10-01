@@ -5700,6 +5700,10 @@ td small {
 .sales-lead-card .lead-status-badge { align-self: start; padding: 5px 9px; border-radius: 999px; color: var(--blue); background: var(--blue-soft); font-weight: 700; }
 .sales-lead-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
 .sales-lead-actions a, .sales-lead-actions button { flex: 1; min-height: 44px; }
+.contact-edit-button.sales-contact-call { color: #fff; background: #c2410c; border-color: #c2410c; box-shadow: 0 3px 8px rgb(194 65 12 / 18%); }
+.contact-edit-button.sales-contact-call:hover:not(:disabled) { color: #fff; background: #9a3412; border-color: #9a3412; }
+.contact-edit-button.sales-contact-call:focus-visible { outline: 3px solid #fdba74; outline-offset: 3px; }
+.contact-edit-button.sales-contact-call:disabled { box-shadow: none; }
 .sales-contact-whatsapp { display: inline-flex; align-items: center; justify-content: center; gap: 5px; color: var(--green); background: var(--green-soft); }
 .sales-contact-whatsapp svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; }
 .sales-contact-state { grid-column: 1 / -1; display: block; color: var(--ink-500); font-size: 11px; line-height: 1.4; }

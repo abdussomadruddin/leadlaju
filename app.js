@@ -2643,7 +2643,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261001-notes-push-v132")
+      .register("/sw.js?v=20261001-copy-call-v133")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -5217,7 +5217,7 @@ function countsTowardLeadBadge(lead) {
 function renderSalesContactButton(lead, channel) {
   const label = channel === "call" ? "Call" : "WhatsApp";
   const url = channel === "call" ? `tel:${String(lead.phone || "").replace(/[^+\d]/g, "")}` : whatsappLeadUrl(lead.phone);
-  if (!canViewLeadPhone(lead) || !lead.phone || !lead.assignedAgentId) return `<button class="contact-edit-button" disabled>${label}</button>`;
+  if (!canViewLeadPhone(lead) || !lead.phone || !lead.assignedAgentId) return `<button class="contact-edit-button sales-contact-${channel}" disabled>${label}</button>`;
   return `<a class="contact-edit-button sales-contact-${channel}" href="${escapeHtml(url)}" data-sales-contact="${channel}" data-sales-lead="${escapeHtml(lead.id)}">${channel === "whatsapp" ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a9 9 0 0 1-13.3 8L3 21l1.5-4.7A9 9 0 1 1 21 11.5Z"/><path d="M8 7c0 5 4 9 9 9l1-3-3-1-1 1-3-3 1-1-1-3Z"/></svg>' : ""}${label}</a>`;
 }
 function renderSalesContactState(lead) {
@@ -5602,24 +5602,30 @@ function renderLeadFollowUpButton(lead, actionAttribute = "data-lead-follow-up")
 }
 
 function renderLeadCopyButton(lead, actionAttribute = "data-lead-copy") {
-  const available = lead && canAccessLead(lead) && canViewLeadPhone(lead);
-  return `<button class="contact-edit-button lead-copy-button" type="button" ${actionAttribute}="${escapeHtml(lead?.id || "")}" ${available ? "" : "disabled"} title="${available ? "Copy details lead" : "Tekan CALL NOW dahulu"}" aria-label="Copy details ${escapeHtml(lead?.name || "lead")}">Copy</button>`;
+  const available = lead && canAccessLead(lead) && canRevealLeadContact(lead);
+  return `<button class="contact-edit-button lead-copy-button" type="button" ${actionAttribute}="${escapeHtml(lead?.id || "")}" ${available ? "" : "disabled"} title="${available ? "Copy details lead" : isTeamSales() ? "Tekan Call atau WhatsApp dahulu" : "Tekan CALL NOW dahulu"}" aria-label="Copy details ${escapeHtml(lead?.name || "lead")}">Copy</button>`;
 }
 
 function leadDetailsCopyText(lead) {
+  const project = String(lead.project || "Tidak dinyatakan").trim();
+  const rawSource = String(lead.sourceSystem || lead.source_system || lead.source || "Manual Lead").trim();
+  const source = /tik[\s_-]*tok/i.test(rawSource) ? "Tiktok"
+    : /meta|facebook|instagram/i.test(rawSource) ? "Meta"
+    : /^manual(?:[\s_-]+lead)?$/i.test(rawSource) ? "Meta/Tiktok" : rawSource;
   return [
-    "*Inquiry For House*",
+    `*Inquiry For ${project} From ${source}*`,
     "",
     `Nama: ${String(lead.name || "-").trim()}`,
-    `No Phone: ${String(lead.phone || "-").trim()}`,
+    `No Phone: ${String(lead.phone || "").replace(/\D/g, "") || "-"}`,
     `Email: ${String(lead.email || "-").trim()}`,
-    `${projectLabel()}: ${String(lead.project || "Tidak dinyatakan").trim()}`,
+    "Nota Lain:",
+    String(lead.notes || "-").trim() || "-",
   ].join("\n");
 }
 
 async function copyLeadDetails(leadId) {
   const lead = state.leads.find((item) => item.id === leadId);
-  if (!lead || !canAccessLead(lead) || !canViewLeadPhone(lead)) return false;
+  if (!lead || !canAccessLead(lead) || !canRevealLeadContact(lead)) return false;
   try {
     await navigator.clipboard.writeText(leadDetailsCopyText(lead));
     showToast("Details disalin", `${lead.name} telah disalin.`, "success");
@@ -5729,8 +5735,8 @@ function renderLeadsTable() {
           const callButton = isTeamSales() ? renderSalesContactButton(lead, "call") : requiresCallNow
             ? `<button class="log-call-now-button" type="button" data-lead-call="${lead.id}">CALL NOW</button>`
             : phoneVisible && lead.phone
-              ? `<a class="contact-edit-button" href="tel:${escapeHtml(String(lead.phone).replace(/[^+\d]/g, ""))}">Call</a>`
-              : `<button class="contact-edit-button" type="button" disabled title="Nombor telefon belum tersedia">Call</button>`;
+              ? `<a class="contact-edit-button sales-contact-call" href="tel:${escapeHtml(String(lead.phone).replace(/[^+\d]/g, ""))}">Call</a>`
+              : `<button class="contact-edit-button sales-contact-call" type="button" disabled title="Nombor telefon belum tersedia">Call</button>`;
           const followUpButton = (isTeamSales() && visualStatus === "new"
             ? renderSalesContactButton(lead, "whatsapp")
             : renderLeadFollowUpButton(lead)) + (isTeamSales() ? renderSalesContactState(lead) : "");

@@ -12,10 +12,10 @@ test('Team Sales translates authored project labels while Safrich restores the o
 test('signup terminology comes from signup brand rather than signed-in brand',()=>{
  const c=fixture('agent');assert.equal(c.systemWorkerText('Pilih projek untuk ejen',true),'Pilih produk untuk Team Sales');assert.equal(c.projectLabel(),'Projek');
 });
-test('copy changes only the field label, never lead data or existing requested inquiry title',()=>{
+test('copy uses product/project and source in the title without translating lead data',()=>{
  const c=fixture('team_sales');vm.runInContext(app.match(/function leadDetailsCopyText\(lead\) \{[\s\S]*?\n\}/)[0],c);
- const lead={name:'Projek Ahmad',phone:'60120000000',email:'projek@example.invalid',project:'Projek Asal'};
- const text=c.leadDetailsCopyText(lead);assert.match(text,/\*Inquiry For House\*/);assert.match(text,/Nama: Projek Ahmad/);assert.match(text,/Email: projek@example.invalid/);assert.match(text,/Produk: Projek Asal/);
+ const lead={name:'Projek Ahmad',phone:'60120000000',email:'projek@example.invalid',project:'Projek Asal',source:'TikTok Ads'};
+ const text=c.leadDetailsCopyText(lead);assert.match(text,/\*Inquiry For Projek Asal From Tiktok\*/);assert.match(text,/Nama: Projek Ahmad/);assert.match(text,/Email: projek@example.invalid/);assert.match(text,/Nota Lain:\n/);
 });
 test('generic branding and Agent role contain no property branding',()=>{
  const html=fs.readFileSync('index.html','utf8');const manifest=JSON.parse(fs.readFileSync('manifest.webmanifest','utf8'));

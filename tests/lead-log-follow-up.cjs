@@ -33,9 +33,14 @@ test('copy button uses the requested inquiry text and stays locked before CALL N
   const source = app.match(/function leadDetailsCopyText\(lead\) \{[\s\S]*?\n\}/)?.[0];
   assert.ok(source);
   const format = vm.runInNewContext(`(${source})`, {projectLabel: () => 'Projek'});
-  assert.equal(format({ name: 'Aina', phone: '60123456789', email: 'aina@example.com', project: 'Armani' }),
-    '*Inquiry For House*\n\nNama: Aina\nNo Phone: 60123456789\nEmail: aina@example.com\nProjek: Armani');
-  assert.match(app, /const available = lead && canAccessLead\(lead\) && canViewLeadPhone\(lead\)/);
+  assert.equal(format({ name: 'Aina', phone: '+60 12-345 6789', email: 'aina@example.com', project: 'Armani', source:'Meta Ads', notes: 'Kerja Swasta\nRM3500-RM5000' }),
+    '*Inquiry For Armani From Meta*\n\nNama: Aina\nNo Phone: 60123456789\nEmail: aina@example.com\nNota Lain:\nKerja Swasta\nRM3500-RM5000');
+  assert.match(format({project:'LG',notes:'  '}),/Nota Lain:\n-$/);
+  assert.match(format({project:'LG',source:'TikTok Ads'}),/^\*Inquiry For LG From Tiktok\*/);
+  assert.match(format({project:'LG',source:'Manual Lead'}),/^\*Inquiry For LG From Meta\/Tiktok\*/);
+  assert.match(format({project:'LG',source:'Manual'}),/^\*Inquiry For LG From Meta\/Tiktok\*/);
+  assert.match(app, /const available = lead && canAccessLead\(lead\) && canRevealLeadContact\(lead\)/);
+  assert.match(app, /if \(!lead \|\| !canAccessLead\(lead\) \|\| !canRevealLeadContact\(lead\)\) return false/);
   assert.match(app, /navigator\.clipboard\.writeText\(leadDetailsCopyText\(lead\)\)/);
   assert.match(app, /data-lead-copy/);
 });
