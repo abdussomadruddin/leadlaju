@@ -119,7 +119,8 @@ Deno.serve(async (request) => {
     const leadId = String(first.payload?.lead_id || "");
     const revision = Number(first.payload?.assignment_revision) || 0;
     let leadQuery = admin.from("leads")
-      .select("id,brand_id,name,phone,email,city,source,notes,status,queue_state,assigned_agent_id,received_at,expires_at,assignment_revision,status_revision,created_at,projects(name)")
+      // Both legacy and brand-scoped foreign keys exist; choose the brand-safe one.
+      .select("id,brand_id,name,phone,email,city,source,notes,status,queue_state,assigned_agent_id,received_at,expires_at,assignment_revision,status_revision,created_at,projects!leads_project_id_fkey_brand(name)")
       .eq("brand_id", brandId)
       .eq("id", leadId)
       .eq("assigned_agent_id", first.user_id)
