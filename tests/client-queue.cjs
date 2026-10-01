@@ -1812,6 +1812,6 @@ test('admin lead monitor exposes live assignment diagnostics and agent filters',
   assert.match(source, /"unknown-agent"/);
   assert.match(source, /"missing-runtime"/);
   assert.match(source, /"queued-assigned"/);
-  assert.match(source, /elements\.navMonitorCount\.textContent = issues\.length/);
+  assert.match(source, /elements\.navMonitorCount\.textContent = canVerify \? issues\.length : ""/);
   assert.match(source, /renderLeadMonitor\(\);\s*updateLifecycleMutationGate\(\)/);
 });

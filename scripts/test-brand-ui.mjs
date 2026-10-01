@@ -28,6 +28,7 @@ try {
       const rpc=async(name,args={})=>{
         const headers=new Headers();const stamp=await options.global.fetch('/brand-test-stamp',{headers});const brand=(await stamp.json()).brand || a;
         window.__brandRequests.push({name,brand});
+        if(name==='get_dashboard_state'&&window.__monitorReadFails)return {error:{message:'Simulated canonical read failure'}};
         if(name==='master_manage_brand'){
           if(args.p_action==='create')window.__brands.push({id:'00000000-0000-4000-8000-000000000003',...args.p_brand,active:true});
           if(args.p_action==='set_active')window.__brands.find(x=>x.id===args.p_brand.id).active=args.p_brand.active;
@@ -118,6 +119,25 @@ try {
    assert.equal(await page.evaluate(()=>window.__brands[2].distribution_mode),'team_sales');checks++;
    await page.locator('#master-admin-form [name=name]').fill('Admin C');await page.locator('#master-admin-form [name=email]').fill('admin-c@example.test');await page.locator('#master-admin-form button').click();
    await page.waitForFunction(()=>document.querySelector('#master-admin-list').innerText.includes('Admin C'));checks++;
+  }
+  if(['desktop','iphone','android','small-phone'].includes(name)){
+    await page.evaluate(()=>switchView('lead-monitor'));
+    assert.notEqual(await page.locator('#monitor-health').innerText(),'Tidak disahkan');checks++;
+    // Let the actual dashboard timer mark an old canonical read unverified.
+    await page.evaluate(()=>{monitorLastCanonicalSyncAt=Date.now()-90001;});
+    await page.waitForFunction(()=>document.querySelector('#monitor-health').textContent==='Tidak disahkan');
+    assert.equal(await page.locator('#monitor-critical-count').innerText(),'-');checks++;
+    await page.evaluate(()=>window.__monitorReadFails=true);
+    await page.locator('#monitor-refresh-button').click();
+    await page.waitForFunction(()=>!document.querySelector('#monitor-refresh-button').disabled);
+    assert.equal(await page.locator('#monitor-health').innerText(),'Tidak disahkan');checks++;
+    assert.match(await page.locator('#monitor-list').innerText(),/Semakan Supabase gagal/);checks++;
+    await page.evaluate(()=>window.__monitorReadFails=false);
+    await page.locator('#monitor-refresh-button').click();
+    await page.waitForFunction(()=>!document.querySelector('#monitor-refresh-button').disabled);
+    assert.notEqual(await page.locator('#monitor-health').innerText(),'Tidak disahkan');checks++;
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);checks++;
+    await page.screenshot({path:path.join(artifacts,`${name}-monitor.png`)});
   }
   assert.deepEqual(errors,[],`${name}: no runtime errors`);checks++;
   await context.close();

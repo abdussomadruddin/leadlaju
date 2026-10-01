@@ -153,6 +153,8 @@ let editingAppointmentId = null;
 let pendingAppointmentRequestId = null;
 let remoteDatabaseClient = null;
 let remoteDatabaseMode = false;
+let monitorLastCanonicalSyncAt = null;
+let monitorSyncFailed = false;
 let remoteDatabaseRequired = false;
 const REMOTE_REQUEST_TIMEOUT_MS = 12000;
 let remoteRealtimeChannels = [];
@@ -930,6 +932,9 @@ async function loadRemoteState(userId) {
     };
     remoteDatabaseMode = true;
     await loadFollowUpDueFeed();
+    if (requestBrandVersion !== brandContextVersion) return false;
+    monitorLastCanonicalSyncAt = Date.now();
+    monitorSyncFailed = false;
     saveState();
     if (shouldDetectNewLeads) {
       await notifyForNewVisibleLeads(previousLeadKeys);
@@ -940,6 +945,8 @@ async function loadRemoteState(userId) {
   } catch (error) {
     console.error("Remote load failed", error);
     if (requestBrandVersion !== brandContextVersion) return false;
+    monitorSyncFailed = true;
+    if (activeView === "lead-monitor") renderLeadMonitor();
     remoteDatabaseMode = wasRemoteDatabaseMode;
     return false;
   }
@@ -1147,6 +1154,9 @@ function startAuthenticatedApp(user, options = {}) {
   tickTimer = window.setInterval(() => {
     clearExpiredLocalCooldowns();
     updateCountdown();
+    if (activeView === "lead-monitor" && monitorLastCanonicalSyncAt &&
+      Date.now() - monitorLastCanonicalSyncAt >= 90000 &&
+      elements.monitorHealth.textContent !== "Tidak disahkan") renderLeadMonitor();
   }, 1000);
   scheduleExpiryWatchdog();
   registerServiceWorker().then(() => announceAssignmentReceiverReady());
@@ -1665,6 +1675,8 @@ function logout() {
   integrationSecretTimers.clear();
   showLogin();
   brandContextVersion++;
+  monitorLastCanonicalSyncAt = null;
+  monitorSyncFailed = false;
   activeBrandId = ""; activeBrand = null; masterBrands = []; masterAdmins = [];
   const cleanup = cleanUpPushAfterLogout();
   if (remoteDatabaseClient && wasRemote) cleanup.finally(() => remoteDatabaseClient.auth.signOut().catch(() => {}));
@@ -2563,7 +2575,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261001-general-labels-v127")
+      .register("/sw.js?v=20261001-release-monitor-v128")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -6133,27 +6145,33 @@ function inspectLeadMovement(now = Date.now()) {
     (right.lead.receivedAt || right.lead.createdAt || 0) - (left.lead.receivedAt || left.lead.createdAt || 0));
 }
 
+function leadMonitorDataVerified(now = Date.now()) {
+  return Boolean(remoteDatabaseMode && !monitorSyncFailed && monitorLastCanonicalSyncAt &&
+    now - monitorLastCanonicalSyncAt < 90000);
+}
+
 function renderLeadMonitor() {
   if (!elements.monitorList) return;
+  const canVerify = leadMonitorDataVerified();
   const issues = inspectLeadMovement();
   const critical = issues.filter((issue) => issue.severity === "critical").length;
   const warning = issues.length - critical;
-  elements.monitorCriticalCount.textContent = critical;
-  elements.monitorWarningCount.textContent = warning;
-  elements.monitorHealth.textContent = critical ? "Bermasalah" : warning ? "Perlu semak" : "Sihat";
-  elements.monitorHealth.closest(".monitor-stat")?.classList.toggle("has-issue", Boolean(issues.length));
-  elements.monitorCheckedAt.textContent = new Intl.DateTimeFormat("ms-MY", {
+  elements.monitorCriticalCount.textContent = canVerify ? critical : "-";
+  elements.monitorWarningCount.textContent = canVerify ? warning : "-";
+  elements.monitorHealth.textContent = !canVerify ? "Tidak disahkan" : critical ? "Bermasalah" : warning ? "Perlu semak" : "Sihat";
+  elements.monitorHealth.closest(".monitor-stat")?.classList.toggle("has-issue", !canVerify || Boolean(issues.length));
+  elements.monitorCheckedAt.textContent = monitorLastCanonicalSyncAt ? new Intl.DateTimeFormat("ms-MY", {
     hour: "2-digit", minute: "2-digit", second: "2-digit",
-  }).format(new Date());
-  elements.navMonitorCount.textContent = issues.length;
-  elements.navMonitorCount.hidden = issues.length === 0;
+  }).format(new Date(monitorLastCanonicalSyncAt)) : "Belum berjaya";
+  elements.navMonitorCount.textContent = canVerify ? issues.length : "";
+  elements.navMonitorCount.hidden = !canVerify || issues.length === 0;
 
   const selectedAgent = elements.monitorAgentFilter.value || "all";
   elements.monitorAgentFilter.innerHTML = [
-    '<option value="all">Semua ejen</option>',
+    `<option value="all">${systemWorkerText("Semua ejen")}</option>`,
     ...state.agents.filter((agent) => agent.role === "agent")
       .map((agent) => `<option value="${escapeHtml(agent.id)}">${escapeHtml(agent.name)}</option>`),
-    '<option value="unassigned">Tiada ejen</option>',
+    `<option value="unassigned">${systemWorkerText("Tiada ejen")}</option>`,
   ].join("");
   elements.monitorAgentFilter.value = [...elements.monitorAgentFilter.options]
     .some((option) => option.value === selectedAgent) ? selectedAgent : "all";
@@ -6162,8 +6180,11 @@ function renderLeadMonitor() {
   const filtered = issues.filter((issue) =>
     (severity === "all" || issue.severity === severity) &&
     (agentFilter === "all" || (agentFilter === "unassigned" ? !issue.agentId : issue.agentId === agentFilter)));
-  elements.monitorResultCount.textContent = `${filtered.length} isu`;
-  elements.monitorList.innerHTML = filtered.length ? filtered.map((issue) => {
+  elements.monitorResultCount.textContent = canVerify ? `${filtered.length} isu` : "Belum disahkan";
+  elements.monitorList.innerHTML = !canVerify ? `<div class="monitor-empty">
+    <strong>${monitorSyncFailed ? "Semakan Supabase gagal" : "Data belum disahkan"}</strong>
+    <small>Tekan Semak semula untuk membaca keadaan server terkini.</small>
+  </div>` : filtered.length ? filtered.map((issue) => {
     const agent = issue.agentId ? getAgent(issue.agentId) : null;
     return `<article class="monitor-issue ${issue.severity}">
       <span class="monitor-severity">${issue.severity === "critical" ? "Kritikal" : "Perlu semak"}</span>
@@ -6675,6 +6696,8 @@ function clearBrandOperationalState() {
   const current = getCurrentUser();
   const integration = state.integration;
   brandContextVersion++;
+  monitorLastCanonicalSyncAt = null;
+  monitorSyncFailed = false;
   salesContactStates.clear();
   performanceRequestVersion++;
   performanceReport = null;
@@ -6986,6 +7009,7 @@ function switchView(viewName, { historyMode = "push" } = {}) {
     populatePerformanceFilters();
     if (!performanceReport || Date.now() - performanceLoadedAt > 300000) loadPerformanceReport();
   }
+  if (viewName === "lead-monitor") renderLeadMonitor();
   if (viewName === "dashboard" && !isAdmin() && Date.now() - ownPerformanceLoadedAt > 300000) loadOwnPerformance();
   if (viewName === "integrations") loadIntegrationStatus();
   if (viewName === "brands") loadMasterManagement();
@@ -8280,7 +8304,13 @@ elements.monitorRefreshButton?.addEventListener("click", async () => {
   setGlobalLoading(true, "Memeriksa pergerakan lead...");
   try {
     await waitForCurrentSync();
-    await syncGoogleSheet({ silent: true });
+    const synced = await syncGoogleSheet({ silent: true });
+    if (!synced) {
+      monitorSyncFailed = true;
+      renderLeadMonitor();
+      showToast("Pemeriksaan gagal", "Data Supabase tidak dapat disahkan. Cuba semula.", "error");
+      return;
+    }
     renderLeadMonitor();
     showToast("Pemeriksaan selesai", systemWorkerText("Status queue, assignment dan ejen telah diperiksa."));
   } finally {
