@@ -2643,7 +2643,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261001-smooth-whatsapp-v131")
+      .register("/sw.js?v=20261001-notes-push-v132")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -5200,7 +5200,13 @@ function canViewLeadPhone(lead) {
 }
 
 function displayLeadPhone(lead) {
-  return canViewLeadPhone(lead) && lead.phone ? lead.phone : "•••• •••• ••••";
+  return canRevealLeadContact(lead) && lead.phone ? lead.phone : "•••• •••• ••••";
+}
+
+// Keep Team Sales contact actions available without revealing a New lead's
+// contact details in the card before the server confirms the first action.
+function canRevealLeadContact(lead) {
+  return canViewLeadPhone(lead) && lead.status !== "new";
 }
 
 function countsTowardLeadBadge(lead) {
@@ -5257,6 +5263,29 @@ function compareLeadLogOrder(left, right) {
   return leftBottom - rightBottom || (right.receivedAt || 0) - (left.receivedAt || 0);
 }
 
+function leadDisplayNotes(lead, value = lead.notes) {
+  let notes = String(value || "").trim();
+  if (!canRevealLeadContact(lead)) {
+    notes = notes.replace(/[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[Emel dibuka selepas CALL NOW]")
+      .replace(/(?:\+?60|0)[ \t]*1[\d \t().-]{7,20}\d/g, "[Telefon dibuka selepas CALL NOW]");
+    // Also mask the canonical number with arbitrary formatting, including
+    // international numbers that do not use the Malaysian mobile prefix.
+    const digits = String(lead.phone || "").replace(/\D/g, "");
+    if (digits.length >= 7) {
+      const pattern = digits.split("").join("[ \\t().-]*");
+      notes = notes.replace(new RegExp(`\\+?${pattern}`, "g"), "[Telefon dibuka selepas CALL NOW]");
+    }
+    if (isTeamSales()) notes = notes.replaceAll("selepas CALL NOW", "selepas Call atau WhatsApp");
+  }
+  return notes;
+}
+
+function renderNewLeadNotes(lead) {
+  const notes = leadDisplayNotes(lead);
+  if (!notes) return "";
+  return `<div class="new-lead-notes"><small>NOTA</small><p>${escapeHtml(notes)}</p></div>`;
+}
+
 function renderActiveLead() {
   const lead = getVisibleActiveLead();
   elements.activeLeadContainer.classList.toggle("has-active-lead", Boolean(lead));
@@ -5275,7 +5304,7 @@ function renderActiveLead() {
   if (isTeamSales()) {
     const salesLeads = visibleLeads.filter(item => item.status === "new" && item.assignedAgentId);
     elements.activeLeadContainer.classList.toggle("has-active-lead", salesLeads.length > 0);
-    elements.activeLeadContainer.innerHTML = salesLeads.length ? `<div class="sales-new-leads"><h3>Lead baharu <small>${salesLeads.length}</small></h3>${salesLeads.map(item => `<article class="sales-lead-card"><div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.project)}</span><small>${escapeHtml(displayLeadPhone(item))}</small></div><span class="lead-status-badge new">New</span><div class="sales-lead-actions">${renderSalesContactButton(item, "call")}${renderSalesContactButton(item, "whatsapp")}${renderLeadCopyButton(item)}</div>${renderSalesContactState(item)}</article>`).join("")}</div>` : '<div class="empty-lead"><h3>Tiada lead baharu</h3><p>Lead akan diagih secara automatik kepada Team Sales aktif yang layak.</p></div>';
+    elements.activeLeadContainer.innerHTML = salesLeads.length ? `<div class="sales-new-leads"><h3>Lead baharu <small>${salesLeads.length}</small></h3>${salesLeads.map(item => `<article class="sales-lead-card"><div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.project)}</span><small>${escapeHtml(displayLeadPhone(item))}</small></div><span class="lead-status-badge new">New</span>${renderNewLeadNotes(item)}<div class="sales-lead-actions">${renderSalesContactButton(item, "call")}${renderSalesContactButton(item, "whatsapp")}${renderLeadCopyButton(item)}</div>${renderSalesContactState(item)}</article>`).join("")}</div>` : '<div class="empty-lead"><h3>Tiada lead baharu</h3><p>Lead akan diagih secara automatik kepada Team Sales aktif yang layak.</p></div>';
     return;
   }
 
@@ -5301,7 +5330,7 @@ function renderActiveLead() {
     return;
   }
 
-  const activeLeadKey = `${lead.id}:${lead.assignedAgentId}:${lead.name}:${lead.project}:${lead.source}`;
+  const activeLeadKey = `${lead.id}:${lead.assignedAgentId}:${lead.name}:${lead.project}:${lead.source}:${lead.notes}`;
   if (lastRenderedActiveLeadKey !== activeLeadKey) {
     const fragment = elements.activeLeadTemplate.content.cloneNode(true);
     const article = fragment.querySelector(".lead-alert");
@@ -5316,6 +5345,9 @@ function renderActiveLead() {
     fragment.querySelector(".lead-name").textContent = lead.name;
     fragment.querySelector(".lead-project").textContent = lead.project || "Tidak dinyatakan";
     fragment.querySelector(".lead-phone").textContent = "•••• •••• ••••";
+    const notes = document.createElement("div");
+    notes.innerHTML = renderNewLeadNotes(lead);
+    if (notes.firstElementChild) fragment.querySelector(".countdown-block").before(notes.firstElementChild);
     fragment.querySelector(".call-project").textContent = lead.project || "Tidak dinyatakan";
     fragment.querySelector(".assigned-agent").textContent =
       `Assigned: ${getAgent(lead.assignedAgentId)?.name || "Tiada"}`;
@@ -5366,6 +5398,7 @@ function renderAdminActiveLeads() {
         <article class="admin-active-lead" data-lead-id="${escapeHtml(lead.id)}">
           <span class="admin-active-lead-name">${escapeHtml(lead.name || "Tanpa nama")}</span>
           <span class="admin-active-lead-agent">${escapeHtml(getAgent(lead.assignedAgentId)?.name || "Tiada ejen")}</span>
+          ${renderNewLeadNotes(lead)}
           <strong class="admin-active-lead-timer">00:00</strong>
         </article>`).join("")}
     </div>`;
@@ -5692,7 +5725,7 @@ function renderLeadsTable() {
           const requiresCallNow = !isTeamSales() && !isAdmin() && visualStatus === "new";
           const statusOptions = renderLeadStatusOptions(visualStatus, isAdmin() || requiresCallNow || isTeamSales());
           const contactedTime = lead.contactedAt ? `<small>Dihubungi ${formatDateTime(lead.contactedAt)}</small>` : "";
-          const phoneVisible = canViewLeadPhone(lead);
+          const phoneVisible = canRevealLeadContact(lead);
           const callButton = isTeamSales() ? renderSalesContactButton(lead, "call") : requiresCallNow
             ? `<button class="log-call-now-button" type="button" data-lead-call="${lead.id}">CALL NOW</button>`
             : phoneVisible && lead.phone
@@ -5720,7 +5753,7 @@ function renderLeadsTable() {
           const expanded = expandedLeadLogIds.has(lead.id);
           return `
             <tr class="lead-log-summary" data-lead-row="${lead.id}">
-              <td data-label="Nama"><strong>${escapeHtml(lead.name)}</strong></td>
+              <td data-label="Nama"><strong>${escapeHtml(lead.name)}</strong>${renderNewLeadNotes(lead)}</td>
               <td data-label="${projectLabel()}"><strong>${escapeHtml(lead.project || "Tidak dinyatakan")}</strong></td>
               <td data-label="Status"><select class="lead-status-select ${visualStatus}" data-lead-status="${lead.id}" aria-label="Status ${escapeHtml(lead.name)}">${statusOptions}</select></td>
               <td data-label="Call">${callButton}</td>
@@ -5730,7 +5763,7 @@ function renderLeadsTable() {
             </tr>
             <tr class="lead-log-detail" id="lead-log-detail-${lead.id}" ${expanded ? "" : "hidden"}>
               <td colspan="7"><div class="lead-log-detail-grid">
-                <div><span class="lead-detail-label">Telefon / Emel</span><strong>${escapeHtml(displayLeadPhone(lead))}</strong><small>${phoneVisible ? escapeHtml(lead.email || "Tiada emel") : "No Phone, Whatsapp & Emel dibuka selepas CALL NOW"}</small></div>
+                <div><span class="lead-detail-label">Telefon / Emel</span><strong>${escapeHtml(displayLeadPhone(lead))}</strong><small>${phoneVisible ? escapeHtml(lead.email || "Tiada emel") : isTeamSales() ? "Telefon & emel dibuka selepas Call atau WhatsApp" : "No Phone, Whatsapp & Emel dibuka selepas CALL NOW"}</small></div>
                 <div><span class="lead-detail-label">Sumber</span><strong>${escapeHtml(lead.source || "-")}</strong></div>
                 <div><span class="lead-detail-label">${workerLabel()}</span><strong>${escapeHtml(assignedAgentLabel)}</strong></div>
                 <div><span class="lead-detail-label">Masa</span><strong>Tarikh ${formatDateTime(lead.createdAt || lead.receivedAt)}</strong>${activeTime}${contactedTime}</div>
@@ -5739,10 +5772,11 @@ function renderLeadsTable() {
                   class="lead-note-field"
                   data-lead-note="${lead.id}"
                   rows="3"
+                  ${phoneVisible ? "" : "disabled"}
                   placeholder="${systemWorkerText("Tambah nota follow-up, minat projek, bajet atau temujanji")}"
-                >${escapeHtml(leadNoteDrafts.get(leadNoteDraftKey(lead.id)) ?? lead.notes ?? "")}</textarea>
+                >${escapeHtml(leadDisplayNotes(lead, leadNoteDrafts.get(leadNoteDraftKey(lead.id)) ?? lead.notes))}</textarea>
                 <div class="lead-note-actions">
-                  <button class="lead-note-save" type="button" data-lead-note-save="${lead.id}">Simpan nota</button>
+                  <button class="lead-note-save" type="button" data-lead-note-save="${lead.id}" ${phoneVisible ? "" : "disabled"}>Simpan nota</button>
                 </div>
                 </div>
                 <div><span class="lead-detail-label">Tindakan</span><span class="lead-actions">${actionButtons || "-"}</span></div>
@@ -6334,17 +6368,7 @@ function renderIntegrationConnectors() {
     const key = integration.key || null;
     const rawKey = integrationRawKeys.get(provider.id) || "";
     const resultClass = key?.last_result === "failed" ? "error" : key?.last_result ? "success" : "neutral";
-    const payload = JSON.stringify({
-      source_system: provider.id,
-      source_lead_id: `{{${provider.label} Lead ID}}`,
-      name: "{{Full Name}}",
-      phone: "{{Phone Number}}",
-      email: "{{Email}}",
-      city: "{{City}}",
-      project: state.projects.find((project) => project.active)?.name || systemWorkerText("Nama projek aktif"),
-      source: provider.source,
-      created_at: "{{Created Time}}",
-    }, null, 2);
+    const payload = integrationPayload(provider.id);
     return `
       <article class="panel integration-card" data-provider="${provider.id}">
         <div class="integration-card-heading">
@@ -6448,6 +6472,14 @@ async function revokeIntegrationKey(provider) {
 function integrationPayload(provider) {
   const item = INTEGRATION_PROVIDERS.find((entry) => entry.id === provider);
   if (!item) return "";
+  if (provider === "tiktok_ads") return JSON.stringify({
+    source_system: item.id,
+    source_lead_id: `{{${item.label} Lead ID}}`,
+    details_from_notes: true,
+    notes: "{{Semua jawapan borang, satu jawapan setiap baris}}",
+    project: state.projects.find((project) => project.active)?.name || systemWorkerText("Nama projek aktif"),
+    source: item.source,
+  }, null, 2);
   return JSON.stringify({
     source_system: item.id,
     source_lead_id: `{{${item.label} Lead ID}}`,

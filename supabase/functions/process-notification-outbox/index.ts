@@ -180,12 +180,14 @@ Deno.serve(async (request) => {
       }
     }
 
-    const noSubscription = rows.every((row) => !row.endpoint);
-    const success = delivered > 0 || noSubscription;
+    // A lead is not delivered merely because its owner has no registered device yet.
+    // Keep it retryable; each retry revalidates ownership/status/expiry above.
+    const noSubscription = rows.every((row) => !row.endpoint || !row.p256dh || !row.auth_secret);
+    const success = delivered > 0;
     await admin.rpc("finish_notification_outbox", {
       p_outbox_id: outboxId,
       p_success: success,
-      p_error: success ? null : `Push failed: ${deliveryErrors.join(",")}`,
+      p_error: success ? null : noSubscription ? "Waiting for active push subscription" : `Push failed: ${deliveryErrors.join(",")}`,
     });
     if (success) sent += 1;
     else failed += 1;

@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.116.0";
 import { serviceClient } from "../_shared/brand-access.ts";
+import { parseLeadNotes, normalizeNotesPhone } from "../_shared/lead-notes.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -73,12 +74,25 @@ Deno.serve(async (request) => {
     phone: clean(body.phone || body.phone_number || body["No Phone"]),
     email: clean(body.email || body.emel),
     city: clean(body.city || body.bandar),
-    project: clean(body.project || body.projek),
+    project: clean(body.project || body.projek || body.product || body.produk),
     source: clean(body.source || body.sumber || (sourceSystem === "meta_ads" ? "Meta Ads" : "TikTok Ads")),
     notes: clean(body.notes || body.nota),
     created_at: clean(body.created_at || body["Tarikh & Masa"] || new Date().toISOString()),
   };
-  if (!canonical.source_lead_id || !canonical.name || !canonical.phone || !canonical.project) {
+  const fromNotes = sourceSystem === "tiktok_ads" && Boolean(canonical.notes)
+    && (body.details_from_notes === true || !canonical.name || !normalizeNotesPhone(canonical.phone));
+  if (fromNotes) {
+    try {
+      const projects = await supabase.from("projects").select("id,name").eq("brand_id", keyBrandId).eq("active", true);
+      if (projects.error) throw new Error("Senarai projek/produk belum dapat dimuatkan.");
+      Object.assign(canonical, parseLeadNotes(canonical.notes, projects.data || [], canonical.project));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "NOTA tidak dapat dibaca.";
+      await markAttempt("failed", message);
+      return Response.json({ ok: false, error: message }, { status: 400, headers: corsHeaders });
+    }
+  }
+  if ((!fromNotes && !canonical.source_lead_id) || !canonical.name || !canonical.phone || !canonical.project) {
     await markAttempt("failed", "source_lead_id, name, phone and project are required");
     return Response.json({
       ok: false,
@@ -93,7 +107,7 @@ Deno.serve(async (request) => {
   canonical.created_at = createdAt.toISOString();
   const ingestionKey = `${canonical.source_system}:${canonical.source_lead_id}`;
   const payloadHash = await sha256(JSON.stringify(canonical));
-  const { data, error } = await supabase.rpc("ingest_lead", {
+  const { data, error } = await supabase.rpc(fromNotes ? "ingest_notes_lead" : "ingest_lead", {
     p_ingestion_key: ingestionKey,
     p_source_system: canonical.source_system,
     p_source_lead_id: canonical.source_lead_id,

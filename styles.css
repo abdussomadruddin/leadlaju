@@ -5704,6 +5704,15 @@ td small {
 .sales-contact-whatsapp svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; }
 .sales-contact-state { grid-column: 1 / -1; display: block; color: var(--ink-500); font-size: 11px; line-height: 1.4; }
 .sales-contact-state.failed { color: var(--red); }
+.new-lead-notes { grid-column: 1 / -1; min-width: 0; padding: 12px; border-radius: 12px; background: var(--blue-soft); text-align: left; }
+.new-lead-notes > small { color: var(--ink-500); font-size: 10px; font-weight: 700; letter-spacing: .06em; }
+.new-lead-notes > p { margin: 5px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.5; color: var(--ink-900); }
+.lead-log-summary .new-lead-notes { margin-top: 8px; padding: 8px 10px; }
+.lead-log-summary .new-lead-notes > p { margin-top: 3px; font-size: 11px; line-height: 1.4; }
+@media (max-width: 850px) {
+  .lead-log-table .lead-log-summary td:first-child:has(.new-lead-notes) { grid-column: 1 / -1; }
+  .lead-log-table .lead-log-summary td:first-child:has(.new-lead-notes) + td { grid-column: 1 / -1; }
+}
 .master-mode-label { color: var(--ink-500); font-size: 12px; margin: 0; }
 .team-sales-brand #performance-view > .performance-table-wrap th:nth-child(8),
 .team-sales-brand .stat-card:has(#stat-contacted),

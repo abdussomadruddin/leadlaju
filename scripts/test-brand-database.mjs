@@ -249,5 +249,44 @@ try {
  check((await client.query('select leadlaju_private.recover_team_sales_dispatch() n')).rows[0].n===1,'Dedicated scheduler recovers backlog after brand reactivation');
  check((await client.query("select count(*)::int n from cron.job where jobname='leadlaju-team-sales-dispatch' and schedule='* * * * *'")).rows[0].n===1,'Team Sales recovery job is scheduled');
  await rejects(()=>asUser(salesAdmin,sales,()=>client.query('select leadlaju_private.recover_team_sales_dispatch()')),'Public accounts cannot run global recovery');
+ // Notes ingestion: server receipt time, normalized phone, brand/project isolation and real locking.
+ const notesIngest = async (connection, brand, phone='011-2692 9192', product='Same Project') => {
+   await connection.query('begin');
+   try {
+    await connection.query(`select set_config('request.jwt.claims','{"role":"service_role"}',true),set_config('request.headers',$1,true)`,[JSON.stringify({'x-leadlaju-brand':brand})]);
+    await connection.query('set local role service_role');
+    const result=(await connection.query(`select public.ingest_notes_lead('tiktok_ads:original','tiktok_ads','original','Notes Fixture',$1,'fixture@example.test','',$2,'TikTok Ads','Notes fixture',now()-interval '1 year','hash') x`,[phone,product])).rows[0].x;
+    await connection.query('commit');return result;
+   } catch(e) {await connection.query('rollback');throw e;}
+ };
+ const notesFirst=await notesIngest(client,sa);
+ const notesRepeat=await notesIngest(client,sa,'+60 11-2692 9192');
+ check(notesFirst.result==='inserted' && notesRepeat.result==='duplicate' && notesRepeat.lead_id===notesFirst.lead_id,'Notes duplicate uses normalized phone and receipt time, not old source timestamp');
+ const notesOtherBrand=await notesIngest(client,sb);
+ check(notesOtherBrand.result==='inserted' && notesOtherBrand.lead_id!==notesFirst.lead_id,'Same phone/product in different brand is not duplicate');
+ const otherProduct='Notes Other Product';
+ await commitUser(adminA,sa,`select public.admin_upsert_project($1)`,[{name:otherProduct}]);
+ check((await notesIngest(client,sa,'01126929192',otherProduct)).result==='inserted','Same phone with another product is accepted');
+ await client.query("update public.notes_ingestion_receipts set accepted_at=clock_timestamp()-interval '10 minutes 1 second' where lead_id=$1",[notesFirst.lead_id]);
+ const notesLater=await notesIngest(client,sa);
+ check(notesLater.result==='inserted' && notesLater.lead_id!==notesFirst.lead_id,'Same source ID is accepted again after more than ten minutes');
+ await rejects(()=>asUser(adminA,sa,()=>client.query("select public.ingest_notes_lead('x','tiktok_ads','x','Test','601126929192','','','Same Project','TikTok Ads','Notes',now(),'hash')")),'Authenticated callers cannot bypass ingestion key gateway');
+ await rejects(()=>asUser(adminA,sa,()=>client.query('select * from public.notes_ingestion_receipts')),'Notes receipt registry is not publicly exposed');
+ const duplicateParallel=await Promise.all([1,2,3,4].map(async()=>{const connection=pg.getPgClient();await connection.connect();try{return await notesIngest(connection,sales,'+60173559147','Same Project');}finally{await connection.end();}}));
+ check(duplicateParallel.filter(result=>result.result==='inserted').length===1 && duplicateParallel.filter(result=>result.result==='duplicate').length===3,'Concurrent notes ingestion creates one lead only');
+ check(new Set(duplicateParallel.map(result=>result.lead_id)).size===1,'Concurrent duplicate responses reference the same lead');
+ // All ingress transports converge on the same transactional assignment outbox.
+ for (const source of ['meta_ads','tiktok_ads']) {
+   await client.query('begin');
+   await client.query(`select set_config('request.jwt.claims','{"role":"service_role"}',true),set_config('request.headers',$1,true)`,[JSON.stringify({'x-leadlaju-brand':sales})]);
+   await client.query('set local role service_role');
+   const result=(await client.query(`select public.ingest_lead($1,$2,$1,'Push Fixture','60120000000','','','Same Project',$2,'',now(),'hash') x`,[`push-${source}`,source])).rows[0].x;
+   await client.query('commit');
+   check((await client.query(`select count(*)::int n from public.notification_outbox n join public.leads l on l.id=n.lead_id and l.brand_id=n.brand_id where l.id=$1 and n.notification_type='sales_new_lead' and n.user_id=l.assigned_agent_id and n.assignment_revision=l.assignment_revision`,[result.lead_id])).rows[0].n===1,`${source} creates the owner's new lead push`);
+ }
+ for (const source of ['Manual Lead','Excel Upload']) {
+   const result=(await commitUser(salesAdmin,sales,`select public.admin_ingest_manual_lead($1) x`,[{id:`push-${source}`,name:'Push Fixture',phone:'60120000000',project:'Same Project',source}])).rows[0].x;
+   check((await client.query(`select count(*)::int n from public.notification_outbox n join public.leads l on l.id=n.lead_id and l.brand_id=n.brand_id where l.id=$1 and n.notification_type='sales_new_lead' and n.user_id=l.assigned_agent_id and n.assignment_revision=l.assignment_revision`,[result.lead_id])).rows[0].n===1,`${source} creates the owner's new lead push`);
+ }
  console.log(`PASS: ${checks} real PostgreSQL brand isolation and distribution assertions`);
 } finally { if(client) await client.end(); await pg.stop(); }

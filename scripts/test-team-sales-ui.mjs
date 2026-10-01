@@ -24,7 +24,7 @@ try {
     window.__uid=uid;window.__salesBrand=b;window.__requests=[];window.__fail=false;
     const brands=[{id:a,name:'Safrich',slug:'safrich',active:true,distribution_mode:'agent'},{id:b,name:'Sales Brand',slug:'sales-brand',active:true,distribution_mode:'team_sales'}];
     const profile={id:uid,name:'Fixture Account',role,brand_id:role==='master'?null:b,email:'fixture@test.invalid',active:true,approval_status:'approved',eligible_project_ids:[]};
-    const leads=[1,2,3].map(n=>({id:`sales-lead-${n}`,brand_id:b,name:`Sales Lead ${n} with a long readable name`,phone:'60120000000',email:'lead@test.invalid',project:'Sales Project',status:'new',queue_state:'sales_assigned',assigned_agent_id:uid,assignment_revision:1,status_revision:0,follow_up_count:0,received_at:new Date().toISOString(),created_at:new Date().toISOString()}));
+    const leads=[1,2,3].map(n=>({id:`sales-lead-${n}`,brand_id:b,name:`Sales Lead ${n} with a long readable name`,phone:'60120000000',email:'lead@test.invalid',project:'Sales Project',notes:'RM3500-RM5000\nNama Fixture\n+60 12-0000 000\nYa\nKerja Swasta\nlead@test.invalid\nSales Project',status:'new',queue_state:'sales_assigned',assigned_agent_id:uid,assignment_revision:1,status_revision:0,follow_up_count:0,received_at:new Date().toISOString(),created_at:new Date().toISOString()}));
     const report=args=>({from:args.p_from,to:args.p_to,generated_at:new Date().toISOString(),rows:[{agent_id:uid,agent_name:'Fixture Account',assignments:3,total_contacted:1,total_follow_up:0,total_potential:0,total_cancelled_rejected:0,total_client:0,appointments:0,show_ups:0,due_now:0,within_five:1}],weeks:[{agent_id:uid,week_start:args.p_from,assignments:3,total_contacted:1,appointments:0,show_ups:0,within_five:1}]});
     window.__client=options=>({auth:{getSession:async()=>({data:{session:{user:{id:uid}}}}),getUser:async()=>({data:{user:{id:uid}}})},from:table=>{
       const f={};const q={select(){return q},eq(k,v){f[k]=v;return q},single:async()=>({data:table==='profiles'?profile:brands.find(x=>x.id===f.id)}),maybeSingle:async()=>({data:profile})};return q;
@@ -64,6 +64,11 @@ try {
     assert.deepEqual(await order(),['own-performance','new-leads','dashboard-follow-up']);checks++;
    }
    assert.equal(await page.locator('.sales-lead-card').count(),3);checks++;
+   assert.equal(await page.locator('.sales-lead-card .new-lead-notes').count(),3);checks++;
+   assert.equal(await page.locator('.sales-lead-card .new-lead-notes').first().isVisible(),true);checks++;
+   assert.match(await page.locator('.sales-lead-card .new-lead-notes').first().innerText(),/Kerja Swasta/);checks++;
+   assert.doesNotMatch(await page.locator('.sales-lead-card').first().innerText(),/60120000000|12-0000 000|lead@test.invalid/);checks++;
+   assert.match(await page.locator('.sales-lead-card .new-lead-notes').first().innerText(),/selepas Call atau WhatsApp/);checks++;
    assert.equal(await page.locator('#agent-lead-controls').isVisible(),false);checks++;
    assert.equal(await page.locator('#dashboard-view').innerText().then(t=>/CALL NOW|GET LEAD|STOP LEAD|≤5 min|5 minit|Sasaran 5m|Giliran agihan/.test(t)),false);checks++;
    await page.evaluate(()=>{playNotificationSound=async()=>{};return sendSystemNotification(state.leads[0],{force:true,toast:true});});
@@ -87,6 +92,15 @@ try {
    assert.equal(await page.evaluate(()=>state.leads.every(l=>l.followUpCount===0)),true,'Ordinary WA does not increment Follow Up');checks++;
    await page.screenshot({path:path.join(artifacts,`${name}-${role}-dashboard.png`),fullPage:true});
    await page.evaluate(()=>switchView('leads'));
+   assert.equal(await page.locator('.lead-log-summary .new-lead-notes').count(),3);checks++;
+   assert.equal(await page.locator('.lead-log-summary .new-lead-notes').first().isVisible(),true);checks++;
+   assert.match(await page.locator('.lead-log-summary .new-lead-notes').first().innerText(),/Kerja Swasta/);checks++;
+   const newRow=page.locator('.lead-log-summary').filter({has:page.locator('[data-sales-contact="whatsapp"]')});
+   assert.doesNotMatch(await newRow.locator('.new-lead-notes').innerText(),/60120000000|12-0000 000|lead@test.invalid/);checks++;
+   const detail=page.locator('#lead-log-detail-sales-lead-3');
+   assert.doesNotMatch(await detail.locator('.lead-note-field').inputValue(),/60120000000|12-0000 000|lead@test.invalid/);checks++;
+   assert.equal(await detail.locator('.lead-note-field').isDisabled(),true);checks++;
+   assert.match(await page.locator('#lead-log-detail-sales-lead-1 .lead-note-field').inputValue(),/12-0000 000/);checks++;
    assert.equal((await page.locator('#leads-view th').nth(1).textContent()).trim(),'Produk');checks++;
    assert.equal(await page.locator('#leads-view [data-label="Produk"]').count(),3);checks++;
    assert.match(await page.locator('.lead-note-field').first().getAttribute('placeholder'),/minat produk/);checks++;

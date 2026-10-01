@@ -7,7 +7,7 @@ const { stripTypeScriptTypes } = require('node:module');
 const source = fs.readFileSync('supabase/functions/process-notification-outbox/index.ts', 'utf8');
 const executable = stripTypeScriptTypes(source.replace(/^import .*;\n/gm, ''), { mode: 'strip' });
 
-async function runWorker({ mode = 'team_sales', allowed = true, leadExists = true, queryError = false } = {}) {
+async function runWorker({ mode = 'team_sales', allowed = true, leadExists = true, queryError = false, subscribed = true } = {}) {
   const filters = [], selections = [], delivered = [], finished = [];
   let handler;
   const admin = {
@@ -15,7 +15,7 @@ async function runWorker({ mode = 'team_sales', allowed = true, leadExists = tru
       if (name === 'claim_notification_outbox') return { data: [{
         outbox_id: 1, user_id: 'owner', notification_type: mode === 'team_sales' ? 'sales_new_lead' : 'new_lead',
         payload: { brandId: 'brand', lead_id: 'lead', assignment_revision: 2 },
-        endpoint: 'https://fixture.invalid/push', p256dh: 'fixture', auth_secret: 'fixture', subscription_id: 'subscription',
+        endpoint: subscribed ? 'https://fixture.invalid/push' : null, p256dh: subscribed ? 'fixture' : null, auth_secret: subscribed ? 'fixture' : null, subscription_id: subscribed ? 'subscription' : null,
       }] };
       if (name === 'finish_notification_outbox') finished.push(args);
       return { data: null };
@@ -78,4 +78,18 @@ test('failed lead query remains retryable instead of claiming delivery', async (
   const r = await runWorker({ queryError: true });
   assert.equal(r.delivered.length, 0); assert.equal(r.result.failed, 1); assert.equal(r.finished[0].p_success, false);
   assert.equal(r.finished[0].p_error, 'Simulated query failure');
+});
+
+for (const mode of ['team_sales', 'agent']) test(`${mode} waits for a registered device rather than losing the new lead push`, async () => {
+  const waiting = await runWorker({ mode, subscribed: false });
+  assert.equal(waiting.result.sent, 0);
+  assert.equal(waiting.delivered.length, 0);
+  assert.equal(waiting.finished[0].p_success, false);
+  assert.equal(waiting.finished[0].p_error, 'Waiting for active push subscription');
+  const retry = await runWorker({ mode, subscribed: true });
+  assert.equal(retry.delivered.length, 1);
+  assert.equal(retry.finished[0].p_success, true);
+  const obsolete = await runWorker({ mode, subscribed: false, leadExists: false });
+  assert.equal(obsolete.finished[0].p_success, true);
+  assert.equal(obsolete.delivered.length, 0);
 });
