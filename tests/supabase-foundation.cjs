@@ -323,7 +323,7 @@ test('notification worker claims outbox rows atomically and fans out to every ac
   assert.match(notificationWorker, /leadSnapshot/);
   assert.match(notificationWorker, /statusCode === 404 \|\| statusCode === 410/);
   assert.match(notificationWorker, /\.eq\("status", "new"\)/);
-  assert.match(notificationWorker, /\.eq\("queue_state", "active"\)/);
+  assert.match(notificationWorker, /\.eq\("queue_state", salesLead \? "sales_assigned" : "active"\)/);
   assert.match(notificationWorker, /\.gt\("expires_at", new Date\(\)\.toISOString\(\)\)/);
   assert.match(notificationWorker, /p_success: !leadError/);
   assert.doesNotMatch(notificationWorker, /VAPID_PRIVATE_KEY\) \|\| ["'][^"']+["']/);
@@ -373,11 +373,11 @@ test('production runtime config enables Supabase without requiring a query flag'
 
 test('all production devices invalidate the old app shell for the mandatory agent PWA gate', () => {
   const worker = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
-  assert.match(worker, /leadlaju-pwa-v20261001-master-brands-v123/);
+  assert.match(worker, /leadlaju-pwa-v20261001-team-sales-v124/);
   assert.match(worker, /existingClient\.navigate\(targetUrl\)/);
-  assert.match(html, /app\.js\?v=20261001-master-brands-v123/);
+  assert.match(html, /app\.js\?v=20261001-team-sales-v124/);
   assert.match(html, /vendor\/exceljs\.min\.js\?v=4\.4\.0/);
-  assert.match(app, /register\("\/sw\.js\?v=20261001-master-brands-v123"\)/);
+  assert.match(app, /register\("\/sw\.js\?v=20261001-team-sales-v124"\)/);
   assert.doesNotMatch(app, /get\("backend"\) === "sheet"/);
   assert.match(app, /remoteDatabaseRequired = window\.location\.protocol !== "file:"/);
   assert.match(app, /if \(remoteDatabaseRequired\)[\s\S]*Operasi server lama tidak akan digunakan/);

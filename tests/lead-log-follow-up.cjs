@@ -10,7 +10,7 @@ const migration = fs.readFileSync('supabase/migrations/20260926090000_lead_follo
 test('lead badge counts only actionable statuses and closed outcomes sort last', () => {
   const start = app.indexOf('function countsTowardLeadBadge(');
   const end = app.indexOf('\nfunction renderActiveLead()', start);
-  const context = vm.createContext({ getLeadVisualStatus: lead => lead.status });
+  const context = vm.createContext({ isTeamSales: () => false, getLeadVisualStatus: lead => lead.status });
   vm.runInContext(app.slice(start, end), context);
   const statuses = ['new', 'queued', 'contacted', 'all_offer_presented', 'need_follow_up', 'potential', 'client', 'passed', 'rejected', 'cancelled'];
   assert.deepEqual(statuses.filter(status => context.countsTowardLeadBadge({ status })), ['contacted', 'all_offer_presented', 'need_follow_up', 'potential']);

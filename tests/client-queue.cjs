@@ -9,7 +9,7 @@ test('delayed sync cannot overwrite a completed or pending status edit', async (
   const end = source.indexOf('\nfunction ', start + 1);
   const lead = { id: 'local', dedupeKey: 'sheet-id', status: 'need_follow_up' };
   const pending = new Map();
-  const context = vm.createContext({
+  const context = vm.createContext({ isTeamSales: () => false,
     state: { leads: [lead] }, pendingLeadStatusUpdates: pending,
     leadStatusWriteTimes: new Map([['local', 200]]),
     sheetDedupeKey: () => 'sheet-id', normalizeLeadSource: () => 'Manual Lead',
@@ -31,7 +31,7 @@ test('delayed sync cannot overwrite a completed or pending status edit', async (
 
 function setup(leads) {
   const source = fs.readFileSync('app.js', 'utf8');
-  const context = vm.createContext({
+  const context = vm.createContext({ isTeamSales: () => false,
     state: { leads }, saveState() {}, syncLeadRuntimeInSheet() {},
     isActiveLeadStatus: status => ['new', 'queued'].includes(status),
     RESPONSE_WINDOW_MS: 300000,
@@ -361,7 +361,7 @@ test('new agent status is pending unless the server explicitly confirms active',
   const server = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   const start = source.indexOf('function normalizeAgentActive(');
   const end = source.indexOf('\nfunction normalizeAgentRole', start);
-  const context = vm.createContext({});
+  const context = vm.createContext({ isTeamSales: () => false,});
   vm.runInContext(source.slice(start, end), context);
   assert.equal(context.normalizeAgentActive(undefined), false);
   assert.equal(context.normalizeAgentActive(''), false);
@@ -500,7 +500,7 @@ test('agents must CALL NOW before changing a New lead status', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const server = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   const css = fs.readFileSync('styles.css', 'utf8');
-  assert.match(source, /const requiresCallNow = !isAdmin\(\) && visualStatus === "new"/);
+  assert.match(source, /const requiresCallNow = !isTeamSales\(\) && !isAdmin\(\) && visualStatus === "new"/);
   assert.match(source, /data-lead-call="\$\{lead\.id\}"/);
   assert.match(source, /if \(callNow\) handleCall\(callNow\.dataset\.leadCall\)/);
   assert.match(source, /filter\(\(status\) => allowNew \|\| status\.value !== "new"\)/);
@@ -544,7 +544,7 @@ test('a pre-push sync cannot remove a newer service-worker assignment', async ()
   let fetchMode = 'old';
   const renders = [];
   const errors = [];
-  const context = vm.createContext({
+  const context = vm.createContext({ isTeamSales: () => false,
     state: {
       leads: [], activities: [], agents: [], projects: [], appointments: [],
       integration: { endpoint: 'https://sheet.test', interval: 1, connected: true, lastSyncAt: 1 },
@@ -614,7 +614,7 @@ test('newer assignment and status revisions reject stale rows but accept newer a
   const lead = {
     id: 'local-18', dedupeKey: 'lead-x', assignmentRevision: 18, statusRevision: 4,
   };
-  const context = vm.createContext({
+  const context = vm.createContext({ isTeamSales: () => false,
     state: { leads: [lead] },
     authoritativeStateGeneration: 0,
     authoritativeLeadGenerations: new Map(),
@@ -822,7 +822,7 @@ test('notification timing instrumentation leaves the immediate snapshot render p
   };
   const logs = [];
   let releaseSave;
-  const context = vm.createContext({
+  const context = vm.createContext({ isTeamSales: () => false,
     remoteDatabaseMode: false,
     state: { leads: [] },
     Date, Number, String, Boolean, console: { log: (...args) => logs.push(args) },
@@ -867,7 +867,7 @@ test('Supabase assignment delivery caches the canonical lead without a database 
   const start = source.indexOf('async function acceptAssignmentSnapshot(');
   const end = source.indexOf('\nasync function showNotificationLeadImmediately', start);
   let renders = 0;
-  const context = vm.createContext({
+  const context = vm.createContext({ isTeamSales: () => false,
     state: { leads: [] }, remoteDatabaseMode: true,
     assignmentSnapshotDisposition: () => ({ accepted: true }),
     currentAgentMatches: () => true, markAuthoritativeLeadCommit() {}, logLeadTiming() {},
@@ -998,7 +998,7 @@ test('app writes a readable single-line delivery trace without lead business dat
   assert.match(body, /JSON\.stringify\(entry\)/);
   assert.doesNotMatch(body, /(phone|email|name|notes|project|source):/);
   const logs = [];
-  const context = vm.createContext({
+  const context = vm.createContext({ isTeamSales: () => false,
     Date: { now: () => 160 }, Number, String,
     console: { log: (line) => logs.push(line) },
     document: { visibilityState: 'visible', hasFocus: () => true },
@@ -1038,7 +1038,7 @@ test('notification handoffs use agent lead and assignment revision without overw
   const worker = fs.readFileSync('sw.js', 'utf8');
   const start = worker.indexOf('function leadHandoffIdentity(');
   const end = worker.indexOf('\nasync function cacheLeadSnapshot', start);
-  const context = vm.createContext({ String, Number, encodeURIComponent, LEAD_HANDOFF_SCHEMA_VERSION: 1 });
+  const context = vm.createContext({ isTeamSales: () => false, String, Number, encodeURIComponent, LEAD_HANDOFF_SCHEMA_VERSION: 1 });
   vm.runInContext(worker.slice(start, end), context);
   const first = context.leadHandoffIdentity({
     leadId: 'lead-a', leadSnapshot: { assigned_agent_id: 'agent-1', assignment_revision: 7 },
@@ -1075,7 +1075,7 @@ test('snapshot acceptance rejects wrong owner expiry old revision and unrelated 
   const state = { leads: [] };
   let ownerMatches = true;
   let visibleLead = null;
-  const context = vm.createContext({
+  const context = vm.createContext({ isTeamSales: () => false,
     state, Number, String,
     Date: { now: () => 1000 },
     currentAgentMatches: () => ownerMatches,
@@ -1109,7 +1109,7 @@ test('same assignment is idempotent while a contacted local revision cannot be r
   const start = source.indexOf('function assignmentSnapshotDisposition(');
   const end = source.indexOf('\nasync function acceptAssignmentSnapshot', start);
   const local = { id: 'local', dedupeKey: 'lead-a', assignmentRevision: 8, statusRevision: 3, status: 'new' };
-  const context = vm.createContext({
+  const context = vm.createContext({ isTeamSales: () => false,
     state: { leads: [local] }, Number, String,
     Date: { now: () => 1000 }, currentAgentMatches: () => true,
     parseLeadTimestamp: value => Number(value) || 0,
@@ -1276,7 +1276,7 @@ test('local expiry hides CALL NOW and Log Lead together before the server respon
   let releaseServer;
   const serverResponse = new Promise(resolve => { releaseServer = resolve; });
   const renderSnapshots = [];
-  const context = vm.createContext({
+  const context = vm.createContext({ isTeamSales: () => false,
     state: { leads: [lead] }, Date, Number, Map, Set, console,
     window: { setTimeout, clearTimeout },
     expiryAssignmentTimer: null, expiryAssignmentTimerKey: '',
@@ -1336,7 +1336,7 @@ test('transport failure keeps the UI-only expiry hidden and retryable without ca
     expiresAt: Date.now() - 1, assignmentRevision: 2, assignmentHistory: [],
   };
   const before = structuredClone(lead);
-  const context = vm.createContext({
+  const context = vm.createContext({ isTeamSales: () => false,
     state: { leads: [lead] }, Date, Number, Map, Set,
     console: { warn() {} }, window: { setTimeout, clearTimeout },
     expiryAssignmentTimer: null, expiryAssignmentTimerKey: '',
@@ -1361,7 +1361,7 @@ test('transport failure keeps the UI-only expiry hidden and retryable without ca
 test('a stale local expiry marker cannot hide a newer assignment revision', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const leadB = { id: 'same-lead', status: 'new', queueState: 'active', assignmentRevision: 6 };
-  const context = vm.createContext({
+  const context = vm.createContext({ isTeamSales: () => false,
     state: { leads: [leadB] }, Number, Set,
     locallyExpiredAssignments: new Set(['same-lead:5']),
     expiryRequestStates: new Map(),
@@ -1385,7 +1385,7 @@ test('clock-skew recovery commits future expiry before cleanup and locally hides
   const renders = [];
   let expiryCalls = 0;
   let releaseSecondExpiry;
-  const context = vm.createContext({
+  const context = vm.createContext({ isTeamSales: () => false,
     state: { leads: [lead] }, Date: { now: () => now }, Number, Set, Map,
     locallyExpiredAssignments: new Set(),
     expiryRequestStates: new Map(), EXPIRY_RETRY_DELAY_MS: 3000,
@@ -1430,7 +1430,7 @@ test('admin visually expires another agent lead without becoming its expiry work
     id: 'agent-b-lead', status: 'new', queueState: 'active', assignedAgentId: 'agent-b',
     expiresAt: 9_000, assignmentRevision: 3,
   };
-  const context = vm.createContext({
+  const context = vm.createContext({ isTeamSales: () => false,
     state: { leads: [lead] }, Date: { now: () => 10_000 }, Number, Set,
     locallyExpiredAssignments: new Set(), currentAgentOwnsLead: () => false,
   });
@@ -1451,7 +1451,7 @@ test('post-mutation fresh sync waits for an older in-flight sync before reading 
   const end = source.indexOf('\nfunction ', start + 1);
   const calls = [];
   let releaseOldSync;
-  const context = vm.createContext({
+  const context = vm.createContext({ isTeamSales: () => false,
     syncInProgress: true,
     waitForCurrentSync: () => new Promise(resolve => { releaseOldSync = () => { calls.push('old-finished'); resolve(); }; }),
     syncGoogleSheet: async () => { calls.push('fresh-read'); return true; },
@@ -1469,7 +1469,7 @@ test('post-mutation fresh sync starts immediately when no sync is active', async
   const start = source.indexOf('async function syncGoogleSheetFresh(');
   const end = source.indexOf('\nfunction ', start + 1);
   const calls = [];
-  const context = vm.createContext({
+  const context = vm.createContext({ isTeamSales: () => false,
     syncInProgress: false,
     waitForCurrentSync: () => { calls.push('unexpected-wait'); return Promise.resolve(); },
     syncGoogleSheet: async () => { calls.push('fresh-read'); return true; },
@@ -1485,7 +1485,7 @@ test('a failed current sync releases the waiter and permits exactly one fresh re
   const freshEnd = source.indexOf('\nfunction ', freshStart + 1);
   const calls = [];
   let releaseFailedSync;
-  const context = vm.createContext({
+  const context = vm.createContext({ isTeamSales: () => false,
     syncInProgress: true,
     waitForCurrentSync: () => new Promise(resolve => {
       releaseFailedSync = () => { calls.push('failed-old-sync-finished'); context.syncInProgress = false; resolve(); };
@@ -1506,7 +1506,7 @@ test('actual fresh-sync helpers serialize a post-mutation read after the pre-mut
   let releaseOldResponse;
   const oldResponse = new Promise(resolve => { releaseOldResponse = resolve; });
   let requestCount = 0;
-  const context = vm.createContext({
+  const context = vm.createContext({ isTeamSales: () => false,
     syncInProgress: false,
     syncCompletionWaiters: [],
     syncGoogleSheet: async () => {
@@ -1597,7 +1597,7 @@ test('leads sharing a dedupe key retain distinct expiry request identities', () 
   const source = fs.readFileSync('app.js', 'utf8');
   const start = source.indexOf('function expiryAssignmentKey(');
   const end = source.indexOf('\nfunction ', start + 1);
-  const context = vm.createContext({ Number });
+  const context = vm.createContext({ isTeamSales: () => false, Number });
   vm.runInContext(source.slice(start, end), context);
   const first = context.expiryAssignmentKey({ id: 'lead-a', dedupeKey: 'shared', assignmentRevision: 3 });
   const second = context.expiryAssignmentKey({ id: 'lead-b', dedupeKey: 'shared', assignmentRevision: 3 });
@@ -1610,7 +1610,7 @@ test('admin dashboard does not expire active assignments owned by unrelated agen
   const source = fs.readFileSync('app.js', 'utf8');
   const start = source.indexOf('function getCurrentExpiryAssignment(');
   const end = source.indexOf('\nfunction ', start + 1);
-  const context = vm.createContext({
+  const context = vm.createContext({ isTeamSales: () => false,
     state: { leads: [{
       id: 'other-agent-lead', status: 'new', queueState: 'active', assignedAgentId: 'agent-b',
       expiresAt: Date.now() - 1, assignmentRevision: 2,
@@ -1656,7 +1656,7 @@ test('watchdog performs second and third expiry retries after retryAfter', async
     expiresAt: 9_000, assignmentRevision: 8, assignmentHistory: [],
   };
   let watchdogCallback;
-  const context = vm.createContext({
+  const context = vm.createContext({ isTeamSales: () => false,
     state: { leads: [lead] }, Date: { now: () => now }, Number, Map, Set,
     document: { hidden: false },
     window: {
@@ -1707,7 +1707,7 @@ test('actual response handling keeps a clock-skew server rejection retryable and
     assignmentHistory: [{ agentId: 'agent-a', outcome: 'pending' }],
   };
   let responseReads = 0;
-  const context = vm.createContext({
+  const context = vm.createContext({ isTeamSales: () => false,
     state: { leads: [lead] },
     window: { setTimeout, clearTimeout },
     Date, Number, Map, console,
@@ -1758,7 +1758,7 @@ test('actual response handler rejects HTTP and application failures but returns 
   const source = fs.readFileSync('app.js', 'utf8');
   const start = source.indexOf('async function postGoogleSheetActionWithResponse(');
   const end = source.indexOf('\nasync function updateLeadStatusInSheet(', start);
-  const context = vm.createContext({
+  const context = vm.createContext({ isTeamSales: () => false,
     state: { integration: {} },
     getSheetEndpoint: () => 'https://example.test/exec',
     saveState: () => {},

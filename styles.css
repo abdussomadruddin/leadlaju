@@ -5653,3 +5653,30 @@ td small {
 @media (prefers-reduced-motion: reduce) {
   .master-card-details summary::after { transition: none; }
 }
+
+/* Team Sales reuses the existing controls and colour tokens, without timers. */
+.sales-new-leads { display: grid; gap: 12px; width: 100%; min-width: 0; }
+.sales-new-leads > h3 { margin: 0; font-size: 18px; }
+.sales-new-leads > h3 small { color: var(--ink-500); font-size: 13px; }
+.sales-lead-card { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; padding: 16px; border: 1px solid var(--line); border-radius: 18px; background: var(--white); }
+.sales-lead-card > div:first-child { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.sales-lead-card strong { font-size: 16px; line-height: 1.35; }
+.sales-lead-card span, .sales-lead-card small { font-size: 12px; }
+.sales-lead-card .lead-status-badge { align-self: start; padding: 5px 9px; border-radius: 999px; color: var(--blue); background: var(--blue-soft); font-weight: 700; }
+.sales-lead-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
+.sales-lead-actions a, .sales-lead-actions button { flex: 1; min-height: 44px; }
+.sales-contact-whatsapp { display: inline-flex; align-items: center; justify-content: center; gap: 5px; color: var(--green); background: var(--green-soft); }
+.sales-contact-whatsapp svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; }
+.sales-contact-state { grid-column: 1 / -1; display: block; color: var(--ink-500); font-size: 11px; line-height: 1.4; }
+.sales-contact-state.failed { color: var(--red); }
+.master-mode-label { color: var(--ink-500); font-size: 12px; margin: 0; }
+.team-sales-brand #performance-view > .performance-table-wrap th:nth-child(8),
+.team-sales-brand .stat-card:has(#stat-contacted) { display: none; }
+.team-sales-brand .lead-log-summary td[data-label="Follow Up"] { display: flex; flex-wrap: wrap; gap: 6px; }
+@media (max-width: 850px) {
+  .sales-lead-card { padding: 12px; gap: 10px; border-radius: 15px; }
+  .sales-lead-card strong { font-size: 15px; }
+  .team-sales-brand .lead-log-summary td[data-label="Follow Up"] { display: flex; min-width: 0; }
+  .team-sales-brand .lead-log-summary .sales-contact-whatsapp,
+  .team-sales-brand .lead-log-summary .lead-follow-up-button { width: 100%; font-size: 11px; }
+}

@@ -57,7 +57,8 @@ Deno.serve(async (request) => {
       await admin.rpc("finish_notification_outbox", { p_outbox_id: outboxId, p_success: true, p_error: null });
       continue;
     }
-    if (first.notification_type !== "new_lead") {
+    const salesLead = first.notification_type === "sales_new_lead";
+    if (first.notification_type !== "new_lead" && !salesLead) {
       if (first.notification_type === "follow_up_due") {
         const { data: countData, error: followUpError } = await admin
           .rpc("get_follow_up_notification_count", { p_agent_id: first.user_id });
@@ -117,16 +118,16 @@ Deno.serve(async (request) => {
     }
     const leadId = String(first.payload?.lead_id || "");
     const revision = Number(first.payload?.assignment_revision) || 0;
-    const { data: lead, error: leadError } = await admin.from("leads")
+    let leadQuery = admin.from("leads")
       .select("id,brand_id,name,phone,email,city,source,notes,status,queue_state,assigned_agent_id,received_at,expires_at,assignment_revision,status_revision,created_at,projects(name)")
       .eq("brand_id", brandId)
       .eq("id", leadId)
       .eq("assigned_agent_id", first.user_id)
       .eq("assignment_revision", revision)
       .eq("status", "new")
-      .eq("queue_state", "active")
-      .gt("expires_at", new Date().toISOString())
-      .maybeSingle();
+      .eq("queue_state", salesLead ? "sales_assigned" : "active");
+    if (!salesLead) leadQuery = leadQuery.gt("expires_at", new Date().toISOString());
+    const { data: lead, error: leadError } = await leadQuery.maybeSingle();
     if (leadError || !lead) {
       await admin.rpc("finish_notification_outbox", {
         p_outbox_id: outboxId,
@@ -141,8 +142,8 @@ Deno.serve(async (request) => {
     const leadSnapshot = { ...lead, project: project || "", projects: undefined };
     const notification = JSON.stringify({
       title: `Lead baru: ${project || "Projek baru"}`,
-      body: `${lead.name}\nNombor dibuka selepas CALL NOW.`,
-      tag: `leadlaju-active-${first.user_id}`,
+      body: salesLead ? `${lead.name}\nLead baharu tersedia untuk Call atau WhatsApp.` : `${lead.name}\nNombor dibuka selepas CALL NOW.`,
+      tag: salesLead ? `leadlaju-sales-${lead.id}` : `leadlaju-active-${first.user_id}`,
       renotify: true,
       requireInteraction: true,
       icon: "/assets/icon-192.png",
@@ -162,7 +163,7 @@ Deno.serve(async (request) => {
         await webpush.sendNotification({
           endpoint: row.endpoint,
           keys: { p256dh: row.p256dh, auth: row.auth_secret },
-        }, notification, { TTL: 300, urgency: "high" });
+        }, notification, { TTL: salesLead ? 86400 : 300, urgency: "high" });
         delivered += 1;
         await admin.from("push_subscriptions").update({
           last_success_at: new Date().toISOString(), failure_count: 0, updated_at: new Date().toISOString(),

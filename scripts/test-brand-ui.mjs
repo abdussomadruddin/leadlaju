@@ -113,8 +113,9 @@ try {
   await page.locator('#brand-confirm-cancel').click();
   assert.equal(await page.evaluate(()=>window.__brands[1].active),true,'Cancel leaves brand active');checks++;
   if(name==='desktop'){
-   await page.locator('#master-brand-form [name=name]').fill('Brand C');await page.locator('#master-brand-form [name=slug]').fill('brand-c');await page.locator('#master-brand-form button').click();
+   await page.locator('#master-brand-form [name=name]').fill('Brand C');await page.locator('#master-brand-form [name=slug]').fill('brand-c');await page.locator('#master-brand-form [name=distribution_mode]').selectOption('team_sales');await page.locator('#master-brand-form button').click();
    await page.waitForFunction(()=>document.querySelector('#master-brand-list').children.length===3);
+   assert.equal(await page.evaluate(()=>window.__brands[2].distribution_mode),'team_sales');checks++;
    await page.locator('#master-admin-form [name=name]').fill('Admin C');await page.locator('#master-admin-form [name=email]').fill('admin-c@example.test');await page.locator('#master-admin-form button').click();
    await page.waitForFunction(()=>document.querySelector('#master-admin-list').innerText.includes('Admin C'));checks++;
   }

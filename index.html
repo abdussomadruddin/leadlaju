@@ -33,9 +33,9 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20261001-master-brands-v123" />
+    <link rel="stylesheet" href="styles.css?v=20261001-team-sales-v124" />
     <script src="vendor/exceljs.min.js?v=4.4.0" defer></script>
-    <script src="app.js?v=20261001-master-brands-v123" defer></script>
+    <script src="app.js?v=20261001-team-sales-v124" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -662,6 +662,7 @@
               <div class="master-form-heading"><span class="master-form-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 21V5h8v16M11 21V9h10v12M6 9h2M6 13h2M14 13h3M14 17h3" /></svg></span><div><h3>Brand baharu</h3><p>Mulakan ruang operasi yang berasingan.</p></div></div>
               <label>Nama brand<input name="name" maxlength="100" required placeholder="Contoh: Safrich" /></label>
               <label>Slug link pendaftaran<input name="slug" pattern="[a-z0-9]+(-[a-z0-9]+)*" maxlength="80" required placeholder="contoh-brand" /><small>Huruf kecil, nombor dan tanda sengkang sahaja.</small></label>
+              <label>Mod agihan<select name="distribution_mode" required><option value="" disabled selected>Pilih sistem</option><option value="agent">Sistem Ejen</option><option value="team_sales">Sistem Team Sales</option></select><small>Mod dikunci selepas brand dicipta.</small></label>
               <button class="primary-button" type="submit">Cipta brand</button>
             </form>
             <form class="panel master-form" id="master-admin-form">

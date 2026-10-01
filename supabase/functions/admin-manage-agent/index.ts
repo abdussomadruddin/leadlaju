@@ -97,7 +97,7 @@ Deno.serve(async (request) => {
           notification_type: "agent_signup",
           dedupe_key: `agent_signup:${userId}:${item.id}`,
           payload: {
-            title: "Permohonan ejen baharu",
+            title: brand.distribution_mode === "team_sales" ? "Permohonan Team Sales baharu" : "Permohonan ejen baharu",
             body: `${name} menunggu approval.`,
             tag: `leadlaju-agent-signup-${userId}`,
             view: "agents",

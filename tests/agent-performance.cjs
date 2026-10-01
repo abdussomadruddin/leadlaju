@@ -38,7 +38,7 @@ test("admin report and private agent summary are separate surfaces", () => {
   assert.match(html, /id="performance-download"/);
   assert.match(app, /if \(viewName === "dashboard" && !isAdmin\(\) && Date\.now\(\) - ownPerformanceLoadedAt > 300000\) loadOwnPerformance\(\)/);
   assert.match(app, /if \(\["agents", "performance",/);
-  assert.match(app, /workbook\.addWorksheet\("Ringkasan Ejen"\)/);
+  assert.match(app, /workbook\.addWorksheet\(`Ringkasan \$\{workerLabel\(\)\}`\)/);
   assert.match(app, /workbook\.addWorksheet\("Trend Mingguan"\)/);
 });
 

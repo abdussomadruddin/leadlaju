@@ -21,14 +21,14 @@ export async function actorBrand(request: Request, actor: { role: string; brand_
   const selected = requested || request.headers.get("x-leadlaju-brand") || "";
   const brandId = actor.role === "master" ? selected : actor.brand_id;
   if (!brandId || (actor.role !== "master" && selected && selected !== brandId)) throw new Error("Brand access denied");
-  const { data, error } = await serviceClient().from("brands").select("id,name,slug,active").eq("id", brandId).maybeSingle();
+  const { data, error } = await serviceClient().from("brands").select("id,name,slug,active,distribution_mode").eq("id", brandId).maybeSingle();
   if (error || !data?.active) throw new Error("Brand tidak aktif.");
   return data;
 }
 
 export async function signupBrand(slug: unknown) {
   const name = String(slug || "safrich").trim().toLowerCase();
-  const { data, error } = await serviceClient().from("brands").select("id,name,slug,active").eq("slug", name).eq("active", true).maybeSingle();
+  const { data, error } = await serviceClient().from("brands").select("id,name,slug,active,distribution_mode").eq("slug", name).eq("active", true).maybeSingle();
   if (error || !data) throw new Error("Link pendaftaran brand tidak sah atau brand tidak aktif.");
   return data;
 }

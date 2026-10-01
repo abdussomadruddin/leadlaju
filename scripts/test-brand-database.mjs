@@ -173,5 +173,81 @@ try {
  check((await client.query("select count(*)::int n from public.notification_outbox where dedupe_key like 'appointment-outcome:%'")).rows[0].n===12,'Appointment reminders isolated and not duplicated');
  await client.query("select leadlaju_private.process_appointment_outcomes(now()+interval '6 hours')");
  check((await client.query("select count(*)::int n from public.appointments where status='show_up'")).rows[0].n===2,'Original automatic Show Up rule preserved per brand');
- console.log(`PASS: ${checks} real PostgreSQL brand isolation assertions`);
+ // Team Sales remains a separate mode; all legacy assertions above still run.
+ await rejects(()=>commitUser(master,sa,`select public.master_manage_brand('create','{"name":"No Mode","slug":"no-mode"}')`),'Master must choose a mode');
+ const sales=(await commitUser(master,sa,`select public.master_manage_brand('create','{"name":"Sales","slug":"sales","distribution_mode":"team_sales"}') x`)).rows[0].x.brand.id;
+ await rejects(()=>commitUser(master,sa,`select public.master_manage_brand('update',$1)`,[{id:sales,name:'Sales',distribution_mode:'agent'}]),'Even Master cannot change mode');
+ await rejects(()=>client.query(`update public.brands set distribution_mode='team_sales' where id=$1`,[sa]),'Safrich mode immutable');
+ const salesAdmin='30000000-0000-4000-8000-000000000001';
+ const members=[2,3,4].map(n=>`30000000-0000-4000-8000-${String(n).padStart(12,'0')}`);
+ for(const id of [salesAdmin,...members]) {
+   await client.query(`insert into auth.users(id,email) values($1::uuid,$1::text||'@sales.test')`,[id]);
+   await client.query(`insert into public.profiles(id,name,email,role,approval_status,active,brand_id) values($1::uuid,'Sales Fixture',$1::text||'@sales.test',$2,'approved',true,$3)`,[id,id===salesAdmin?'admin':'agent',sales]);
+ }
+ const salesProject=(await commitUser(salesAdmin,sales,`select public.admin_upsert_project('{"name":"Same Project"}') x`)).rows[0].x.project.id;
+ const saleIngest=n=>commitUser(salesAdmin,sales,`select public.admin_ingest_manual_lead($1) x`,[{id:`sales-${n}`,name:`Sales ${n}`,phone:'60120000000',project:'Same Project'}]);
+ const firstSale=(await saleIngest(1)).rows[0].x.lead_id;
+ check((await client.query('select assigned_agent_id from public.leads where id=$1',[firstSale])).rows[0].assigned_agent_id===null,'No eligible recipient leaves New queued');
+ await client.query('begin');
+ for(const id of members) await client.query(`insert into public.agent_project_eligibility(brand_id,agent_id,project_id) values($1,$2,$3)`,[sales,id,salesProject]);
+ await client.query('commit');
+ check((await client.query('select queue_state from public.leads where id=$1',[firstSale])).rows[0].queue_state==='sales_assigned','Eligibility insertion automatically drains backlog');
+ for(let n=2;n<=7;n++) await saleIngest(n);
+ const distribution=(await client.query(`select assigned_agent_id,count(*)::int n from public.leads where brand_id=$1 group by assigned_agent_id order by assigned_agent_id`,[sales])).rows;
+ check(distribution.map(x=>x.n).join('/')==='3/2/2','Seven leads distribute 3/2/2 while all accounts offline');
+ check((await client.query(`select count(*)::int n from public.lead_assignments where brand_id=$1 and assignment_mode='team_sales' and expires_at is null and outcome='pending'`,[sales])).rows[0].n===7,'Multiple pending no-expiry assignments allowed');
+ const cursorBefore=(await client.query('select sales_last_agent_id from public.project_dispatch_state where project_id=$1',[salesProject])).rows[0].sales_last_agent_id;
+ await saleIngest(1);
+ check((await client.query('select sales_last_agent_id from public.project_dispatch_state where project_id=$1',[salesProject])).rows[0].sales_last_agent_id===cursorBefore,'Duplicate ingestion does not advance cursor');
+ await client.query(`select leadlaju_private.expire_assignments(now()+interval '2 days')`);
+ check((await client.query(`select count(*)::int n from public.leads where brand_id=$1 and status='new' and queue_state='sales_assigned'`,[sales])).rows[0].n===7,'Team Sales never expires or becomes missed');
+ const sale=(await client.query('select * from public.leads where id=$1',[firstSale])).rows[0];
+ await rejects(()=>commitUser(agentA,sa,`select public.team_sales_contact($1,'call',gen_random_uuid(),$2)`,[sale.id,sale.assignment_revision]),'Safrich cannot call Team Sales RPC');
+ await rejects(()=>commitUser(members.find(id=>id!==sale.assigned_agent_id),sales,`select public.team_sales_contact($1,'call',gen_random_uuid(),$2)`,[sale.id,sale.assignment_revision]),'Another owner cannot claim lead');
+ await rejects(()=>commitUser(sale.assigned_agent_id,sales,`select public.contact_assignment(gen_random_uuid(),$1,$2)`,[sale.id,sale.assignment_revision]),'Team Sales cannot use CALL NOW');
+ const action='40000000-0000-4000-8000-000000000001';
+ await rejects(()=>commitUser(sale.assigned_agent_id,sales,`select public.team_sales_contact($1,null,gen_random_uuid(),$2)`,[sale.id,sale.assignment_revision]),'Missing channel denied');
+ await rejects(()=>commitUser(sale.assigned_agent_id,sales,`select public.team_sales_contact($1,'call',gen_random_uuid(),null)`,[sale.id]),'Missing revision denied');
+ await commitUser(sale.assigned_agent_id,sales,`select public.team_sales_contact($1,'whatsapp',$2,$3)`,[sale.id,action,sale.assignment_revision]);
+ await commitUser(sale.assigned_agent_id,sales,`select public.team_sales_contact($1,'whatsapp',$2,$3)`,[sale.id,action,sale.assignment_revision]);
+ check((await client.query(`select count(*)::int n from public.lead_events where lead_id=$1 and event_type='sales_contact'`,[sale.id])).rows[0].n===1,'Repeated action records once');
+ check((await client.query('select status,follow_up_count from public.leads where id=$1',[sale.id])).rows[0].follow_up_count===0,'Ordinary WhatsApp does not increment Follow Up');
+ await client.query(`update public.leads set status='potential',queue_state='potential' where id=$1`,[sale.id]);
+ await commitUser(sale.assigned_agent_id,sales,`select public.team_sales_contact($1,'call',gen_random_uuid(),$2)`,[sale.id,sale.assignment_revision]);
+ check((await client.query('select status from public.leads where id=$1',[sale.id])).rows[0].status==='potential','Call does not overwrite a later status');
+ await asUser(salesAdmin,sales,async()=>{
+   const report=(await client.query('select public.get_agent_performance_report(current_date-7,current_date) x')).rows[0].x;
+   check(report.response_sla_applicable===false&&report.rows.every(r=>!Object.hasOwn(r,'within_five')),'Team Sales report omits 5-minute measurement');
+   check(report.rows.reduce((n,r)=>n+r.assignments,0)===7,'Team Sales report counts assignments');
+ });
+ const concurrentProject=(await commitUser(salesAdmin,sales,`select public.admin_upsert_project('{"name":"Concurrent Project"}') x`)).rows[0].x.project.id;
+ for(const id of members) await client.query('insert into public.agent_project_eligibility(brand_id,agent_id,project_id) values($1,$2,$3)',[sales,id,concurrentProject]);
+ await Promise.all([1,2,3,4,5,6,7,1,2].map(async n=>{
+   const connection=pg.getPgClient();await connection.connect();
+   try {
+     await connection.query('begin');
+     await connection.query(`select set_config('request.jwt.claims',$1,true),set_config('request.headers',$2,true)`,[JSON.stringify({sub:salesAdmin,role:'authenticated'}),JSON.stringify({'x-leadlaju-brand':sales})]);
+     await connection.query('set local role authenticated');
+     await connection.query('select public.admin_ingest_manual_lead($1)',[{id:`concurrent-${n}`,name:'Concurrent fixture',phone:'60120000000',project:'Concurrent Project'}]);
+     await connection.query('commit');
+   } catch(error) {await connection.query('rollback');throw error;} finally {await connection.end();}
+ }));
+ const parallel=(await client.query('select assigned_agent_id,count(*)::int n from public.leads where project_id=$1 group by assigned_agent_id order by assigned_agent_id',[concurrentProject])).rows;
+ check(parallel.map(x=>x.n).sort().join('/')==='2/2/3','Concurrent ingestion and duplicates distribute exactly 3/2/2');
+ check((await client.query('select count(*)::int n from public.lead_assignments a join public.leads l on l.id=a.lead_id where l.project_id=$1',[concurrentProject])).rows[0].n===7,'Concurrent duplicate ingestion creates exactly seven assignments');
+ await client.query('update public.profiles set active=false where id=$1',[sale.assigned_agent_id]);
+ check((await client.query('select assigned_agent_id from public.leads where id=$1',[sale.id])).rows[0].assigned_agent_id===sale.assigned_agent_id,'Deactivation preserves ownership');
+ await rejects(()=>commitUser(sale.assigned_agent_id,sales,`select public.team_sales_contact($1,'call',gen_random_uuid(),$2)`,[sale.id,sale.assignment_revision]),'Inactive account cannot act');
+ await client.query('update public.profiles set active=false where id=any($1::uuid[])',[members]);
+ const waiting=(await saleIngest(8)).rows[0].x.lead_id;
+ check((await client.query('select assigned_agent_id from public.leads where id=$1',[waiting])).rows[0].assigned_agent_id===null,'All inactive members leave new lead waiting');
+ await client.query('update public.profiles set active=true where id=$1',[members[0]]);
+ check((await client.query('select assigned_agent_id from public.leads where id=$1',[waiting])).rows[0].assigned_agent_id===members[0],'Reactivation automatically assigns backlog without GET LEAD');
+ await client.query('update public.brands set active=false where id=$1',[sales]);
+ await client.query(`insert into public.leads(brand_id,name,phone,project_id,source,source_lead_id,ingestion_fingerprint,created_at) values($1,'Recovery fixture','60120000000',$2,'manual','recovery','recovery-fixture',now())`,[sales,salesProject]);
+ await client.query('update public.brands set active=true where id=$1',[sales]);
+ check((await client.query('select leadlaju_private.recover_team_sales_dispatch() n')).rows[0].n===1,'Dedicated scheduler recovers backlog after brand reactivation');
+ check((await client.query("select count(*)::int n from cron.job where jobname='leadlaju-team-sales-dispatch' and schedule='* * * * *'")).rows[0].n===1,'Team Sales recovery job is scheduled');
+ await rejects(()=>asUser(salesAdmin,sales,()=>client.query('select leadlaju_private.recover_team_sales_dispatch()')),'Public accounts cannot run global recovery');
+ console.log(`PASS: ${checks} real PostgreSQL brand isolation and distribution assertions`);
 } finally { if(client) await client.end(); await pg.stop(); }

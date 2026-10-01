@@ -205,6 +205,41 @@ let pendingLeadImportRows = [];
 let integrationStatus = [];
 let activeBrandId = "";
 let activeBrand = null;
+let signupBrand = null;
+const salesContactStates = new Map();
+function isTeamSales() { return activeBrand?.distribution_mode === "team_sales"; }
+function workerLabel() { return isTeamSales() ? "Team Sales" : "Ejen"; }
+function systemWorkerText(text, sales = isTeamSales()) {
+  return sales ? String(text).replace(/\bProperty Agent\b|\bEjen\b|\bejen\b|\bAgent\b|\bagent\b/g, "Team Sales") : text;
+}
+// Capture authored labels only, never lead names, notes or account details.
+const workerLabelNodes = [];
+const workerLabelWalker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+while (workerLabelWalker.nextNode()) {
+  const node = workerLabelWalker.currentNode;
+  if (/\b(ejen|agent)\b/i.test(node.nodeValue) && !node.parentElement.closest('script,style,#master-brand-form,#sidebar-user-name')) workerLabelNodes.push({ node, original: node.nodeValue, last: node.nodeValue });
+}
+function updateWorkerLabels() {
+  workerLabelNodes.forEach(item => {
+    if (!item.node.isConnected || item.node.nodeValue !== item.last) return;
+    item.last = systemWorkerText(item.original, !elements.signupForm.hidden && signupBrand ? signupBrand.distribution_mode === 'team_sales' : isTeamSales());
+    item.node.nodeValue = item.last;
+  });
+  ['#lead-agent-filter','#follow-up-agent-filter','#monitor-agent-filter','#performance-agent','#bulletin-project'].forEach(selector => {
+    const select = document.querySelector(selector);
+    select?.querySelectorAll('option').forEach(option => {
+      if (!option.value || option.value === 'all') {
+        option.dataset.agentLabel ||= option.textContent;
+        option.textContent = systemWorkerText(option.dataset.agentLabel);
+      }
+    });
+  });
+  const help = document.querySelector('.performance-help p');
+  if (help) {
+    help.dataset.agentText ||= help.textContent;
+    help.textContent = isTeamSales() ? 'Jumlah mengikut assignment dalam tempoh dipilih dan status lead semasa. Appointment dijadual semula tidak dikira dua kali. Follow Up Due ialah jumlah tertunggak sekarang. Call, WhatsApp dan Follow Up ialah tindakan direkod, bukan bukti pelanggan berjaya dihubungi.' : help.dataset.agentText;
+  }
+}
 let masterBrands = [];
 let masterAdmins = [];
 let brandContextVersion = 0;
@@ -638,12 +673,19 @@ async function readContactOutbox(agentId) {
 }
 
 async function submitContactAction(action) {
-  const { data, error } = await remoteDatabaseClient.rpc("contact_assignment", {
+  const { data, error } = await remoteDatabaseClient.rpc(action.actionType === "team_sales_contact" ? "team_sales_contact" : "contact_assignment", {
     p_action_id: action.actionId,
     p_lead_id: action.leadId,
     p_assignment_revision: action.assignmentRevision,
+    ...(action.actionType === "team_sales_contact" ? { p_channel: action.channel } : {}),
   });
-  if (error) throw error;
+  if (error) {
+    if (action.actionType === "team_sales_contact" && ["42501", "P0001", "23505"].includes(error.code)) {
+      error.authoritativeRejection = true;
+      await writeContactOutbox({ ...action, state: "conflict", error: error.message }).catch(() => false);
+    }
+    throw error;
+  }
   if (!data?.ok) {
     const rejection = new Error(data?.error || "CALL NOW rejected by canonical server state");
     rejection.authoritativeRejection = true;
@@ -662,11 +704,14 @@ async function submitContactAction(action) {
 async function flushContactOutbox() {
   if (!remoteDatabaseMode || !remoteDatabaseClient || !navigator.onLine) return false;
   const user = getCurrentUser();
-  if (!user?.id || user.role !== "agent") return false;
+  if (!user?.id || (user.role !== "agent" && !isTeamSales())) return false;
   const actions = (await readContactOutbox(user.id).catch(() => []))
     .filter((action) => !action.state || action.state === "pending");
   for (const action of actions) {
-    await submitContactAction(action).catch(() => false);
+    if (action.brandId && action.brandId !== activeBrandId) continue;
+    await submitContactAction(action).then(() => salesContactStates.delete(action.leadId)).catch(error => {
+      if (action.actionType === "team_sales_contact") salesContactStates.set(action.leadId, error.authoritativeRejection ? "failed" : "pending");
+    });
   }
   if (actions.length) queueRemoteReload();
   return true;
@@ -812,7 +857,7 @@ async function loadRemoteState(userId) {
         }
       } else activeBrandId = profile.brand_id;
     }
-    const brandResult = await remoteDatabaseClient.from("brands").select("id,name,slug,active").eq("id", activeBrandId).single();
+    const brandResult = await remoteDatabaseClient.from("brands").select("id,name,slug,active,distribution_mode").eq("id", activeBrandId).single();
     if (brandResult.error || !brandResult.data?.active) throw new Error("Brand tidak aktif. Hubungi Master.");
     if (requestBrandVersion !== brandContextVersion) return false;
     activeBrand = brandResult.data;
@@ -1302,7 +1347,9 @@ async function syncSignupProjects() {
       if (elements.signupForm.hidden) return false;
       signupProjects = normalizeProjects(data.projects);
       signupBrandReady = true;
-      document.querySelector("#signup-brand-label").textContent = `Pendaftaran ejen · ${data.brand?.name || signupBrandSlug}`;
+      signupBrand = data.brand;
+      updateWorkerLabels();
+      document.querySelector("#signup-brand-label").textContent = `Pendaftaran ${signupBrand?.distribution_mode === "team_sales" ? "Team Sales" : "ejen"} · ${data.brand?.name || signupBrandSlug}`;
       renderSignupProjectOptions();
       if (!wasReady) setSignupError("");
       const submit = elements.signupForm.querySelector('button[type="submit"]');
@@ -1536,6 +1583,7 @@ async function handleAgentSignup(event) {
 }
 
 function sendAgentLogoutState(user) {
+  if (isTeamSales()) return;
   if (!user?.id || user.role !== "agent") return;
   if (remoteDatabaseMode && remoteDatabaseClient) {
     Promise.resolve(remoteDatabaseClient.rpc("set_agent_availability", {
@@ -1981,7 +2029,7 @@ function todayKey(value = Date.now()) {
 }
 
 function showToast(title, message, tone = "success") {
-  elements.toastTitle.textContent = title;
+  elements.toastTitle.textContent = systemWorkerText(title);
   elements.toastMessage.textContent = message;
   const icon = elements.toast.querySelector(".toast-icon");
   icon.style.color = tone === "error" ? "var(--red)" : "var(--green)";
@@ -2300,6 +2348,13 @@ function assignmentSnapshotDisposition(leadSnapshot) {
     leadSnapshot.assigned_agent_name || leadSnapshot.assignedAgentName,
   )) return { accepted: false, terminal: false };
   const incomingRevision = Number(leadSnapshot.assignment_revision ?? leadSnapshot.assignmentRevision) || 0;
+  if (isTeamSales()) {
+    const existing = state.leads.find(item => item.id === leadSnapshot.id);
+    const revision = Number(leadSnapshot.status_revision ?? leadSnapshot.statusRevision) || 0;
+    const valid = normalizeSheetStatus(leadSnapshot.status) === "new" && (leadSnapshot.queue_state || leadSnapshot.queueState) === "sales_assigned"
+      && (!existing || (incomingRevision >= existing.assignmentRevision && (existing.status === "new" || revision > existing.statusRevision)));
+    return { accepted: valid, terminal: !valid };
+  }
   const expiresAt = parseLeadTimestamp(leadSnapshot.expires_at || leadSnapshot.expiresAt, 0);
   const active = String(leadSnapshot.queue_state || leadSnapshot.queueState || "").toLowerCase() === "active";
   if (normalizeSheetStatus(leadSnapshot.status) !== "new" || !active || expiresAt <= Date.now()) {
@@ -2488,7 +2543,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261001-master-brands-v123")
+      .register("/sw.js?v=20261001-team-sales-v124")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -4959,6 +5014,7 @@ async function handleCall(leadId) {
 }
 
 function getVisibleActiveLead() {
+  if (isTeamSales()) return null;
   const newLeads = state.leads
     .filter((lead) =>
       lead.status === "new" &&
@@ -4971,6 +5027,7 @@ function getVisibleActiveLead() {
 }
 
 function canViewLeadPhone(lead) {
+  if (isTeamSales()) return canAccessLead(lead);
   if (isActiveLeadStatus(lead.status)) return false;
   return isAdmin() || lead.assignedAgentId === state.currentUserId;
 }
@@ -4980,7 +5037,48 @@ function displayLeadPhone(lead) {
 }
 
 function countsTowardLeadBadge(lead) {
+  if (isTeamSales() && getLeadVisualStatus(lead) === "new") return true;
   return ["contacted", "all_offer_presented", "need_follow_up", "potential"].includes(getLeadVisualStatus(lead));
+}
+
+function renderSalesContactButton(lead, channel) {
+  const label = channel === "call" ? "Call" : "WhatsApp";
+  const url = channel === "call" ? `tel:${String(lead.phone || "").replace(/[^+\d]/g, "")}` : whatsappLeadUrl(lead.phone);
+  if (!canViewLeadPhone(lead) || !lead.phone || !lead.assignedAgentId) return `<button class="contact-edit-button" disabled>${label}</button>`;
+  return `<a class="contact-edit-button sales-contact-${channel}" href="${escapeHtml(url)}" data-sales-contact="${channel}" data-sales-lead="${escapeHtml(lead.id)}">${channel === "whatsapp" ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a9 9 0 0 1-13.3 8L3 21l1.5-4.7A9 9 0 1 1 21 11.5Z"/><path d="M8 7c0 5 4 9 9 9l1-3-3-1-1 1-3-3 1-1-1-3Z"/></svg>' : ""}${label}</a>`;
+}
+function renderSalesContactState(lead) {
+  const status = salesContactStates.get(lead.id);
+  return status ? `<small class="sales-contact-state ${status}" role="status">${status === "failed" ? "Gagal disimpan — tekan semula untuk cuba lagi" : "Belum disahkan server — menunggu sync"}</small>` : "";
+}
+async function handleSalesContact(leadId, channel, destination) {
+  const lead = state.leads.find(item => item.id === leadId);
+  if (!isTeamSales() || !lead || !canViewLeadPhone(lead) || !guardLifecycleMutation()) return;
+  const brandVersion = brandContextVersion;
+  const existing = (await readContactOutbox(state.currentUserId).catch(() => [])).find(item => item.leadId === leadId && item.brandId === activeBrandId && item.state === "pending");
+  const action = existing || { actionId: crypto.randomUUID(), agentId: state.currentUserId, brandId: activeBrandId, leadId, assignmentRevision: lead.assignmentRevision, actionType: "team_sales_contact", channel, createdAt: Date.now(), state: "pending" };
+  try {
+    await writeContactOutbox(action);
+  } catch (error) {
+    salesContactStates.set(leadId, "failed"); renderAll();
+    showToast("Tindakan belum disimpan", "Storan peranti tidak tersedia. Cuba semula.", "error");
+    return;
+  }
+  if (brandVersion !== brandContextVersion) return;
+  salesContactStates.set(leadId, "pending"); renderAll();
+  // The durable action is recorded before handing off to the phone/WhatsApp.
+  // Do not optimistically claim Contacted before the RPC confirms it.
+  const submission = submitContactAction(action).then(async () => {
+    if (brandVersion !== brandContextVersion) return;
+    salesContactStates.delete(leadId);
+    await loadRemoteState(state.currentUserId);
+  }).catch(error => {
+    if (brandVersion !== brandContextVersion) return;
+    salesContactStates.set(leadId, error.authoritativeRejection ? "failed" : "pending"); renderAll();
+    showToast(error.authoritativeRejection ? "Tindakan gagal disimpan" : "Menunggu sambungan", error.authoritativeRejection ? "Sync dan cuba semula." : "Tindakan akan dicuba semula apabila talian kembali.", "error");
+  });
+  window.location.assign(destination);
+  await submission;
 }
 
 function compareLeadLogOrder(left, right) {
@@ -5004,6 +5102,13 @@ function renderActiveLead() {
   elements.notificationCount.textContent = newLeadCount;
   elements.notificationCount.style.display = newLeadCount ? "grid" : "none";
   renderAgentLeadControls();
+
+  if (isTeamSales()) {
+    const salesLeads = visibleLeads.filter(item => item.status === "new" && item.assignedAgentId);
+    elements.activeLeadContainer.classList.toggle("has-active-lead", salesLeads.length > 0);
+    elements.activeLeadContainer.innerHTML = salesLeads.length ? `<div class="sales-new-leads"><h3>Lead baharu <small>${salesLeads.length}</small></h3>${salesLeads.map(item => `<article class="sales-lead-card"><div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.project)}</span><small>${escapeHtml(displayLeadPhone(item))}</small></div><span class="lead-status-badge new">New</span><div class="sales-lead-actions">${renderSalesContactButton(item, "call")}${renderSalesContactButton(item, "whatsapp")}${renderLeadCopyButton(item)}</div>${renderSalesContactState(item)}</article>`).join("")}</div>` : '<div class="empty-lead"><h3>Tiada lead baharu</h3><p>Lead akan diagih secara automatik kepada Team Sales aktif yang layak.</p></div>';
+    return;
+  }
 
   if (isAdmin()) {
     renderAdminActiveLeads();
@@ -5113,7 +5218,7 @@ function updateAdminActiveLeadCountdowns(leads = getAdminActiveLeads()) {
 
 function renderAgentLeadControls() {
   const user = getCurrentUser();
-  const isAgent = user?.role === "agent";
+  const isAgent = user?.role === "agent" && !isTeamSales();
   elements.agentLeadControls.hidden = !isAgent;
   if (!isAgent) return;
   const ready = Boolean(user.leadReady);
@@ -5130,6 +5235,7 @@ function renderAgentLeadControls() {
 }
 
 function updateCountdown() {
+  if (isTeamSales()) return;
   if (isAdmin()) {
     updateAdminActiveLeadCountdowns();
     return;
@@ -5283,11 +5389,11 @@ let leadLogSearchTimer = 0;
 
 function renderLeadFollowUpButton(lead, actionAttribute = "data-lead-follow-up") {
   const followUpCount = Math.min(6, Math.max(0, Number(lead?.followUpCount) || 0));
-  const whatsappUrl = lead && canViewLeadPhone(lead) ? whatsappLeadUrl(lead.phone) : "";
+  const whatsappUrl = lead && canViewLeadPhone(lead) && !(isTeamSales() && lead.status === "new") ? whatsappLeadUrl(lead.phone) : "";
   const title = followUpCount >= 6
     ? "Maksimum Follow Up 6"
     : !lead ? "Data lead belum tersedia"
-      : !whatsappUrl ? "Tekan CALL NOW dahulu"
+      : !whatsappUrl ? isTeamSales() ? "Tekan Call atau WhatsApp dahulu" : "Tekan CALL NOW dahulu"
         : `Rekod Follow Up ${followUpCount + 1} dan buka WhatsApp`;
   const icon = `<svg class="lead-follow-up-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20.5 11.7a8.5 8.5 0 0 1-12.6 7.5L3.5 20.5l1.3-4.3a8.5 8.5 0 1 1 15.7-4.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8.3 8.2c-.4.4-.7 1-.7 1.5 0 2.8 3.1 5.9 5.9 6.2.6.1 1.2-.2 1.6-.6l.7-.8-2.1-1.1-.9.9a7.4 7.4 0 0 1-3.1-3.1l.9-.9-1.1-2.1-.8.7Z" fill="currentColor"/></svg>`;
   return `<button class="contact-edit-button lead-follow-up-button follow-up-stage-${followUpCount}" type="button" ${actionAttribute}="${escapeHtml(lead?.id || "")}" ${!whatsappUrl || followUpCount >= 6 ? "disabled" : ""} title="${title}">${icon}<span>Follow Up${followUpCount ? ` ${followUpCount}` : ""}</span></button>`;
@@ -5414,16 +5520,16 @@ function renderLeadsTable() {
     ? shownRows
         .map((lead) => {
           const visualStatus = getLeadVisualStatus(lead);
-          const requiresCallNow = !isAdmin() && visualStatus === "new";
-          const statusOptions = renderLeadStatusOptions(visualStatus, isAdmin() || requiresCallNow);
+          const requiresCallNow = !isTeamSales() && !isAdmin() && visualStatus === "new";
+          const statusOptions = renderLeadStatusOptions(visualStatus, isAdmin() || requiresCallNow || isTeamSales());
           const contactedTime = lead.contactedAt ? `<small>Dihubungi ${formatDateTime(lead.contactedAt)}</small>` : "";
           const phoneVisible = canViewLeadPhone(lead);
-          const callButton = requiresCallNow
+          const callButton = isTeamSales() ? renderSalesContactButton(lead, "call") : requiresCallNow
             ? `<button class="log-call-now-button" type="button" data-lead-call="${lead.id}">CALL NOW</button>`
             : phoneVisible && lead.phone
               ? `<a class="contact-edit-button" href="tel:${escapeHtml(String(lead.phone).replace(/[^+\d]/g, ""))}">Call</a>`
               : `<button class="contact-edit-button" type="button" disabled title="Nombor telefon belum tersedia">Call</button>`;
-          const followUpButton = renderLeadFollowUpButton(lead);
+          const followUpButton = (isTeamSales() ? renderSalesContactButton(lead, "whatsapp") : "") + renderLeadFollowUpButton(lead) + (isTeamSales() ? renderSalesContactState(lead) : "");
           const editButton = canViewLeadPhone(lead)
             ? `<button class="contact-edit-button" type="button" data-lead-edit="${lead.id}">Edit</button>`
             : "";
@@ -5455,7 +5561,7 @@ function renderLeadsTable() {
               <td colspan="7"><div class="lead-log-detail-grid">
                 <div><span class="lead-detail-label">Telefon / Emel</span><strong>${escapeHtml(displayLeadPhone(lead))}</strong><small>${phoneVisible ? escapeHtml(lead.email || "Tiada emel") : "No Phone, Whatsapp & Emel dibuka selepas CALL NOW"}</small></div>
                 <div><span class="lead-detail-label">Sumber</span><strong>${escapeHtml(lead.source || "-")}</strong></div>
-                <div><span class="lead-detail-label">Ejen</span><strong>${escapeHtml(assignedAgentLabel)}</strong></div>
+                <div><span class="lead-detail-label">${workerLabel()}</span><strong>${escapeHtml(assignedAgentLabel)}</strong></div>
                 <div><span class="lead-detail-label">Masa</span><strong>Tarikh ${formatDateTime(lead.createdAt || lead.receivedAt)}</strong>${activeTime}${contactedTime}</div>
                 <div class="lead-note-cell"><span class="lead-detail-label">Nota</span>
                 <textarea
@@ -5561,7 +5667,7 @@ function renderAppointments() {
           </div>
           <div>
             <strong>${escapeHtml(owner)}</strong>
-            <small>Ejen bertanggungjawab</small>
+            <small>${workerLabel()} bertanggungjawab</small>
           </div>
         </div>
         ${appointment.notes ? `<p class="appointment-notes">${escapeHtml(appointment.notes)}</p>` : ""}
@@ -5721,11 +5827,11 @@ function renderAgents() {
     .map(
       (agent) => {
         const isPendingAgent = agent.role === "agent" && agent.approvalStatus === "pending";
-        const roleLabel = agent.role === "admin" ? "Administrator" : isPendingAgent ? "Menunggu approval" : "Property Agent";
+        const roleLabel = agent.role === "admin" ? "Administrator" : isPendingAgent ? "Menunggu approval" : isTeamSales() ? "Team Sales" : "Property Agent";
         const projectNames = normalizeProjectIds(agent.eligibleProjectIds)
           .map((projectId) => state.projects.find((project) => project.id === projectId)?.name)
           .filter(Boolean);
-        const leadAvailabilityAction = agent.role === "agent" && agent.active && agent.approvalStatus === "approved"
+        const leadAvailabilityAction = !isTeamSales() && agent.role === "agent" && agent.active && agent.approvalStatus === "approved"
           ? agent.leadReady
             ? `<button class="agent-lead-availability stop" type="button" data-agent-lead-availability="stop" data-agent-id="${agent.id}">STOP LEAD</button>`
             : agent.online && agent.notificationEnabled
@@ -5845,9 +5951,10 @@ function renderUser() {
 
   document.querySelector("#dashboard-view")?.classList.toggle("agent-dashboard", user.role === "agent");
   document.body.classList.toggle("master-account", isMaster());
+  document.body.classList.toggle("team-sales-brand", isTeamSales());
   elements.sidebarAvatar.textContent = initials(user.name);
   elements.sidebarUserName.textContent = user.name;
-  elements.sidebarUserRole.textContent = user.role === "admin" ? "Administrator" : "Property Agent";
+  elements.sidebarUserRole.textContent = user.role === "admin" ? "Administrator" : isTeamSales() ? "Team Sales" : "Property Agent";
   if (isMaster()) elements.sidebarUserRole.textContent = "Master";
   document.querySelector("#active-brand-label").textContent = activeBrand?.name || (isMaster() ? "Tiada brand aktif" : "Safrich");
   document.querySelector("#copy-agent-registration-link").disabled = !isAdmin() || !activeBrand?.slug || activeBrand.active === false;
@@ -5860,17 +5967,20 @@ function renderUser() {
   elements.viewTitle.innerHTML =
     activeView === "dashboard"
       ? `<span class="desktop-greeting">Selamat datang, </span><span class="mobile-dashboard-brand"><span class="mobile-dashboard-brand-mark"><img src="assets/icon.svg" alt="" /></span><span>LeadLaju</span></span><span class="user-name">${escapeHtml(user.name.split(" ")[0])}</span>`
-      : viewTitles[activeView] || "LeadLaju";
+      : systemWorkerText(viewTitles[activeView] || "LeadLaju");
 
   document.querySelectorAll(".admin-only").forEach((item) => {
     item.style.display = isAdmin() ? (item.classList.contains("admin-only-block") ? "block" : "flex") : "none";
   });
+  [elements.getLeadAllAgentsButton, elements.stopLeadAllAgentsButton].forEach(item => { item.hidden = isTeamSales(); });
+  updateWorkerLabels();
   if (!isAdmin() && ["agents", "performance", "projects", "lead-monitor", "import-leads", "integrations"].includes(activeView)) {
     switchView("dashboard");
   }
 }
 
 function inspectLeadMovement(now = Date.now()) {
+  if (isTeamSales()) return [];
   const issues = [];
   const agentsById = new Map(state.agents.map((agent) => [String(agent.id), agent]));
   const activeByAgent = new Map();
@@ -5997,6 +6107,7 @@ function renderLeadMonitor() {
 }
 
 function enforceSingleActiveLead() {
+  if (isTeamSales()) return [];
   const occupied = new Set();
   const overflow = [];
   const active = state.leads.filter((lead) => lead.status === "new")
@@ -6361,7 +6472,7 @@ function renderFollowUpDue() {
         <span class="member-avatar">${initials(item.name)}</span>
         <span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.project)}</small></span>
       </div>
-      <div class="follow-up-owner"><small>Ejen</small><strong>${escapeHtml(item.assignedAgentName)}</strong></div>
+      <div class="follow-up-owner"><small>${workerLabel()}</small><strong>${escapeHtml(item.assignedAgentName)}</strong></div>
       <div class="follow-up-note"><small>Remark terakhir</small><p>${escapeHtml(item.notes || "Belum ada remark")}</p></div>
       <div class="follow-up-time"><strong>${followUpOverdueLabel(item)}</strong><small>Dikemas kini ${formatDateTime(item.followUpActivityAt)}</small></div>
       <div class="follow-up-due-actions">
@@ -6421,7 +6532,7 @@ function renderOwnPerformance(current, previous) {
   elements.ownPerformanceStatus.textContent = `${current.from} hingga ${current.to} · Dibandingkan dengan 7 hari sebelumnya`;
   elements.ownPerformanceMetrics.innerHTML = [
     performanceMetric("Lead ditugaskan", row.assignments, `Sebelumnya ${prior?.assignments || 0}`, "lead"),
-    performanceMetric("CALL NOW ≤5 min", performanceRateLabel(row), `Sebelumnya ${prior ? performanceRateLabel(prior) : "—"}`, "call"),
+    isTeamSales() ? performanceMetric("Total Contacted", row.total_contacted || 0, `Sebelumnya ${prior?.total_contacted || 0}`, "call") : performanceMetric("CALL NOW ≤5 min", performanceRateLabel(row), `Sebelumnya ${prior ? performanceRateLabel(prior) : "—"}`, "call"),
     performanceMetric("Appointment", row.appointments, `Sebelumnya ${prior?.appointments || 0}`, "appointment"),
     performanceMetric("Show Up", row.show_ups, `Sebelumnya ${prior?.show_ups || 0}`, "show"),
     performanceMetric("Follow Up Due", row.due_now, "Perlu tindakan", "due"),
@@ -6470,6 +6581,7 @@ async function loadMasterManagement() {
     document.querySelector("#master-admin-brand").innerHTML = masterBrands.filter(b => b.active).map(b => `<option value="${escapeHtml(b.id)}" ${b.id === activeBrandId ? "selected" : ""}>${escapeHtml(b.name)}</option>`).join("");
     document.querySelector("#master-brand-list").innerHTML = masterBrands.map(b => `<article class="panel master-card">
       <div class="master-card-heading"><div class="master-card-identity"><span class="master-card-avatar" aria-hidden="true">${escapeHtml(initials(b.name))}</span><h3>${escapeHtml(b.name)}</h3></div><span class="integration-status ${b.active ? "active" : "inactive"}">${b.active ? "Aktif" : "Tidak aktif"}</span></div>
+      <p class="master-mode-label">${b.distribution_mode === "team_sales" ? "Sistem Team Sales" : "Sistem Ejen"} · Mod dikunci</p>
       <div class="master-registration-link"><small>Link pendaftaran</small><p>${escapeHtml(agentRegistrationUrl(b))}</p></div>
       <div class="master-card-actions"><button class="primary-button" data-master-open="${b.id}" ${b.active ? "" : "disabled"}>Buka brand</button><button class="secondary-button" data-master-copy="${b.id}">Salin link daftar</button><button class="secondary-button" data-master-rename="${b.id}">Edit nama</button></div>
       <details class="master-card-details"><summary>Kawalan brand</summary><div class="master-card-actions"><button class="secondary-button ${b.active ? "danger" : ""}" data-master-toggle="${b.id}">${b.active ? "Nyahaktif brand" : "Aktifkan semula"}</button></div></details></article>`).join("");
@@ -6485,6 +6597,7 @@ function clearBrandOperationalState() {
   const current = getCurrentUser();
   const integration = state.integration;
   brandContextVersion++;
+  salesContactStates.clear();
   performanceRequestVersion++;
   performanceReport = null;
   performanceLoadedAt = ownPerformanceLoadedAt = 0;
@@ -6541,7 +6654,7 @@ async function masterOperation(operation) {
 document.querySelector("#master-brand-switcher").addEventListener("change",event=>changeMasterBrand(event.target.value));
 document.querySelector("#master-brand-form").addEventListener("submit",event=>{
   event.preventDefault(); const form=event.currentTarget; const fields=new FormData(form);
-  masterOperation(async()=>{const result=await remoteDatabaseClient.rpc("master_manage_brand",{p_action:"create",p_brand:{name:fields.get("name"),slug:fields.get("slug")}});if(result.error)throw result.error;form.reset();});
+  masterOperation(async()=>{const result=await remoteDatabaseClient.rpc("master_manage_brand",{p_action:"create",p_brand:{name:fields.get("name"),slug:fields.get("slug"),distribution_mode:fields.get("distribution_mode")}});if(result.error)throw result.error;form.reset();});
 });
 document.querySelector("#master-admin-form").addEventListener("submit",event=>{
   event.preventDefault(); const form=event.currentTarget; const fields=Object.fromEntries(new FormData(form));
@@ -6560,7 +6673,14 @@ document.querySelector("#master-brand-list").addEventListener("click",async even
   if(button.dataset.masterOpen){await changeMasterBrand(button.dataset.masterOpen);return;}
   if(button.dataset.masterCopy){const brand=masterBrands.find(b=>b.id===button.dataset.masterCopy);await copyIntegrationText(agentRegistrationUrl(brand),`Link daftar agent · ${brand.name}`);return;}
   if(button.dataset.masterRename){const brand=masterBrands.find(b=>b.id===button.dataset.masterRename);const name=window.prompt("Nama brand",brand.name);if(name?.trim())masterOperation(async()=>{const result=await remoteDatabaseClient.rpc("master_manage_brand",{p_action:"update",p_brand:{id:brand.id,name:name.trim()}});if(result.error)throw result.error;if(activeBrandId===brand.id)activeBrand={...activeBrand,name:name.trim()};});return;}
-  if(button.dataset.masterToggle){pendingBrandConfirmation={brand:masterBrands.find(b=>b.id===button.dataset.masterToggle),step:1};document.querySelector("#brand-confirm-message").textContent=pendingBrandConfirmation.brand.active?"Semua Admin dan Ejen brand ini hilang akses. Ingestion, agihan dan push baharu dihentikan. Data tidak dipadam.":"Akses brand dibuka semula. Ejen perlu mengaktifkan GET LEAD semula.";document.querySelector("#brand-confirm-next").textContent="Teruskan";document.querySelector("#brand-confirm-dialog").showModal();}
+  if(button.dataset.masterToggle){
+    pendingBrandConfirmation={brand:masterBrands.find(b=>b.id===button.dataset.masterToggle),step:1};
+    const sales=pendingBrandConfirmation.brand.distribution_mode === "team_sales";
+    document.querySelector("#brand-confirm-message").textContent=pendingBrandConfirmation.brand.active
+      ? `Semua Admin dan ${sales ? "Team Sales" : "Ejen"} brand ini hilang akses. Ingestion, agihan dan push baharu dihentikan. Data tidak dipadam.`
+      : sales ? "Akses brand dibuka semula. Agihan automatik diteruskan kepada Team Sales aktif dan layak." : "Akses brand dibuka semula. Ejen perlu mengaktifkan GET LEAD semula.";
+    document.querySelector("#brand-confirm-next").textContent="Teruskan";document.querySelector("#brand-confirm-dialog").showModal();
+  }
 });
 document.querySelector("#brand-confirm-cancel").addEventListener("click",()=>{pendingBrandConfirmation=null;document.querySelector("#brand-confirm-dialog").close();});
 document.querySelector("#brand-confirm-next").addEventListener("click",()=>{
@@ -6583,19 +6703,20 @@ function populatePerformanceFilters() {
     .map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join("");
   elements.performanceProject.value = project;
   elements.performanceAgent.value = agent;
+  updateWorkerLabels();
 }
 
 function renderPerformanceReport() {
   if (!isAdmin() || !performanceReport) return;
   const rows = performanceReport.rows || [];
-  elements.performanceStatus.textContent = `${performanceReport.from} hingga ${performanceReport.to} · ${rows.length} ejen · Data semasa ${formatDateTime(new Date(performanceReport.generated_at).getTime())}`;
+  elements.performanceStatus.textContent = `${performanceReport.from} hingga ${performanceReport.to} · ${rows.length} ${isTeamSales() ? "Team Sales" : "ejen"} · Data semasa ${formatDateTime(new Date(performanceReport.generated_at).getTime())}`;
   elements.performanceDownload.disabled = false;
   elements.performanceRows.innerHTML = rows.length ? rows.map((row) => `<tr>
     <td><button type="button" class="performance-agent-link" data-performance-agent="${escapeHtml(row.agent_id)}">${escapeHtml(row.agent_name)}</button></td>
     <td>${Number(row.assignments) || 0}</td>
     <td>${Number(row.total_contacted) || 0}</td><td>${Number(row.total_follow_up) || 0}</td>
     <td>${Number(row.total_potential) || 0}</td><td>${Number(row.total_cancelled_rejected) || 0}</td><td>${Number(row.total_client) || 0}</td>
-    <td>${performanceRateLabel(row)} <small>(${Number(row.within_five) || 0}/${Number(row.assignments) || 0})</small></td>
+    ${isTeamSales() ? "" : `<td>${performanceRateLabel(row)} <small>(${Number(row.within_five) || 0}/${Number(row.assignments) || 0})</small></td>`}
     <td>${Number(row.appointments) || 0}</td><td>${Number(row.show_ups) || 0}</td><td>${Number(row.due_now) || 0}</td>
   </tr>`).join("") : '<tr><td colspan="11">Tiada ejen untuk penapis ini.</td></tr>';
   const cardMetric = (label, value) => `<div><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></div>`;
@@ -6603,19 +6724,19 @@ function renderPerformanceReport() {
   elements.performanceCards.innerHTML = rows.length ? rows.map((row) => `<details class="performance-card">
     ${cardSummary(row.agent_name, `${Number(row.assignments) || 0} lead · ${Number(row.due_now) || 0} due`)}
     <div class="performance-card-content">
-    <div class="performance-card-grid">${cardMetric("Total Contacted", Number(row.total_contacted) || 0)}${cardMetric("Total Follow Up", Number(row.total_follow_up) || 0)}${cardMetric("Total Potential", Number(row.total_potential) || 0)}${cardMetric("Total Cancelled & Rejected", Number(row.total_cancelled_rejected) || 0)}${cardMetric("Total Client", Number(row.total_client) || 0)}${cardMetric("CALL NOW ≤5 min", performanceRateLabel(row))}${cardMetric("Appointment", Number(row.appointments) || 0)}${cardMetric("Show Up", Number(row.show_ups) || 0)}</div>
+    <div class="performance-card-grid">${cardMetric("Total Contacted", Number(row.total_contacted) || 0)}${cardMetric("Total Follow Up", Number(row.total_follow_up) || 0)}${cardMetric("Total Potential", Number(row.total_potential) || 0)}${cardMetric("Total Cancelled & Rejected", Number(row.total_cancelled_rejected) || 0)}${cardMetric("Total Client", Number(row.total_client) || 0)}${isTeamSales() ? "" : cardMetric("CALL NOW ≤5 min", performanceRateLabel(row))}${cardMetric("Appointment", Number(row.appointments) || 0)}${cardMetric("Show Up", Number(row.show_ups) || 0)}</div>
     <button type="button" class="performance-agent-link" data-performance-agent="${escapeHtml(row.agent_id)}">Lihat trend mingguan</button>
     </div>
-  </details>`).join("") : '<p>Tiada ejen untuk penapis ini.</p>';
+  </details>`).join("") : `<p>Tiada ${workerLabel()} untuk penapis ini.</p>`;
   const selected = rows.find((row) => row.agent_id === selectedPerformanceAgentId);
   elements.performanceDetail.hidden = !selected;
   if (!selected) return;
   elements.performanceDetailTitle.textContent = selected.agent_name;
   const weeks = (performanceReport.weeks || []).filter((item) => item.agent_id === selected.agent_id);
   elements.performanceWeeks.innerHTML = weeks.length
-    ? `<div class="performance-table-wrap"><table class="performance-table"><thead><tr><th>Minggu bermula</th><th>Lead ditugaskan</th><th>Total Contacted</th><th>Total Follow Up</th><th>Total Potential</th><th>Total Cancelled &amp; Rejected</th><th>Total Client</th><th>CALL NOW ≤5 min</th><th>Appointment</th><th>Show Up</th></tr></thead><tbody>${weeks.map((week) => `<tr><td>${escapeHtml(week.week_start)}</td><td>${week.assignments}</td><td>${week.total_contacted || 0}</td><td>${week.total_follow_up || 0}</td><td>${week.total_potential || 0}</td><td>${week.total_cancelled_rejected || 0}</td><td>${week.total_client || 0}</td><td>${performanceRateLabel(week)} (${week.within_five}/${week.assignments})</td><td>${week.appointments}</td><td>${week.show_ups}</td></tr>`).join("")}</tbody></table></div>`
+    ? `<div class="performance-table-wrap"><table class="performance-table"><thead><tr><th>Minggu bermula</th><th>Lead ditugaskan</th><th>Total Contacted</th><th>Total Follow Up</th><th>Total Potential</th><th>Total Cancelled &amp; Rejected</th><th>Total Client</th>${isTeamSales() ? "" : "<th>CALL NOW ≤5 min</th>"}<th>Appointment</th><th>Show Up</th></tr></thead><tbody>${weeks.map((week) => `<tr><td>${escapeHtml(week.week_start)}</td><td>${week.assignments}</td><td>${week.total_contacted || 0}</td><td>${week.total_follow_up || 0}</td><td>${week.total_potential || 0}</td><td>${week.total_cancelled_rejected || 0}</td><td>${week.total_client || 0}</td>${isTeamSales() ? "" : `<td>${performanceRateLabel(week)} (${week.within_five}/${week.assignments})</td>`}<td>${week.appointments}</td><td>${week.show_ups}</td></tr>`).join("")}</tbody></table></div>`
     : '<p>Tiada aktiviti dalam tempoh ini.</p>';
-  if (weeks.length) elements.performanceWeeks.innerHTML += `<div class="performance-week-cards">${weeks.map((week) => `<details class="performance-card">${cardSummary(week.week_start, `${Number(week.assignments) || 0} lead`)}<div class="performance-card-content"><div class="performance-card-grid">${cardMetric("Total Contacted", Number(week.total_contacted) || 0)}${cardMetric("Total Follow Up", Number(week.total_follow_up) || 0)}${cardMetric("Total Potential", Number(week.total_potential) || 0)}${cardMetric("Total Cancelled & Rejected", Number(week.total_cancelled_rejected) || 0)}${cardMetric("Total Client", Number(week.total_client) || 0)}${cardMetric("CALL NOW ≤5 min", performanceRateLabel(week))}${cardMetric("Appointment", Number(week.appointments) || 0)}${cardMetric("Show Up", Number(week.show_ups) || 0)}</div></div></details>`).join("")}</div>`;
+  if (weeks.length) elements.performanceWeeks.innerHTML += `<div class="performance-week-cards">${weeks.map((week) => `<details class="performance-card">${cardSummary(week.week_start, `${Number(week.assignments) || 0} lead`)}<div class="performance-card-content"><div class="performance-card-grid">${cardMetric("Total Contacted", Number(week.total_contacted) || 0)}${cardMetric("Total Follow Up", Number(week.total_follow_up) || 0)}${cardMetric("Total Potential", Number(week.total_potential) || 0)}${cardMetric("Total Cancelled & Rejected", Number(week.total_cancelled_rejected) || 0)}${cardMetric("Total Client", Number(week.total_client) || 0)}${isTeamSales() ? "" : cardMetric("CALL NOW ≤5 min", performanceRateLabel(week))}${cardMetric("Appointment", Number(week.appointments) || 0)}${cardMetric("Show Up", Number(week.show_ups) || 0)}</div></div></details>`).join("")}</div>`;
 }
 
 async function loadPerformanceReport() {
@@ -6662,26 +6783,25 @@ async function downloadPerformanceReport() {
   if (!isAdmin() || !performanceReport || !window.ExcelJS) return;
   const report = performanceReport;
   const workbook = new window.ExcelJS.Workbook();
-  const summary = workbook.addWorksheet("Ringkasan Ejen");
+  const summary = workbook.addWorksheet(`Ringkasan ${workerLabel()}`);
   const trend = workbook.addWorksheet("Trend Mingguan");
   const safeName = (value) => /^[=+@-]/.test(String(value || "")) ? `'${value}` : String(value || "");
-  summary.addRow(["Prestasi Ejen Lead Laju", `${report.from} hingga ${report.to}`]);
-  summary.addRow(["Projek", elements.performanceProject.selectedOptions[0]?.textContent || "Semua projek", "Ejen", elements.performanceAgent.selectedOptions[0]?.textContent || "Semua ejen"]);
-  summary.addRow(["Ejen", "Lead ditugaskan", "Total Contacted", "Total Follow Up", "Total Potential", "Total Cancelled & Rejected", "Total Client", "CALL NOW ≤5 min", "Kadar ≤5 min", "Appointment", "Show Up", "Follow Up Due sekarang"]);
-  (report.rows || []).forEach((row) => summary.addRow([safeName(row.agent_name), row.assignments, row.total_contacted, row.total_follow_up, row.total_potential, row.total_cancelled_rejected, row.total_client, row.within_five, performanceRate(row), row.appointments, row.show_ups, row.due_now]));
-  trend.addRow(["Minggu bermula", "Ejen", "Lead ditugaskan", "Total Contacted", "Total Follow Up", "Total Potential", "Total Cancelled & Rejected", "Total Client", "CALL NOW ≤5 min", "Kadar ≤5 min", "Appointment", "Show Up"]);
+  summary.addRow([`Prestasi ${workerLabel()} Lead Laju`, `${report.from} hingga ${report.to}`]);
+  summary.addRow(["Projek", elements.performanceProject.selectedOptions[0]?.textContent || "Semua projek", workerLabel(), elements.performanceAgent.selectedOptions[0]?.textContent || `Semua ${workerLabel()}`]);
+  summary.addRow([workerLabel(), "Lead ditugaskan", "Total Contacted", "Total Follow Up", "Total Potential", "Total Cancelled & Rejected", "Total Client", ...(isTeamSales() ? [] : ["CALL NOW ≤5 min", "Kadar ≤5 min"]), "Appointment", "Show Up", "Follow Up Due sekarang"]);
+  (report.rows || []).forEach((row) => summary.addRow([safeName(row.agent_name), row.assignments, row.total_contacted, row.total_follow_up, row.total_potential, row.total_cancelled_rejected, row.total_client, ...(isTeamSales() ? [] : [row.within_five, performanceRate(row)]), row.appointments, row.show_ups, row.due_now]));
+  trend.addRow(["Minggu bermula", workerLabel(), "Lead ditugaskan", "Total Contacted", "Total Follow Up", "Total Potential", "Total Cancelled & Rejected", "Total Client", ...(isTeamSales() ? [] : ["CALL NOW ≤5 min", "Kadar ≤5 min"]), "Appointment", "Show Up"]);
   (report.weeks || []).forEach((week) => {
     const agent = (report.rows || []).find((row) => row.agent_id === week.agent_id);
-    trend.addRow([new Date(`${week.week_start}T00:00:00Z`), safeName(agent?.agent_name || ""), week.assignments, week.total_contacted, week.total_follow_up, week.total_potential, week.total_cancelled_rejected, week.total_client, week.within_five, performanceRate(week), week.appointments, week.show_ups]);
+    trend.addRow([new Date(`${week.week_start}T00:00:00Z`), safeName(agent?.agent_name || ""), week.assignments, week.total_contacted, week.total_follow_up, week.total_potential, week.total_cancelled_rejected, week.total_client, ...(isTeamSales() ? [] : [week.within_five, performanceRate(week)]), week.appointments, week.show_ups]);
   });
   summary.getRow(3).font = { bold: true };
   trend.getRow(1).font = { bold: true };
-  summary.getColumn(9).numFmt = "0.0%";
-  trend.getColumn(10).numFmt = "0.0%";
+  if (!isTeamSales()) { summary.getColumn(9).numFmt = "0.0%"; trend.getColumn(10).numFmt = "0.0%"; }
   trend.getColumn(1).numFmt = "dd/mm/yyyy";
   [summary, trend].forEach((sheet) => sheet.columns.forEach((column) => { column.width = 22; }));
   const buffer = await workbook.xlsx.writeBuffer();
-  downloadFile(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), `leadlaju-prestasi-ejen-${report.from}-${report.to}.xlsx`);
+  downloadFile(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), `leadlaju-prestasi-${isTeamSales() ? "team-sales" : "ejen"}-${report.from}-${report.to}.xlsx`);
 }
 
 function renderAll() {
@@ -6704,6 +6824,7 @@ function renderAll() {
   renderLeadMonitor();
   updateLifecycleMutationGate();
   syncMobileNavigation();
+  updateWorkerLabels();
   if (remoteDatabaseMode && activeView === "dashboard" && !isAdmin() && Date.now() - ownPerformanceLoadedAt > 300000) loadOwnPerformance();
   if (remoteDatabaseMode && activeView === "performance" && isAdmin() && performanceReport && Date.now() - performanceLoadedAt > 300000) loadPerformanceReport();
 }
@@ -6807,7 +6928,7 @@ function openAgentModal(agentId = null) {
   editingAgentId = agent?.id || null;
   elements.agentForm.reset();
   elements.agentModalKicker.textContent = agent ? "Kemaskini ahli pasukan" : "Ahli pasukan baru";
-  elements.agentModalTitle.textContent = agent ? "Edit Ejen" : "Daftar Ejen";
+  elements.agentModalTitle.textContent = `${agent ? "Edit" : "Daftar"} ${workerLabel()}`;
   elements.agentPasswordLabel.textContent = agent ? "Kata laluan baru (optional)" : "Kata laluan sementara";
   elements.agentPassword.required = !agent;
   elements.agentPassword.placeholder = agent ? "Biarkan kosong jika tidak mahu tukar" : "Minimum 8 aksara";
@@ -7554,7 +7675,7 @@ async function updateLeadStatusFromLog(leadId, nextStatus, field = null) {
   const normalizedStatus = normalizeSheetStatus(nextStatus);
   if (getCurrentUser()?.role === "agent" && getLeadVisualStatus(lead) === "new" && normalizedStatus !== "new") {
     if (field) field.value = "new";
-    showToast("CALL NOW diperlukan", "Tekan CALL NOW sebelum menukar status lead.", "error");
+    showToast(isTeamSales() ? "Call atau WhatsApp diperlukan" : "CALL NOW diperlukan", isTeamSales() ? "Tekan Call atau WhatsApp sebelum menukar status lead." : "Tekan CALL NOW sebelum menukar status lead.", "error");
     return false;
   }
   if (getCurrentUser()?.role === "agent" && normalizedStatus === "new") {
@@ -8538,4 +8659,13 @@ function initializeFloatingNavigation() {
 initializeFloatingNavigation();
 lockViewportZoom();
 window.addEventListener("online", flushContactOutbox);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && isTeamSales()) flushContactOutbox();
+});
+document.addEventListener("click", event => {
+  const link = event.target.closest("[data-sales-contact]");
+  if (!link || !isTeamSales()) return;
+  event.preventDefault();
+  handleSalesContact(link.dataset.salesLead, link.dataset.salesContact, link.href);
+});
 bootstrap();
