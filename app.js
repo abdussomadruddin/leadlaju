@@ -1171,6 +1171,11 @@ function startAuthenticatedApp(user, options = {}) {
   switchView(getRequestedStartView(), { historyMode: "replace" });
   renderAll();
   enforceAgentNotificationAccess();
+  if (pendingNotificationLeadId) openNotificationLead(pendingNotificationLeadId);
+  if (new URLSearchParams(window.location.search).get("status") === "new") {
+    elements.leadFilter.value = "new";
+    renderLeadsTable();
+  }
   if (new URLSearchParams(window.location.search).get("setup") === "1") {
     openOwnDetails();
     elements.ownPassword.required = true;
@@ -1437,7 +1442,36 @@ function showSignupForm(show) {
   }
 }
 
+let loginPending = false;
 async function handleLogin(event) {
+  event.preventDefault();
+  if (loginPending) return;
+  if (!elements.loginEmail.value.trim() || !elements.loginPassword.value) {
+    setLoginError("Masukkan emel dan kata laluan.");
+    return;
+  }
+  const button = elements.loginForm.querySelector('button[type="submit"]');
+  const originalContent = button.innerHTML;
+  loginPending = true;
+  button.disabled = true;
+  button.classList.add("login-pending");
+  button.innerHTML = '<span class="login-spinner" aria-hidden="true"></span><span role="status">Sedang log masuk…</span>';
+  elements.loginForm.setAttribute("aria-busy", "true");
+  setLoginError("");
+  try {
+    await performLogin(event);
+  } catch (error) {
+    setLoginError("Log masuk belum selesai. Semak sambungan dan cuba lagi.");
+  } finally {
+    loginPending = false;
+    button.disabled = false;
+    button.classList.remove("login-pending");
+    button.innerHTML = originalContent;
+    elements.loginForm.removeAttribute("aria-busy");
+  }
+}
+
+async function performLogin(event) {
   event.preventDefault();
   const email = elements.loginEmail.value.trim().toLowerCase();
   const password = elements.loginPassword.value;
@@ -2351,6 +2385,40 @@ function getRequestedStartView() {
   return ["dashboard", "leads", "appointments", "follow-up-due", "bulletins", "agents", "performance", "projects", "lead-monitor", "import-leads", "integrations", "brands"].includes(requestedView) ? requestedView : isMaster() ? "brands" : "dashboard";
 }
 
+async function openNotificationLead(leadId) {
+  const requestedId = String(leadId || "").trim();
+  if (!requestedId) return;
+  pendingNotificationLeadId = requestedId;
+  if (!getCurrentUser()) return;
+  let lead = state.leads.find((item) => item.id === requestedId || item.dedupeKey === requestedId);
+  if (!lead && remoteDatabaseMode) {
+    await loadRemoteState(state.currentUserId);
+    lead = state.leads.find((item) => item.id === requestedId || item.dedupeKey === requestedId);
+  }
+  if (!lead || !canAccessLead(lead) || isVisuallyExpiredAssignment(lead)) {
+    pendingNotificationLeadId = "";
+    showToast("Lead tidak tersedia", "Lead ini mungkin sudah luput atau tidak lagi dalam akses anda.", "error");
+    return;
+  }
+  pendingNotificationLeadId = "";
+  if (!isTeamSales() && lead.status === "new" && !isAdmin()) {
+    switchView("dashboard");
+    renderAll();
+    return;
+  }
+  elements.leadSearch.value = lead.name;
+  [elements.leadFilter, elements.leadFollowUpFilter, elements.leadAgentFilter, elements.leadPeriodFilter].forEach((field) => { if (field) field.value = "all"; });
+  expandedLeadLogIds.add(lead.id);
+  leadLogVisibleLimit = Math.max(LEAD_LOG_PAGE_SIZE, state.leads.length);
+  switchView("leads");
+  renderLeadsTable();
+  window.requestAnimationFrame(() => {
+    const row = [...elements.leadsTableBody.querySelectorAll("[data-lead-row]")].find((item) => item.dataset.leadRow === lead.id);
+    row?.scrollIntoView({ block: "center", behavior: "instant" });
+    row?.querySelector("button")?.focus({ preventScroll: true });
+  });
+}
+
 async function syncNotificationLead(leadId) {
   const requestedId = String(leadId || "").trim();
   if (!requestedId || !getSheetEndpoint()) return false;
@@ -2575,7 +2643,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261001-team-sales-templates-v129")
+      .register("/sw.js?v=20261001-notifications-cards-v130")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -4392,7 +4460,7 @@ async function sendSystemNotification(lead, options = {}) {
     badge: NOTIFICATION_BADGE,
     data: {
       leadId: lead.id,
-      url: getNotificationStartUrl(),
+      url: `${getNotificationStartUrl("leads")}&lead=${encodeURIComponent(lead.id)}`,
     },
   };
 
@@ -4410,7 +4478,7 @@ async function sendSystemNotification(lead, options = {}) {
     const notification = new Notification(title, notificationOptions);
     notification.onclick = () => {
       window.focus();
-      switchView("dashboard");
+      openNotificationLead(lead.id);
       notification.close();
     };
   } catch (error) {
@@ -5628,7 +5696,9 @@ function renderLeadsTable() {
             : phoneVisible && lead.phone
               ? `<a class="contact-edit-button" href="tel:${escapeHtml(String(lead.phone).replace(/[^+\d]/g, ""))}">Call</a>`
               : `<button class="contact-edit-button" type="button" disabled title="Nombor telefon belum tersedia">Call</button>`;
-          const followUpButton = (isTeamSales() ? renderSalesContactButton(lead, "whatsapp") : "") + renderLeadFollowUpButton(lead) + (isTeamSales() ? renderSalesContactState(lead) : "");
+          const followUpButton = (isTeamSales() && visualStatus === "new"
+            ? renderSalesContactButton(lead, "whatsapp")
+            : renderLeadFollowUpButton(lead)) + (isTeamSales() ? renderSalesContactState(lead) : "");
           const editButton = canViewLeadPhone(lead)
             ? `<button class="contact-edit-button" type="button" data-lead-edit="${lead.id}">Edit</button>`
             : "";
@@ -5652,7 +5722,7 @@ function renderLeadsTable() {
               <td data-label="${projectLabel()}"><strong>${escapeHtml(lead.project || "Tidak dinyatakan")}</strong></td>
               <td data-label="Status"><select class="lead-status-select ${visualStatus}" data-lead-status="${lead.id}" aria-label="Status ${escapeHtml(lead.name)}">${statusOptions}</select></td>
               <td data-label="Call">${callButton}</td>
-              <td data-label="Follow Up">${followUpButton}</td>
+              <td data-label="${isTeamSales() && visualStatus === "new" ? "WhatsApp" : "Follow Up"}" class="lead-message-action">${followUpButton}</td>
               <td data-label="Copy">${renderLeadCopyButton(lead)}</td>
               <td data-label="Butiran"><button class="lead-log-toggle" type="button" data-lead-expand="${lead.id}" aria-expanded="${expanded}" aria-controls="lead-log-detail-${lead.id}" aria-label="${expanded ? "Tutup" : "Buka"} butiran ${escapeHtml(lead.name)}"><span>${expanded ? "Tutup" : "Lihat"}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></button></td>
             </tr>
@@ -8502,12 +8572,25 @@ if ("serviceWorker" in navigator) {
         leadTimingDeliveries.delete(timing.key);
       }
     }
+    if (event.data?.type === "OPEN_LEAD") {
+      (async () => {
+        if (event.data.leadSnapshot) await consumeAssignmentHandoff(event.data);
+        await openNotificationLead(event.data.leadId);
+      })().catch(() => showToast("Lead belum dimuatkan", "Semak sambungan dan cuba lagi.", "error"));
+    }
     if (event.data?.type === "OPEN_DASHBOARD") {
       switchView("dashboard");
       if (event.data.leadSnapshot) consumeAssignmentHandoff(event.data);
       if (event.data.leadId) syncNotificationLead(event.data.leadId);
     }
-    if (event.data?.type === "OPEN_VIEW") switchView(event.data.view || "dashboard");
+    if (event.data?.type === "OPEN_VIEW") {
+      if (event.data.view === "leads" && event.data.leadIds?.length > 1) {
+        elements.leadSearch.value = "";
+        elements.leadFilter.value = "new";
+        [elements.leadFollowUpFilter, elements.leadAgentFilter, elements.leadPeriodFilter].forEach((field) => { if (field) field.value = "all"; });
+      }
+      switchView(event.data.view || "dashboard");
+    }
     if (event.data?.type === "OPEN_BULLETIN") { pendingBulletinId = event.data.bulletinId || ""; switchView("bulletins"); loadBulletinFeed().then(openRequestedBulletin); }
     if (event.data?.type === "OPEN_POTENTIAL_REMINDER") handlePotentialReminderNotification();
   });

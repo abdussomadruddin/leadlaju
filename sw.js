@@ -1,13 +1,13 @@
-const CACHE_NAME = "leadlaju-pwa-v20261001-team-sales-templates-v129";
+const CACHE_NAME = "leadlaju-pwa-v20261001-notifications-cards-v130";
 const LEAD_HANDOFF_CACHE = "leadlaju-notification-snapshots";
 const LEAD_HANDOFF_SCHEMA_VERSION = 1;
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20261001-team-sales-templates-v129",
+  "/styles.css?v=20261001-notifications-cards-v130",
   "/vendor/exceljs.min.js?v=4.4.0",
-  "/app.js?v=20261001-team-sales-templates-v129",
-  "/manifest.webmanifest?v=20261001-team-sales-templates-v129",
+  "/app.js?v=20261001-notifications-cards-v130",
+  "/manifest.webmanifest?v=20261001-notifications-cards-v130",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",
   "/assets/icon-512.png",
@@ -197,10 +197,17 @@ async function acknowledgeLeadHandoff(data = {}) {
   }
 }
 
-async function showLeadNotification(payload = {}, timing = createLeadTiming(payload), config = {}) {
+let leadNotificationChain = Promise.resolve();
+function showLeadNotification(payload = {}, timing = createLeadTiming(payload), config = {}) {
+  const task = leadNotificationChain.catch(() => {}).then(() => showLeadNotificationSerialized(payload, timing, config));
+  leadNotificationChain = task;
+  return task;
+}
+
+async function showLeadNotificationSerialized(payload = {}, timing = createLeadTiming(payload), config = {}) {
   logLeadTiming("SW_NOTIFICATION_START", timing);
   if (!config.snapshotCached) await cacheLeadSnapshot(payload);
-  const title = payload.title || "Lead baru masuk";
+  let title = payload.title || "Lead baru masuk";
   const options = {
     body: payload.body || "Lead baru perlu dihubungi dalam masa 5 minit.",
     tag: payload.tag || payload.leadId || "leadlaju-new-lead",
@@ -218,6 +225,25 @@ async function showLeadNotification(payload = {}, timing = createLeadTiming(payl
       bulletinId: payload.bulletinId || null,
     }
   };
+  if (String(options.tag).startsWith("leadlaju-sales-") && payload.leadId) {
+    const snapshot = payload.leadSnapshot || {};
+    const groupTag = `leadlaju-sales-group-${snapshot.brand_id || ""}-${snapshot.assigned_agent_id || ""}`;
+    const existing = await self.registration.getNotifications();
+    const previous = existing.find((item) => item.data?.groupKey === groupTag && Date.now() - Number(item.data?.groupUpdatedAt || 0) < 15000);
+    const leadIds = [...new Set([...(previous?.data?.leadIds || []), payload.leadId])];
+    options.tag = previous?.tag || `${groupTag}-${payload.leadId}`;
+    options.data.leadIds = leadIds;
+    options.data.groupKey = groupTag;
+    options.data.groupUpdatedAt = Date.now();
+    if (leadIds.length > 1) {
+      title = `${leadIds.length} lead baharu masuk`;
+      options.body = "Tekan untuk lihat semua lead baharu anda.";
+      options.data.leadId = null;
+      options.data.leadSnapshot = null;
+      options.data.view = "leads";
+      options.data.url = "/?view=leads&status=new";
+    }
+  }
   if (String(options.tag).startsWith("leadlaju-active-")) {
     const existing = await self.registration.getNotifications();
     existing
@@ -316,7 +342,9 @@ self.addEventListener("push", (event) => {
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const notificationData = event.notification.data || {};
-  const targetUrl = new URL(notificationData.url || "/", self.location.origin).href;
+  const notificationUrl = new URL(notificationData.url || "/", self.location.origin);
+  if (notificationData.leadId) notificationUrl.searchParams.set("lead", notificationData.leadId);
+  const targetUrl = notificationUrl.href;
   const view = notificationData.view || null;
 
   event.waitUntil(
@@ -341,9 +369,10 @@ self.addEventListener("notificationclick", (event) => {
         existingClient.postMessage({
           type: notificationData.reminderType === "potential"
             ? "OPEN_POTENTIAL_REMINDER"
-            : notificationData.leadId ? "OPEN_DASHBOARD" : view ? "OPEN_VIEW" : "OPEN_DASHBOARD",
+            : notificationData.leadId ? "OPEN_LEAD" : view ? "OPEN_VIEW" : "OPEN_DASHBOARD",
           view,
           leadId: notificationData.leadId || null,
+          leadIds: notificationData.leadIds || [],
           leadSnapshot: notificationData.leadSnapshot || null,
           handoffKey: leadHandoffIdentity(notificationData)?.key || null,
           potentialCount: Number(notificationData.potentialCount) || 0,

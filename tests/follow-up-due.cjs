@@ -82,5 +82,5 @@ test('Follow Up Due navigation, filters and direct WhatsApp follow-up are wired 
   assert.doesNotMatch(app, /data-follow-up-open/);
   assert.match(app, /"follow-up-due": "Follow Up Due"/);
   assert.match(css, /@media \(max-width: 650px\)[\s\S]*\.follow-up-due-item/);
-  assert.match(sw, /notificationData\.leadId \? "OPEN_DASHBOARD" : view \? "OPEN_VIEW" : "OPEN_DASHBOARD"/);
+  assert.match(sw, /notificationData\.leadId \? "OPEN_LEAD" : view \? "OPEN_VIEW" : "OPEN_DASHBOARD"/);
 });

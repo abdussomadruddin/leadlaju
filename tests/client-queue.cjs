@@ -794,7 +794,7 @@ test('notification click fetches the assigned lead directly for an instant dashb
   const instantBody = source.slice(instantStart, source.indexOf('\nasync function showNotificationLeadImmediately', instantStart));
   assert.ok(instantBody.indexOf('renderAll();') < instantBody.indexOf('Promise.resolve(savePromise)'));
   assert.doesNotMatch(instantBody, /await savePromise/);
-  assert.match(worker, /notificationData\.leadId \? "OPEN_DASHBOARD"/);
+  assert.match(worker, /notificationData\.leadId \? "OPEN_LEAD"/);
   assert.match(worker, /leadlaju-notification-snapshots/);
   assert.match(worker, /async function cacheLeadSnapshot\(payload/);
   assert.match(worker, /await cacheLeadSnapshot\(payload\)/);

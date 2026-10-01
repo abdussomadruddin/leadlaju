@@ -471,6 +471,28 @@ svg {
   stroke-width: 2;
 }
 
+.login-button.login-pending {
+  cursor: progress;
+  transform: none;
+  opacity: 1;
+}
+
+.login-spinner {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: login-spin 800ms linear infinite;
+}
+
+@keyframes login-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .login-spinner { animation: none; }
+}
+
 .demo-credentials {
   display: flex;
   gap: 10px;
@@ -5689,11 +5711,16 @@ td small {
 .team-sales-brand .stat-card:has(#stat-conversion),
 .team-sales-brand .team-panel:has(#lead-ready-list) { display: none; }
 .team-sales-brand .stats-grid { grid-template-columns: repeat(auto-fit,minmax(160px,1fr)); }
-.team-sales-brand .lead-log-summary td[data-label="Follow Up"] { display: flex; flex-wrap: wrap; gap: 6px; }
+.team-sales-brand .lead-log-summary .lead-message-action { min-width: 0; }
+.team-sales-brand .lead-log-summary .lead-message-action > .sales-contact-state { margin-top: 5px; }
 @media (max-width: 850px) {
   .sales-lead-card { padding: 12px; gap: 10px; border-radius: 15px; }
   .sales-lead-card strong { font-size: 15px; }
-  .team-sales-brand .lead-log-summary td[data-label="Follow Up"] { display: flex; min-width: 0; }
+  .team-sales-brand .lead-log-summary .lead-message-action { display: block; min-width: 0; }
   .team-sales-brand .lead-log-summary .sales-contact-whatsapp,
   .team-sales-brand .lead-log-summary .lead-follow-up-button { width: 100%; font-size: 11px; }
+  .team-sales-brand .lead-log-summary td:nth-child(n+4) { align-self: stretch; padding-top: 10px; padding-bottom: 10px; }
+  .team-sales-brand .lead-log-summary .contact-edit-button,
+  .team-sales-brand .lead-log-summary .lead-log-toggle { min-height: 42px; height: 42px; border-radius: 12px; white-space: nowrap; }
+  .team-sales-brand .lead-log-summary td:last-child { align-items: flex-end; padding-bottom: 10px; }
 }

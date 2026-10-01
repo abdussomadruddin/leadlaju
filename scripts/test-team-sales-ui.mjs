@@ -97,7 +97,11 @@ try {
    assert.equal(await page.locator('#project-name').getAttribute('placeholder'),'Nama produk');checks++;
    assert.equal(await page.locator('#projects-view h2').innerText(),'Produk');checks++;
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,`${name}: lead controls fit`);checks++;
-   assert.equal(await page.locator('#leads-view [data-sales-contact="whatsapp"]').count(),3);checks++;
+   assert.equal(await page.locator('#leads-view [data-sales-contact="whatsapp"]').count(),1);checks++;
+   assert.equal(await page.locator('#leads-view [data-lead-follow-up]').count(),2);checks++;
+   for (const action of await page.locator('#leads-view .lead-message-action').all()) {
+    assert.equal(await action.locator('[data-sales-contact="whatsapp"], [data-lead-follow-up]').count(),1,'One WhatsApp or Follow Up per card');checks++;
+   }
    await page.screenshot({path:path.join(artifacts,`${name}-${role}-leads.png`),fullPage:true});
    if(role==='master'){
     await page.evaluate(()=>switchView('performance'));await page.waitForFunction(()=>document.querySelector('#performance-cards').children.length>0);
