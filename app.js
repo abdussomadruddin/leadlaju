@@ -2643,7 +2643,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261001-notifications-cards-v130")
+      .register("/sw.js?v=20261001-smooth-whatsapp-v131")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -5232,9 +5232,12 @@ async function handleSalesContact(leadId, channel, destination) {
     return;
   }
   if (brandVersion !== brandContextVersion) return;
-  salesContactStates.set(leadId, "pending"); renderAll();
+  salesContactStates.set(leadId, "pending");
   // The durable action is recorded before handing off to the phone/WhatsApp.
   // Do not optimistically claim Contacted before the RPC confirms it.
+  // Hand off immediately after the durable write, without repainting the page
+  // or waiting for network work that may pause when the external app opens.
+  window.location.assign(destination);
   const submission = submitContactAction(action).then(async () => {
     if (brandVersion !== brandContextVersion) return;
     salesContactStates.delete(leadId);
@@ -5242,9 +5245,8 @@ async function handleSalesContact(leadId, channel, destination) {
   }).catch(error => {
     if (brandVersion !== brandContextVersion) return;
     salesContactStates.set(leadId, error.authoritativeRejection ? "failed" : "pending"); renderAll();
-    showToast(error.authoritativeRejection ? "Tindakan gagal disimpan" : "Menunggu sambungan", error.authoritativeRejection ? "Sync dan cuba semula." : "Tindakan akan dicuba semula apabila talian kembali.", "error");
+    if (error.authoritativeRejection) showToast("Tindakan gagal disimpan", "Sync dan cuba semula.", "error");
   });
-  window.location.assign(destination);
   await submission;
 }
 
