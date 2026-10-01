@@ -1,7 +1,7 @@
 {
-  "name": "LeadLaju - Property Lead Router",
+  "name": "LeadLaju - Lead Management",
   "short_name": "LeadLaju",
-  "description": "Terima, agih dan hubungi lead hartanah dengan pantas.",
+  "description": "Terima, agih, urus dan hubungi lead dengan pantas.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

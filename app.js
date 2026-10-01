@@ -213,23 +213,36 @@ const salesContactStates = new Map();
 function isTeamSales() { return activeBrand?.distribution_mode === "team_sales"; }
 function workerLabel() { return isTeamSales() ? "Team Sales" : "Ejen"; }
 function signupWorkerLabel() { return signupBrand?.distribution_mode === "team_sales" ? "Team Sales" : "ejen"; }
+function projectLabel() { return isTeamSales() ? "Produk" : "Projek"; }
 function systemWorkerText(text, sales = isTeamSales()) {
-  return sales ? String(text).replace(/\bProperty Agent\b|\bEjen\b|\bejen\b|\bAgent\b|\bagent\b/g, "Team Sales") : text;
+  return sales ? String(text)
+    .replace(/\bProperty Agent\b|\bEjen\b|\bejen\b|\bAgent\b|\bagent\b/g, "Team Sales")
+    .replace(/\bPROJEK\b/g, "PRODUK").replace(/\bProjek\b/g, "Produk").replace(/\bprojek\b/g, "produk") : text;
 }
 // Capture authored labels only, never lead names, notes or account details.
 const workerLabelNodes = [];
 const workerLabelWalker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
 while (workerLabelWalker.nextNode()) {
   const node = workerLabelWalker.currentNode;
-  if (/\b(ejen|agent)\b/i.test(node.nodeValue) && !node.parentElement.closest('script,style,#master-brand-form,#sidebar-user-name')) workerLabelNodes.push({ node, original: node.nodeValue, last: node.nodeValue });
+  if (/\b(ejen|agent|projek)\b/i.test(node.nodeValue) && !node.parentElement.closest('script,style,pre,code,#master-brand-form,#sidebar-user-name')) workerLabelNodes.push({ node, original: node.nodeValue, last: node.nodeValue });
 }
+const projectLabelAttributes = [...document.querySelectorAll('[placeholder],[aria-label],[title]')].flatMap(node =>
+  ['placeholder', 'aria-label', 'title'].filter(attribute => /\bprojek\b/i.test(node.getAttribute(attribute) || ''))
+    .map(attribute => ({node, attribute, original: node.getAttribute(attribute), last: node.getAttribute(attribute)})),
+);
 function updateWorkerLabels() {
+  const sales = !elements.signupForm.hidden && signupBrand ? signupBrand.distribution_mode === 'team_sales' : isTeamSales();
   workerLabelNodes.forEach(item => {
     if (!item.node.isConnected || item.node.nodeValue !== item.last) return;
-    item.last = systemWorkerText(item.original, !elements.signupForm.hidden && signupBrand ? signupBrand.distribution_mode === 'team_sales' : isTeamSales());
+    item.last = systemWorkerText(item.original, sales);
     item.node.nodeValue = item.last;
   });
-  ['#lead-agent-filter','#follow-up-agent-filter','#monitor-agent-filter','#performance-agent','#bulletin-project'].forEach(selector => {
+  projectLabelAttributes.forEach(item => {
+    if (!item.node.isConnected || item.node.getAttribute(item.attribute) !== item.last) return;
+    item.last = systemWorkerText(item.original, sales);
+    item.node.setAttribute(item.attribute, item.last);
+  });
+  ['#lead-agent-filter','#follow-up-agent-filter','#monitor-agent-filter','#performance-agent','#bulletin-project','#appointment-project-filter','#follow-up-project-filter','#performance-project'].forEach(selector => {
     const select = document.querySelector(selector);
     select?.querySelectorAll('option').forEach(option => {
       if (!option.value || option.value === 'all' || option.value === 'unassigned') {
@@ -1320,7 +1333,7 @@ function setLoginError(message) {
 }
 
 function setSignupError(message) {
-  elements.signupError.textContent = message;
+  elements.signupError.textContent = systemWorkerText(message, signupBrand?.distribution_mode === "team_sales");
 }
 
 function renderSignupProjectOptions() {
@@ -1335,7 +1348,7 @@ function renderSignupProjectOptions() {
         <input type="checkbox" name="signup-project" value="${escapeHtml(project.id)}" ${selectedIds.has(project.id) ? "checked" : ""} />
         <span>${escapeHtml(project.name)}</span>
       </label>`).join("")
-    : '<p class="field-error">Tiada projek aktif. Hubungi admin sebelum mendaftar.</p>';
+    : `<p class="field-error">${systemWorkerText("Tiada projek aktif. Hubungi admin sebelum mendaftar.", signupBrand?.distribution_mode === "team_sales")}</p>`;
 }
 
 async function syncSignupProjects() {
@@ -1404,7 +1417,7 @@ function showSignupForm(show) {
     signupProjects = [];
     signupBrandReady = false;
     document.querySelector("#signup-brand-label").textContent = "Pendaftaran ejen";
-    elements.signupProjectCheckboxes.textContent = "Memuatkan projek brand…";
+    elements.signupProjectCheckboxes.textContent = systemWorkerText("Memuatkan projek brand…", signupBrand?.distribution_mode === "team_sales");
     elements.signupForm.querySelector('button[type="submit"]').disabled = true;
     syncSignupProjects();
     signupProjectSyncTimer = window.setInterval(syncSignupProjects, SIGNUP_PROJECT_SYNC_INTERVAL_SECONDS * 1000);
@@ -2550,7 +2563,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261001-push-recovery-v126")
+      .register("/sw.js?v=20261001-general-labels-v127")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -3323,7 +3336,7 @@ async function addManualLead(event) {
   const source = elements.manualLeadSource.value;
 
   if (!name || !phone || !project) {
-    elements.manualLeadError.textContent = "Masukkan nama, nombor telefon dan projek.";
+    elements.manualLeadError.textContent = systemWorkerText("Masukkan nama, nombor telefon dan projek.");
     return;
   }
 
@@ -3462,7 +3475,7 @@ function normalizeLeadImportRows(table) {
     if (!raw.name) errors.push("nama tiada");
     if (!normalizePhone(raw.phone)) errors.push("telefon tiada");
     const canonicalProject = projects.get(String(raw.project || "").toLowerCase());
-    if (!canonicalProject) errors.push("projek tidak aktif/tidak wujud");
+    if (!canonicalProject) errors.push(systemWorkerText("projek tidak aktif/tidak wujud"));
     return {
       rowNumber: index + 2,
       name: raw.name || "",
@@ -3582,7 +3595,7 @@ function downloadFile(blob, filename) {
 function leadSampleRows() {
   return [
     LEAD_IMPORT_HEADERS,
-    ["Nama Lead", "60123456789", "lead@example.com", "Kuala Lumpur", state.projects.find((project) => project.active)?.name || "Nama Projek"],
+    ["Nama Lead", "60123456789", "lead@example.com", "Kuala Lumpur", state.projects.find((project) => project.active)?.name || systemWorkerText("Nama Projek")],
   ];
 }
 
@@ -4349,7 +4362,7 @@ async function sendSystemNotification(lead, options = {}) {
   if (!("Notification" in window) || Notification.permission !== "granted") return;
 
   const agent = getAgent(lead.assignedAgentId);
-  const title = `Lead baru: ${lead.project || "Projek baru"}`;
+  const title = `Lead baru: ${lead.project || systemWorkerText("Projek baru")}`;
   const notificationOptions = {
     body: isTeamSales() ? `${lead.name}\nLead baharu tersedia untuk Call atau WhatsApp.` : `${lead.name}\nNombor dibuka selepas CALL NOW. Diberikan kepada ${agent?.name || "ejen"}.`,
     tag: isTeamSales() ? `leadlaju-sales-${lead.id}` : `leadlaju-active-${lead.assignedAgentId}`,
@@ -5044,7 +5057,7 @@ async function handleCall(leadId) {
     saveState();
     showToast(
       "Lead berjaya dikunci",
-      `${lead.name} untuk projek ${lead.project} kini milik ${agent?.name || "ejen ini"}.`,
+      `${lead.name} ${systemWorkerText("untuk projek")} ${lead.project} kini milik ${agent?.name || systemWorkerText("ejen ini")}.`,
     );
     renderAll();
 
@@ -5477,7 +5490,7 @@ function leadDetailsCopyText(lead) {
     `Nama: ${String(lead.name || "-").trim()}`,
     `No Phone: ${String(lead.phone || "-").trim()}`,
     `Email: ${String(lead.email || "-").trim()}`,
-    `Projek: ${String(lead.project || "Tidak dinyatakan").trim()}`,
+    `${projectLabel()}: ${String(lead.project || "Tidak dinyatakan").trim()}`,
   ].join("\n");
 }
 
@@ -5616,7 +5629,7 @@ function renderLeadsTable() {
           return `
             <tr class="lead-log-summary" data-lead-row="${lead.id}">
               <td data-label="Nama"><strong>${escapeHtml(lead.name)}</strong></td>
-              <td data-label="Projek"><strong>${escapeHtml(lead.project || "Tidak dinyatakan")}</strong></td>
+              <td data-label="${projectLabel()}"><strong>${escapeHtml(lead.project || "Tidak dinyatakan")}</strong></td>
               <td data-label="Status"><select class="lead-status-select ${visualStatus}" data-lead-status="${lead.id}" aria-label="Status ${escapeHtml(lead.name)}">${statusOptions}</select></td>
               <td data-label="Call">${callButton}</td>
               <td data-label="Follow Up">${followUpButton}</td>
@@ -5634,7 +5647,7 @@ function renderLeadsTable() {
                   class="lead-note-field"
                   data-lead-note="${lead.id}"
                   rows="3"
-                  placeholder="Tambah nota follow-up, minat projek, bajet atau temujanji"
+                  placeholder="${systemWorkerText("Tambah nota follow-up, minat projek, bajet atau temujanji")}"
                 >${escapeHtml(leadNoteDrafts.get(leadNoteDraftKey(lead.id)) ?? lead.notes ?? "")}</textarea>
                 <div class="lead-note-actions">
                   <button class="lead-note-save" type="button" data-lead-note-save="${lead.id}">Simpan nota</button>
@@ -5689,7 +5702,7 @@ function renderAppointments() {
   elements.navAppointmentCount.hidden = upcomingCount === 0;
   const projects = [...new Set(visible.map((appointment) => appointment.project).filter(Boolean))].sort();
   elements.appointmentProjectFilter.innerHTML = [
-    '<option value="all">Semua projek</option>',
+    `<option value="all">${systemWorkerText("Semua projek")}</option>`,
     ...projects.map((project) => `<option value="${escapeHtml(project)}">${escapeHtml(project)}</option>`),
   ].join("");
   elements.appointmentProjectFilter.value = projects.includes(selectedProject) ? selectedProject : "all";
@@ -5893,7 +5906,7 @@ function renderAgents() {
     .map(
       (agent) => {
         const isPendingAgent = agent.role === "agent" && agent.approvalStatus === "pending";
-        const roleLabel = agent.role === "admin" ? "Administrator" : isPendingAgent ? "Menunggu approval" : isTeamSales() ? "Team Sales" : "Property Agent";
+        const roleLabel = agent.role === "admin" ? "Administrator" : isPendingAgent ? "Menunggu approval" : isTeamSales() ? "Team Sales" : "Agent";
         const projectNames = normalizeProjectIds(agent.eligibleProjectIds)
           .map((projectId) => state.projects.find((project) => project.id === projectId)?.name)
           .filter(Boolean);
@@ -5943,7 +5956,7 @@ function renderAgents() {
             <span>Telefon <b>${escapeHtml(agent.phone)}</b></span>
             <span>Emel <b>${escapeHtml(agent.email)}</b></span>
             <span>Lead dikendalikan <b>${agent.leadsHandled || 0}</b></span>
-            <span>Projek <b>${escapeHtml(projectNames.join(", ") || "Belum dipilih")}</b></span>
+            <span>${projectLabel()} <b>${escapeHtml(projectNames.join(", ") || "Belum dipilih")}</b></span>
           </div>
           <div class="agent-card-actions">
             ${actionButtons}
@@ -5979,7 +5992,7 @@ function renderProjects() {
         </div>
         <details class="project-status-dropdown" data-project-status="${project.id}" ${expandedProjectStatusIds.has(project.id) ? "open" : ""}>
           <summary>
-            <span>Status lead mengikut projek</span>
+            <span>${systemWorkerText("Status lead mengikut projek")}</span>
             <b>${projectLeads.length} lead</b>
           </summary>
           <div class="project-status-list">
@@ -5993,7 +6006,7 @@ function renderProjects() {
             <summary>Pilihan lanjut</summary>
             <div class="project-danger-actions">
               <small>${systemWorkerText("Hanya projek tanpa lead, buletin atau ejen yang dipautkan boleh dipadam.")}</small>
-              <button class="text-button danger-text" type="button" data-project-delete="${escapeHtml(project.id)}">Padam projek</button>
+              <button class="text-button danger-text" type="button" data-project-delete="${escapeHtml(project.id)}">${systemWorkerText("Padam projek")}</button>
             </div>
           </details>
         </details>
@@ -6020,7 +6033,7 @@ function renderUser() {
   document.body.classList.toggle("team-sales-brand", isTeamSales());
   elements.sidebarAvatar.textContent = initials(user.name);
   elements.sidebarUserName.textContent = user.name;
-  elements.sidebarUserRole.textContent = user.role === "admin" ? "Administrator" : isTeamSales() ? "Team Sales" : "Property Agent";
+  elements.sidebarUserRole.textContent = user.role === "admin" ? "Administrator" : isTeamSales() ? "Team Sales" : "Agent";
   if (isMaster()) elements.sidebarUserRole.textContent = "Master";
   document.querySelector("#active-brand-label").textContent = activeBrand?.name || (isMaster() ? "Tiada brand aktif" : "Safrich");
   document.querySelector("#copy-agent-registration-link").disabled = !isAdmin() || !activeBrand?.slug || activeBrand.active === false;
@@ -6192,8 +6205,8 @@ function renderIntegrationProjects() {
   if (!elements.integrationProjects) return;
   const projects = state.projects.filter((project) => project.active);
   elements.integrationProjects.innerHTML = projects.length
-    ? `<span>Nama projek aktif:</span>${projects.map((project) => `<code>${escapeHtml(project.name)}</code>`).join("")}`
-    : '<span class="integration-warning">Tiada projek aktif. Lead Pabbly akan ditolak sehingga projek diaktifkan.</span>';
+    ? `<span>${systemWorkerText("Nama projek aktif:")}</span>${projects.map((project) => `<code>${escapeHtml(project.name)}</code>`).join("")}`
+    : `<span class="integration-warning">${systemWorkerText("Tiada projek aktif. Lead Pabbly akan ditolak sehingga projek diaktifkan.")}</span>`;
 }
 
 function formatIntegrationTime(value) {
@@ -6221,7 +6234,7 @@ function renderIntegrationConnectors() {
       phone: "{{Phone Number}}",
       email: "{{Email}}",
       city: "{{City}}",
-      project: state.projects.find((project) => project.active)?.name || "Nama projek aktif",
+      project: state.projects.find((project) => project.active)?.name || systemWorkerText("Nama projek aktif"),
       source: provider.source,
       created_at: "{{Created Time}}",
     }, null, 2);
@@ -6335,7 +6348,7 @@ function integrationPayload(provider) {
     phone: "{{Phone Number}}",
     email: "{{Email}}",
     city: "{{City}}",
-    project: state.projects.find((project) => project.active)?.name || "Nama projek aktif",
+    project: state.projects.find((project) => project.active)?.name || systemWorkerText("Nama projek aktif"),
     source: item.source,
     created_at: "{{Created Time}}",
   }, null, 2);
@@ -6514,7 +6527,7 @@ function renderFollowUpDue() {
   }
   if (isAdmin() && elements.followUpProjectFilter) {
     const projects = [...new Set(rows.map((item) => item.project).filter(Boolean))].sort();
-    elements.followUpProjectFilter.innerHTML = '<option value="all">Semua projek</option>' + projects
+    elements.followUpProjectFilter.innerHTML = `<option value="all">${systemWorkerText("Semua projek")}</option>` + projects
       .map((project) => `<option value="${escapeHtml(project)}">${escapeHtml(project)}</option>`).join("");
     elements.followUpProjectFilter.value = projects.includes(selectedProject) ? selectedProject : "all";
   }
@@ -6761,7 +6774,7 @@ function populatePerformanceFilters() {
   if (!isAdmin()) return;
   const project = elements.performanceProject.value;
   const agent = elements.performanceAgent.value;
-  elements.performanceProject.innerHTML = '<option value="">Semua projek</option>' + state.projects
+  elements.performanceProject.innerHTML = `<option value="">${systemWorkerText("Semua projek")}</option>` + state.projects
     .map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join("");
   elements.performanceAgent.innerHTML = '<option value="">Semua ejen</option>' + state.agents
     .filter((item) => item.role === "agent" && item.approvalStatus !== "rejected")
@@ -6852,7 +6865,7 @@ async function downloadPerformanceReport() {
   const trend = workbook.addWorksheet("Trend Mingguan");
   const safeName = (value) => /^[=+@-]/.test(String(value || "")) ? `'${value}` : String(value || "");
   summary.addRow([`Prestasi ${workerLabel()} Lead Laju`, `${report.from} hingga ${report.to}`]);
-  summary.addRow(["Projek", elements.performanceProject.selectedOptions[0]?.textContent || "Semua projek", workerLabel(), elements.performanceAgent.selectedOptions[0]?.textContent || `Semua ${workerLabel()}`]);
+  summary.addRow([projectLabel(), elements.performanceProject.selectedOptions[0]?.textContent || systemWorkerText("Semua projek"), workerLabel(), elements.performanceAgent.selectedOptions[0]?.textContent || `Semua ${workerLabel()}`]);
   summary.addRow([workerLabel(), "Lead ditugaskan", "Total Contacted", "Total Follow Up", "Total Potential", "Total Cancelled & Rejected", "Total Client", ...(isTeamSales() ? [] : ["CALL NOW ≤5 min", "Kadar ≤5 min"]), "Appointment", "Show Up", "Follow Up Due sekarang"]);
   (report.rows || []).forEach((row) => summary.addRow([safeName(row.agent_name), row.assignments, row.total_contacted, row.total_follow_up, row.total_potential, row.total_cancelled_rejected, row.total_client, ...(isTeamSales() ? [] : [row.within_five, performanceRate(row)]), row.appointments, row.show_ups, row.due_now]));
   trend.addRow(["Minggu bermula", workerLabel(), "Lead ditugaskan", "Total Contacted", "Total Follow Up", "Total Potential", "Total Cancelled & Rejected", "Total Client", ...(isTeamSales() ? [] : ["CALL NOW ≤5 min", "Kadar ≤5 min"]), "Appointment", "Show Up"]);
@@ -7006,7 +7019,7 @@ function openAgentModal(agentId = null) {
         <input type="checkbox" name="agent-project" value="${project.id}" ${selectedProjectIds.has(project.id) ? "checked" : ""} />
         <span>${escapeHtml(project.name)}</span>
       </label>`).join("")
-    : '<p class="field-error">Tambah projek aktif dahulu.</p>';
+    : `<p class="field-error">${systemWorkerText("Tambah projek aktif dahulu.")}</p>`;
   if (agent) {
     elements.agentName.value = agent.name;
     elements.agentPhone.value = agent.phone || "";
@@ -7141,7 +7154,7 @@ async function approveAgent(agentId) {
   const agent = getAgent(agentId);
   if (!agent || agent.approvalStatus !== "pending" || pendingAgentApprovals.has(agentId)) return;
   if (!normalizeProjectIds(agent.eligibleProjectIds).length) {
-    showToast("Pilih projek dahulu", `Edit ${agent.name} dan tick sekurang-kurangnya satu projek sebelum approve.`, "error");
+    showToast("Pilih projek dahulu", `Edit ${agent.name} ${systemWorkerText("dan tick sekurang-kurangnya satu projek sebelum approve.")}`, "error");
     openAgentModal(agentId);
     return;
   }
@@ -7245,7 +7258,7 @@ async function addProject(event) {
   const name = elements.projectName.value.trim().replace(/\s+/g, " ");
   if (!name) return;
   if (state.projects.some((project) => project.name.toLowerCase() === name.toLowerCase())) {
-    showToast("Projek sudah ada", "Gunakan nama projek lain.", "error");
+    showToast("Projek sudah ada", systemWorkerText("Gunakan nama projek lain."), "error");
     return;
   }
   // Supabase generates UUID project IDs; the local ID format is not a UUID.
@@ -7282,7 +7295,7 @@ async function deleteProject(projectId, button) {
   if (!guardLifecycleMutation() || !isAdmin()) return;
   const project = state.projects.find((item) => item.id === projectId);
   if (!project || !remoteDatabaseMode) return;
-  if (!confirmPermanentDelete("projek", project.name)) return;
+  if (!confirmPermanentDelete(systemWorkerText("projek"), project.name)) return;
 
   button.disabled = true;
   try {
@@ -7290,12 +7303,12 @@ async function deleteProject(projectId, button) {
     if (error) throw error;
     if (!data?.ok) {
       const reasons = {
-        has_leads: "Projek ini masih mempunyai lead. Nyahaktifkan projek jika tidak mahu menerima lead baharu.",
-        has_bulletins: "Projek ini masih digunakan oleh buletin. Alihkan atau arkibkan buletin dahulu.",
+        has_leads: systemWorkerText("Projek ini masih mempunyai lead. Nyahaktifkan projek jika tidak mahu menerima lead baharu."),
+        has_bulletins: systemWorkerText("Projek ini masih digunakan oleh buletin. Alihkan atau arkibkan buletin dahulu."),
         has_agents: systemWorkerText("Projek ini masih dipautkan kepada ejen. Buang projek daripada ejen dahulu."),
-        not_found: "Projek ini sudah tiada. Muat semula senarai projek.",
+        not_found: systemWorkerText("Projek ini sudah tiada. Muat semula senarai projek."),
       };
-      showToast("Projek tidak dipadam", reasons[data?.code] || "Cuba lagi selepas menyemak pautan projek.", "error");
+      showToast("Projek tidak dipadam", reasons[data?.code] || systemWorkerText("Cuba lagi selepas menyemak pautan projek."), "error");
       return;
     }
     state.projects = state.projects.filter((item) => item.id !== projectId);
@@ -7593,7 +7606,7 @@ async function updateContact(event) {
   lead.project = elements.contactProject.value.trim();
   lead.notes = elements.contactNotes.value.trim();
   if (!lead.name || !lead.phone || !lead.project) {
-    elements.contactFormError.textContent = "Nama, nombor telefon dan projek diperlukan.";
+    elements.contactFormError.textContent = systemWorkerText("Nama, nombor telefon dan projek diperlukan.");
     return;
   }
   setGlobalLoading(true, "Menyimpan perubahan lead...");

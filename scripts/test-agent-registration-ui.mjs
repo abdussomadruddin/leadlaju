@@ -39,6 +39,8 @@ try {
       await page.locator('#signup-form').waitFor({ state: 'visible' });
       await page.waitForFunction(() => !document.querySelector('#signup-form button[type=submit]').disabled);
       assert.equal(await page.locator('#login-form').isVisible(), false); checks++;
+      assert.equal(await page.locator('.signup-projects-fieldset legend').innerText(),slug==='brand-b'?'Produk yang ingin diterima':'Projek yang ingin diterima');checks++;
+      assert.equal((await page.locator('.login-brand small').textContent()).trim(),'Lead Management');checks++;
       assert.equal(await page.locator('#signup-project-checkboxes input').getAttribute('value'), 'project-' + slug); checks++;
       assert.equal(await page.evaluate(() => window.__signupCalls[0].brand_slug), slug); checks++;
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true); checks++;

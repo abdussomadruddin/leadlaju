@@ -32,7 +32,7 @@ test('compact lead log keeps Call, Follow Up, status and expandable details with
 test('copy button uses the requested inquiry text and stays locked before CALL NOW', () => {
   const source = app.match(/function leadDetailsCopyText\(lead\) \{[\s\S]*?\n\}/)?.[0];
   assert.ok(source);
-  const format = vm.runInNewContext(`(${source})`);
+  const format = vm.runInNewContext(`(${source})`, {projectLabel: () => 'Projek'});
   assert.equal(format({ name: 'Aina', phone: '60123456789', email: 'aina@example.com', project: 'Armani' }),
     '*Inquiry For House*\n\nNama: Aina\nNo Phone: 60123456789\nEmail: aina@example.com\nProjek: Armani');
   assert.match(app, /const available = lead && canAccessLead\(lead\) && canViewLeadPhone\(lead\)/);

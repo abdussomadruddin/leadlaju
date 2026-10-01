@@ -68,6 +68,7 @@ try {
    }else if(scenario==='safrich')await gate.waitFor({state:'hidden'});
    else {await page.evaluate(()=>requestNotifications());assert.equal(await gate.isVisible(),false);checks++;}
    assert.equal(await page.evaluate(()=>document.body.classList.contains('agent-access-locked')),false);checks++;
+   if(scenario==='safrich'){assert.equal(await page.locator('#sidebar-user-role').innerText(),'Agent');checks++;}
    assert.equal(await page.evaluate(()=>window.__push.unsubscribed),scenario==='collision'?1:0);checks++;
    assert.equal(await page.evaluate(()=>window.__push.subscribed),scenario==='collision'?1:0);checks++;
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);checks++;

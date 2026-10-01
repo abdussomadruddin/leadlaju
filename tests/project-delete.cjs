@@ -12,7 +12,7 @@ const source = app.slice(app.indexOf('async function deleteProject(projectId, bu
 test('project deletion stays inside the expanded project details and advanced menu', () => {
   const render = app.slice(app.indexOf('function renderProjects()'), app.indexOf('function escapeHtml(value)'));
   assert.match(render, /<details class="project-status-dropdown"[\s\S]*<details class="project-danger-menu">[\s\S]*data-project-delete/);
-  assert.match(app, /if \(!confirmPermanentDelete\("projek", project\.name\)\) return/);
+  assert.match(app, /if \(!confirmPermanentDelete\(systemWorkerText\("projek"\), project\.name\)\) return/);
   assert.match(app, /const firstConfirmed = window\.confirm\([\s\S]*return window\.confirm\(/);
 });
 
@@ -35,6 +35,7 @@ test('cancelled deletion never calls Supabase; confirmed deletion removes only t
   const context = {
     guardLifecycleMutation: () => true,
     isAdmin: () => true,
+    systemWorkerText: text => text,
     remoteDatabaseMode: true,
     state,
     confirmPermanentDelete: () => confirmed,
