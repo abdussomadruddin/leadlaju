@@ -143,6 +143,7 @@ let followUpReminderTimer;
 let toastTimer;
 let lastRenderedActiveLeadKey = null;
 let passwordResetRequest = null;
+let remotePasswordRecoveryPending = false;
 let selectedAgentId = null;
 let editingAgentId = null;
 let selectedContactId = null;
@@ -687,6 +688,10 @@ async function initRemoteDatabase() {
         try { return await fetch(url, { ...options, headers }); }
         finally { pendingBrandRequestCount--; }
       } },
+    });
+    // Keep this callback synchronous: Auth holds its initialization lock here.
+    remoteDatabaseClient.auth.onAuthStateChange?.((event, session) => {
+      if (event === "PASSWORD_RECOVERY" && session?.user) remotePasswordRecoveryPending = true;
     });
     return remoteDatabaseClient;
   } catch (error) {
@@ -1575,6 +1580,11 @@ function resetPasswordFlow() {
   elements.resetCode.required = true;
   elements.resetRequestError.textContent = "";
   elements.resetVerifyError.textContent = "";
+  elements.resetRequestForm.querySelector(".reset-description").textContent = remoteDatabaseClient
+    ? "Masukkan emel yang didaftarkan. Kami akan hantar pautan untuk menetapkan kata laluan baru."
+    : "Masukkan emel yang didaftarkan. Kami akan hantar kod verifikasi enam digit.";
+  elements.resetRequestForm.querySelector('button[type="submit"]').textContent = remoteDatabaseClient
+    ? "Hantar pautan reset" : "Hantar kod verifikasi";
 }
 
 function openResetPasswordModal() {
@@ -1624,7 +1634,7 @@ async function requestPasswordReset(event) {
   event.preventDefault();
   const email = elements.resetEmail.value.trim().toLowerCase();
   if (remoteDatabaseClient) {
-    const redirectTo = `${window.location.origin}${window.location.pathname}`;
+    const redirectTo = `${window.location.origin}${window.location.pathname}?reset=1`;
     const { error } = await remoteDatabaseClient.auth.resetPasswordForEmail(email, { redirectTo });
     if (error) {
       elements.resetRequestError.textContent = "Emel reset tidak dapat dihantar. Semak tetapan emel.";
@@ -1689,13 +1699,27 @@ async function verifyPasswordReset(event) {
   }
 
   if (passwordResetRequest.remoteRecovery) {
-    const { error } = await remoteDatabaseClient.auth.updateUser({ password });
+    const button = elements.resetVerifyForm.querySelector('button[type="submit"]');
+    if (button.disabled) return;
+    button.disabled = true;
+    const { error } = await remoteDatabaseClient.auth.updateUser({ password })
+      .catch(() => ({ error: true }));
+    button.disabled = false;
     if (error) {
       elements.resetVerifyError.textContent = "Kata laluan tidak dapat dikemas kini.";
       return;
     }
     closeModal(elements.resetPasswordModal);
     resetPasswordFlow();
+    remotePasswordRecoveryPending = false;
+    const cleanUrl = new URL(window.location.href);
+    cleanUrl.searchParams.delete("reset");
+    cleanUrl.searchParams.delete("setup");
+    cleanUrl.hash = "";
+    window.history.replaceState(null, "", cleanUrl);
+    elements.ownPassword.required = false;
+    elements.ownPasswordConfirm.required = false;
+    await bootstrap();
     showToast("Kata laluan dikemas kini", "Anda kini boleh menggunakan kata laluan baru.");
     return;
   }
@@ -2420,7 +2444,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261001-master-brands-v121")
+      .register("/sw.js?v=20261001-master-brands-v122")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -8319,12 +8343,29 @@ document.addEventListener("keydown", (event) => {
 });
 
 async function bootstrap() {
+  // Capture before the SDK consumes and removes the Auth URL fragment.
+  const authFragment = new URLSearchParams(window.location.hash.slice(1));
+  const recoveryRequested = remotePasswordRecoveryPending
+    || authFragment.get("type") === "recovery"
+    || new URLSearchParams(window.location.search).get("reset") === "1";
+  const authLinkFailed = authFragment.has("error") || authFragment.has("error_code");
   state.integration = normalizeIntegration(state.integration);
   saveState();
-  await initRemoteDatabase();
+  if (!remoteDatabaseClient) await initRemoteDatabase();
 
   if (remoteDatabaseClient) {
     const { data } = await remoteDatabaseClient.auth.getSession();
+    if (authLinkFailed || ((recoveryRequested || remotePasswordRecoveryPending) && !data.session?.user)) {
+      showLogin();
+      openResetPasswordModal();
+      elements.resetRequestError.textContent = "Pautan reset tidak sah atau telah tamat. Minta pautan baru.";
+      return;
+    }
+    if ((recoveryRequested || remotePasswordRecoveryPending) && data.session?.user) {
+      showLogin();
+      openRemoteRecoveryModal();
+      return;
+    }
     if (data.session?.user) {
       const loaded = await loadRemoteState(data.session.user.id);
       if (loaded) {
