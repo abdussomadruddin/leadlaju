@@ -171,6 +171,9 @@ let lastAgentPresenceHeartbeatAt = 0;
 let deferredInstallPrompt = null;
 let agentPushAccessReady = false;
 let agentPushAccessCheckInProgress = false;
+let pushSubscriptionSyncPromise = null;
+let notificationRequestInProgress = false;
+let notificationConnectionError = "";
 const expandedProjectStatusIds = new Set();
 let agentPresenceSessionStartedAt = 0;
 let notifiedLeadKeys = loadNotifiedLeadKeys();
@@ -1638,6 +1641,7 @@ function logout() {
   }
   localStorage.removeItem("leadlaju-push-subscription-owner");
   agentPushAccessReady = false;
+  notificationConnectionError = "";
   document.body.classList.remove("agent-access-locked");
   localStorage.removeItem(AUTH_KEY);
   const wasRemote = remoteDatabaseMode;
@@ -2546,7 +2550,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261001-team-sales-v125")
+      .register("/sw.js?v=20261001-push-recovery-v126")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -2583,6 +2587,31 @@ function isPhonePushDevice() {
 }
 
 async function syncPushSubscription(force = false) {
+  if (pushSubscriptionSyncPromise) {
+    const previous = await pushSubscriptionSyncPromise.catch(() => false);
+    if (!force) return previous;
+  }
+  const pending = performPushSubscriptionSync(force);
+  pushSubscriptionSyncPromise = pending;
+  try {
+    return await pending;
+  } finally {
+    if (pushSubscriptionSyncPromise === pending) pushSubscriptionSyncPromise = null;
+  }
+}
+
+function isPushEndpointOwnershipConflict(error) {
+  return error?.code === "42501" && /row-level security/i.test(error.message || "") && /push_subscriptions/i.test(error.message || "");
+}
+
+function pushConnectionErrorMessage(error) {
+  if (error?.name === "NotAllowedError" || Notification.permission === "denied") {
+    return "Benarkan notifikasi LeadLaju dalam tetapan telefon, kemudian cuba semula.";
+  }
+  return "Notifikasi belum berjaya disambungkan. Semak internet, tutup dan buka semula aplikasi, kemudian tekan Sambung semula.";
+}
+
+async function performPushSubscriptionSync(force = false) {
   if (!isPushSupported() || Notification.permission !== "granted") return false;
   const user = getCurrentUser();
   if (!user?.id || !user.active) return false;
@@ -2598,22 +2627,41 @@ async function syncPushSubscription(force = false) {
     });
   }
 
-  const subscriptionPayload = subscription.toJSON();
-  const endpoint = subscriptionPayload.endpoint || subscription.endpoint;
+  let subscriptionPayload = subscription.toJSON();
+  let endpoint = subscriptionPayload.endpoint || subscription.endpoint;
   if (!endpoint) return false;
 
   const storageKey = "leadlaju-push-subscription-owner";
-  const fingerprint = `${user.id}:${endpoint}:${subscriptionPayload.keys?.p256dh || ""}:${user.email}:${user.active}`;
+  let fingerprint = `${user.id}:${endpoint}:${subscriptionPayload.keys?.p256dh || ""}:${user.email}:${user.active}`;
   if (!force && localStorage.getItem(storageKey) === fingerprint) return true;
 
   let pushed;
   if (remoteDatabaseMode) {
-    const { data, error } = await remoteDatabaseClient.rpc("register_push_subscription", {
+    const register = () => remoteDatabaseClient.rpc("register_push_subscription", {
       p_endpoint: endpoint,
       p_p256dh: subscriptionPayload.keys?.p256dh || "",
       p_auth: subscriptionPayload.keys?.auth || "",
       p_user_agent: navigator.userAgent,
     });
+    let { data, error } = await register();
+    // A browser endpoint can belong to another brand's previous login. Keep RLS
+    // intact: replace the browser subscription only on an explicit reconnect.
+    if (force && isPushEndpointOwnershipConflict(error) && getCurrentUser()?.id === user.id) {
+      const previousEndpoint = endpoint;
+      if (!await subscription.unsubscribe()) throw new Error("Unable to replace previous push subscription");
+      localStorage.removeItem(storageKey);
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(WEB_PUSH_PUBLIC_KEY),
+      });
+      subscriptionPayload = subscription.toJSON();
+      endpoint = subscriptionPayload.endpoint || subscription.endpoint;
+      if (!endpoint || endpoint === previousEndpoint || getCurrentUser()?.id !== user.id) {
+        throw new Error("A fresh push subscription is required");
+      }
+      fingerprint = `${user.id}:${endpoint}:${subscriptionPayload.keys?.p256dh || ""}:${user.email}:${user.active}`;
+      ({ data, error } = await register());
+    }
     if (error) throw error;
     pushed = Boolean(data?.ok);
   } else {
@@ -2634,6 +2682,7 @@ async function syncPushSubscription(force = false) {
     );
   }
 
+  if (getCurrentUser()?.id !== user.id) return false;
   if (pushed) localStorage.setItem(storageKey, fingerprint);
   return pushed;
 }
@@ -3951,6 +4000,9 @@ function renderAgentAccessGate(accessState) {
   document.body.classList.toggle("agent-access-locked", locked);
   elements.notificationRequiredModal.classList.toggle("open", locked);
   elements.notificationRequiredModal.setAttribute("aria-hidden", String(!locked));
+  const connectionError = elements.notificationRequiredModal.querySelector("#notification-connection-error");
+  connectionError.textContent = notificationConnectionError;
+  connectionError.hidden = !locked || !notificationConnectionError;
   if (!locked) return;
 
   const title = elements.notificationRequiredModal.querySelector("#notification-required-title");
@@ -3979,20 +4031,27 @@ function renderAgentAccessGate(accessState) {
     : "<li><span>Tekan <strong>Aktifkan loceng</strong>.</span></li><li><span>Pilih <strong>Allow</strong> apabila telefon meminta kebenaran.</span></li><li><span>LeadLaju dibuka selepas notifikasi berjaya disambungkan.</span></li>";
   elements.addToHomeScreen.hidden = true;
   elements.enableRequiredNotifications.hidden = false;
-  elements.enableRequiredNotifications.querySelector("span").textContent = accessState === "subscription-required"
+  elements.enableRequiredNotifications.disabled = notificationRequestInProgress;
+  elements.enableRequiredNotifications.setAttribute("aria-busy", String(notificationRequestInProgress));
+  elements.enableRequiredNotifications.querySelector("span").textContent = notificationRequestInProgress
+    ? "Menyambungkan…"
+    : accessState === "subscription-required"
     ? "Sambung semula"
     : "Aktifkan loceng";
 }
 
 async function verifyAgentPushAccess(force = false) {
-  if (agentPushAccessCheckInProgress || !isPhonePushDevice() || !isInstalledApp()) return false;
+  if (agentPushAccessCheckInProgress && !force) return false;
+  if (!isPhonePushDevice() || !isInstalledApp()) return false;
   if (!("Notification" in window) || Notification.permission !== "granted") return false;
   agentPushAccessCheckInProgress = true;
   try {
     agentPushAccessReady = await syncPushSubscription(force).catch((error) => {
       console.warn("Agent push access check failed", error);
+      notificationConnectionError = pushConnectionErrorMessage(error);
       return false;
     });
+    if (agentPushAccessReady) notificationConnectionError = "";
     return agentPushAccessReady;
   } finally {
     agentPushAccessCheckInProgress = false;
@@ -4660,6 +4719,7 @@ function scheduleFollowUpReminders() {
 }
 
 async function requestNotifications() {
+  if (notificationRequestInProgress) return;
   if (getCurrentUser()?.role === "agent" && (!isPhonePushDevice() || !isInstalledApp())) {
     enforceAgentNotificationAccess();
     return;
@@ -4668,36 +4728,39 @@ async function requestNotifications() {
     showToast("Tidak disokong", "Pelayar ini tidak menyokong notifikasi sistem.", "error");
     return;
   }
-  await registerServiceWorker();
-  await playNotificationSound();
-  if (Notification.permission === "granted") {
+  notificationRequestInProgress = true;
+  notificationConnectionError = "";
+  if (getCurrentUser()?.role === "agent") renderAgentAccessGate(getAgentAppAccessState());
+  try {
+    // Ask for permission directly inside the tap, before any unrelated awaits.
+    const permission = Notification.permission === "granted"
+      ? "granted"
+      : await Notification.requestPermission();
+    if (permission !== "granted") {
+      notificationConnectionError = "Benarkan notifikasi LeadLaju dalam tetapan telefon, kemudian cuba semula.";
+      showToast("Notifikasi belum aktif", notificationConnectionError, "error");
+      return;
+    }
+    // Audio unlock can wait for another gesture on iOS; it must not block push.
+    playNotificationSound().catch(() => {});
     const subscribed = isAdmin()
-      ? await syncPushSubscription(true).catch(() => false)
+      ? await syncPushSubscription(true)
       : await verifyAgentPushAccess(true);
+    if (!subscribed && !notificationConnectionError) notificationConnectionError = pushConnectionErrorMessage();
+    if (subscribed) await updateAgentPresence(true, true);
     showToast(
       subscribed ? "Notifikasi aktif" : "Notifikasi belum disambungkan",
-      subscribed ? "Lead baru dan reminder follow up akan keluar notifikasi sistem." : "Semak internet dan tekan Sambung semula.",
+      subscribed ? "Lead baru dan reminder follow up akan keluar notifikasi sistem." : notificationConnectionError,
       subscribed ? "success" : "error",
     );
-    enforceAgentNotificationAccess();
-    return;
+  } catch (error) {
+    notificationConnectionError = pushConnectionErrorMessage(error);
+    showToast("Notifikasi belum disambungkan", notificationConnectionError, "error");
+  } finally {
+    notificationRequestInProgress = false;
+    // Do not immediately repeat a failed registration in the background.
+    if (getCurrentUser()?.role === "agent") renderAgentAccessGate(getAgentAppAccessState());
   }
-  const permission = await Notification.requestPermission();
-  if (permission === "granted") {
-    await playNotificationSound();
-    const subscribed = isAdmin()
-      ? await syncPushSubscription(true).catch(() => false)
-      : await verifyAgentPushAccess(true);
-    if (subscribed) await updateAgentPresence(true, true);
-  }
-  enforceAgentNotificationAccess();
-  showToast(
-    permission === "granted" ? "Notifikasi diaktifkan" : "Notifikasi belum aktif",
-    permission === "granted"
-      ? "Lead baru dan reminder follow up akan muncul sebagai notifikasi sistem."
-      : "Benarkan notifikasi melalui tetapan pelayar untuk mengaktifkannya.",
-    permission === "granted" ? "success" : "error",
-  );
 }
 
 function expiryAssignmentKey(lead) {

@@ -4307,6 +4307,14 @@ td small {
   background: var(--amber-soft);
 }
 
+.notification-connection-error {
+  margin: 0 0 12px;
+  color: #b42318;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
 .notification-required-icon svg,
 .notification-enable-button svg {
   width: 24px;
