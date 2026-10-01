@@ -35,7 +35,7 @@ test('missing or expired recovery session requests a new link', async () => {
   }
 });
 test('reset requests carry explicit recovery destination and successful save clears auth URL', () => {
-  assert.match(source, /pathname\}\?reset=1/);
+  assert.match(source, /window.location.origin\}\/\?reset=1/);
   assert.match(source, /onAuthStateChange\?\.\(\(event, session\)/);
   assert.match(source, /searchParams.delete\("reset"\)/);
   assert.match(source, /cleanUrl.hash = ""/);

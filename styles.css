@@ -24,32 +24,9 @@
 }
 
 [hidden].master-only { display: none !important; }
-.brand-context { display: flex; align-items: center; gap: 6px; min-width: 0; margin-top: 3px; font-size: 11px; color: var(--ink-500); }
-.brand-context select { max-width: 150px; min-height: 28px; padding: 3px 8px; font-size: 12px; border-radius: 8px; }
-.master-create-grid, .master-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
-.master-form, .master-card { padding: 16px; min-width: 0; }
-.master-form { display: grid; gap: 12px; align-content: start; }
-.master-form h3, .master-card h3 { margin: 0; font-size: 17px; }
-.master-form label, .master-admin-edit label { display: grid; gap: 5px; font-size: 12px; font-weight: 600; }
-.master-form input, .master-form select, .master-admin-edit input { min-width: 0; width: 100%; min-height: 42px; border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; background: var(--white); font: inherit; }
-.master-form small, .master-card p { color: var(--ink-500); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
-.master-card-heading, .master-card-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-.master-card-heading { justify-content: space-between; }
-.master-card-actions { margin-top: 12px; }
-.master-card-actions button { min-height: 42px; padding: 8px 12px; font-size: 12px; }
-.master-list-heading { margin: 22px 0 12px; font-size: 17px; }
-.master-admin-edit { display: grid; gap: 10px; padding-top: 12px; }
-.master-admin-edit .master-active-label { display: flex; align-items: center; gap: 6px; }
-.master-active-label input { width: auto; min-height: 24px; }
 .brand-confirm-dialog { width: min(420px,calc(100% - 32px)); border: 1px solid var(--line); border-radius: 20px; padding: 22px; color: var(--ink-950); background: var(--white); }
 .brand-confirm-dialog::backdrop { background: #10182c80; }
 .brand-confirm-dialog p { font-size: 14px; line-height: 1.5; }
-@media (max-width: 600px) {
- .master-create-grid, .master-card-grid { grid-template-columns: minmax(0,1fr); }
- .master-form, .master-card { padding: 14px; }
- .brand-context { font-size: 10px; }
- .brand-context select { max-width: 115px; }
-}
 
 * {
   box-sizing: border-box;
@@ -569,9 +546,10 @@ svg {
   bottom: 0;
   left: 0;
   display: flex;
-  width: 258px;
+  width: 272px;
   flex-direction: column;
-  padding: 27px 20px 20px;
+  min-height: 0;
+  padding: 22px 16px 16px;
   color: #fff;
   background:
     radial-gradient(circle at 15% 8%, rgba(70, 111, 197, 0.2), transparent 18rem),
@@ -580,6 +558,7 @@ svg {
 
 .brand {
   display: flex;
+  flex: none;
   gap: 11px;
   align-items: center;
   padding: 0 8px;
@@ -625,14 +604,22 @@ svg {
 }
 
 .main-nav {
-  display: grid;
-  gap: 7px;
-  margin-top: 45px;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 24px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ink-700) transparent;
 }
 
 .nav-item {
   display: flex;
-  min-height: 47px;
+  min-height: 44px;
+  flex: none;
   gap: 12px;
   align-items: center;
   padding: 0 13px;
@@ -890,7 +877,10 @@ svg {
 
 .sidebar-account {
   position: relative;
-  margin-top: auto;
+  flex: none;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--white) 10%, transparent);
 }
 
 .sidebar-user {
@@ -898,7 +888,8 @@ svg {
   width: 100%;
   gap: 10px;
   align-items: center;
-  padding: 13px 8px 0;
+  min-height: 48px;
+  padding: 4px 8px;
   border: 0;
   border-radius: 0;
   color: inherit;
@@ -913,6 +904,10 @@ svg {
 }
 
 .account-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  left: 0;
   display: grid;
   gap: 4px;
   margin-bottom: 8px;
@@ -956,13 +951,15 @@ svg {
 }
 
 .sidebar-user strong {
-  font-size: 11px;
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .sidebar-user small {
   margin-top: 2px;
   color: #7f8da9;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .icon-button {
@@ -993,7 +990,7 @@ svg {
 
 .main-content {
   min-height: 100vh;
-  margin-left: 258px;
+  margin-left: 272px;
 }
 
 .topbar {
@@ -5568,4 +5565,91 @@ td small {
   .lead-log-toggle, .lead-log-toggle svg { transition: none; }
   .lead-log-toggle[aria-expanded="true"], .lead-log-detail:not([hidden]) .lead-log-detail-grid { animation: none; }
   .pulse::after { animation: none; }
+}
+
+/* Master workspace: scoped spacing avoids generic panel/form overrides. */
+.brand-context { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 3px 0; color: var(--ink-700); font-size: 11px; }
+.brand-context select { width: min(170px, 100%); min-width: 0; min-height: 30px; padding: 4px 28px 4px 10px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink-900); background-color: var(--canvas); font: inherit; font-weight: 600; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='none' stroke='%2346516a' stroke-width='1.7' viewBox='0 0 24 24'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 9px center; }
+.master-account .brand-context #active-brand-label { display: none; }
+.page-title { min-width: 0; }
+#brands-view { padding-top: 24px; }
+#brands-view .master-page-heading { align-items: flex-start; gap: 16px; margin-bottom: 22px; }
+#brands-view .content-heading h2 { margin: 4px 0 7px; font-size: 27px; line-height: 1.2; }
+#brands-view .content-heading p { margin: 0; font-size: 13px; line-height: 1.5; }
+#brands-view #master-management-status { flex: none; margin-top: 25px; padding: 7px 10px; border-radius: 8px; color: var(--ink-700); background: var(--white); font-size: 11px; }
+#master-management-status:empty { display: none; }
+.master-create-grid, .master-directory-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 18px; }
+.master-directory-grid { margin-top: 26px; }
+.master-directory { min-width: 0; }
+.master-card-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+#brands-view .master-form, #brands-view .master-card { min-width: 0; padding: 20px; border-radius: 16px; box-shadow: none; }
+.master-form { display: grid; gap: 14px; align-content: start; }
+.master-form-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 2px; }
+.master-form-heading > div { min-width: 0; }
+.master-form-icon { display: grid; width: 38px; height: 38px; flex: none; place-items: center; border-radius: 11px; color: var(--blue); background: var(--blue-soft); }
+.master-form-icon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.master-form h3, .master-card h3 { margin: 0; font-size: 16px; line-height: 1.3; overflow-wrap: anywhere; }
+.master-form-heading p { margin: 4px 0 0; color: var(--ink-500); font-size: 12px; line-height: 1.4; }
+.master-form-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.master-field-wide { grid-column: 1 / -1; }
+.master-form label, .master-admin-edit label { display: grid; gap: 6px; min-width: 0; color: var(--ink-700); font-size: 12px; font-weight: 600; }
+.master-form input, .master-form select, .master-admin-edit input { width: 100%; min-width: 0; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink-900); background: var(--white); font: inherit; font-size: 13px; }
+.master-form input::placeholder { color: var(--ink-500); font-weight: 400; }
+.master-form small { color: var(--ink-500); font-size: 11px; font-weight: 400; line-height: 1.5; }
+#brands-view button { min-height: 44px; padding: 10px 14px; border-radius: 10px; font-size: 12px; line-height: 1.25; box-shadow: none; }
+.master-form :is(input, select):focus-visible, .brand-context select:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.master-list-heading { margin: 0 0 12px; color: var(--ink-900); font-size: 15px; line-height: 1.4; }
+.master-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.master-card-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.master-card-avatar { display: grid; width: 36px; height: 36px; flex: none; place-items: center; border-radius: 10px; color: var(--blue); background: var(--blue-soft); font-size: 12px; font-weight: 800; }
+.master-admin-avatar { color: var(--green); background: var(--green-soft); }
+.master-card-heading .integration-status { flex: none; margin: 0; padding: 5px 9px; font-size: 10px; }
+.master-registration-link { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--canvas); }
+.master-registration-link small { color: var(--ink-500); font-size: 10px; }
+.master-registration-link p, .master-admin-meta p { margin: 4px 0 0; color: var(--ink-700); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.master-registration-link p { user-select: all; }
+.master-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.master-card-actions button { min-width: 0; }
+.master-admin-meta { margin-top: 12px; }
+.master-admin-meta > span { color: var(--ink-500); font-size: 11px; }
+.master-card-details { margin-top: 16px; padding-top: 4px; border-top: 1px solid var(--line); }
+.master-card-details summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; color: var(--ink-700); font-size: 12px; font-weight: 600; cursor: pointer; list-style: none; }
+.master-card-details summary::-webkit-details-marker { display: none; }
+.master-card-details summary::after { width: 7px; height: 7px; margin-right: 3px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; content: ""; transform: rotate(45deg); transition: transform 160ms ease; }
+.master-card-details[open] summary::after { transform: rotate(225deg); }
+.master-card-details > .master-card-actions { margin-top: 4px; }
+.master-admin-edit { display: grid; gap: 12px; padding: 8px 0 12px; }
+.master-admin-edit .master-active-label { display: flex; align-items: center; gap: 8px; min-height: 36px; }
+.master-active-label input { width: 18px; min-height: 18px; margin: 0; accent-color: var(--blue); }
+.master-card-details > [data-master-reset] { width: 100%; }
+#brands-view .master-empty-state { margin: 0; padding: 20px; color: var(--ink-500); font-size: 13px; line-height: 1.5; box-shadow: none; }
+
+@media (max-width: 1100px) {
+  .master-create-grid, .master-directory-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+}
+@media (max-width: 850px) {
+  .sidebar { width: min(304px, calc(100vw - 24px)); }
+  .sidebar .brand-mark { width: 36px; height: 36px; }
+  .sidebar .brand strong { font-size: 17px; }
+  .sidebar .brand small { font-size: 8px; letter-spacing: .04em; }
+  .master-account .topbar { min-height: calc(80px + env(safe-area-inset-top, 0px)); }
+  .master-account .main-content { padding-top: calc(80px + env(safe-area-inset-top, 0px)); }
+  .brand-context select { width: min(150px, 100%); font-size: 11px; }
+  #brands-view { padding-top: 16px; }
+  #brands-view .master-page-heading { flex-direction: column; gap: 8px; margin-bottom: 16px; }
+  #brands-view .content-heading h2 { font-size: 23px; }
+  #brands-view .content-heading p { font-size: 12px; }
+  #brands-view #master-management-status { margin: 0; padding: 0; background: transparent; }
+  #brands-view .master-form, #brands-view .master-card { padding: 16px; border-radius: 14px; }
+  .master-directory-grid { margin-top: 22px; gap: 22px; }
+  .master-card-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .master-card-actions > button:first-child { grid-column: 1 / -1; }
+  .master-form input, .master-form select, .master-admin-edit input:not([type="checkbox"]) { font-size: 16px; }
+}
+@media (max-width: 380px) {
+  .master-form-fields { grid-template-columns: minmax(0, 1fr); }
+  #brands-view .master-form, #brands-view .master-card { padding: 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .master-card-details summary::after { transition: none; }
 }

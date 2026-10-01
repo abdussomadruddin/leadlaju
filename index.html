@@ -2,6 +2,14 @@
 <html lang="ms">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // Registration URLs share the app shell; resolve its assets from the root.
+      if (/^\/daftar(?:\/|$)/.test(location.pathname)) {
+        const base = document.createElement("base");
+        base.href = "/";
+        document.head.append(base);
+      }
+    </script>
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1.0, viewport-fit=cover"
@@ -25,9 +33,9 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20261001-master-brands-v122" />
+    <link rel="stylesheet" href="styles.css?v=20261001-master-brands-v123" />
     <script src="vendor/exceljs.min.js?v=4.4.0" defer></script>
-    <script src="app.js?v=20261001-master-brands-v122" defer></script>
+    <script src="app.js?v=20261001-master-brands-v123" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -187,8 +195,8 @@
             </button>
           </form>
 
-          <button class="signup-toggle" id="signup-toggle" type="button">
-            Agent baru? Sign up untuk minta approval admin
+          <button class="signup-toggle" id="signup-login-button" type="button" hidden>
+            Sudah ada akaun? Log masuk
           </button>
 
           <p class="session-note">
@@ -648,24 +656,29 @@
         </section>
 
         <section class="view" id="brands-view">
-          <div class="content-heading"><div><span class="section-kicker">Master sahaja</span><h2>Brand &amp; Admin</h2><p>Setiap brand mempunyai data dan pasukan berasingan.</p></div></div>
-          <p id="master-management-status" role="status"></p>
+          <div class="content-heading master-page-heading"><div><span class="section-kicker">Ruang Master</span><h2>Brand &amp; Admin</h2><p>Urus brand dan pasukan, dengan data yang kekal berasingan.</p></div><p id="master-management-status" role="status"></p></div>
           <div class="master-create-grid">
-            <form class="panel master-form" id="master-brand-form"><h3>Brand baharu</h3>
+            <form class="panel master-form" id="master-brand-form">
+              <div class="master-form-heading"><span class="master-form-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 21V5h8v16M11 21V9h10v12M6 9h2M6 13h2M14 13h3M14 17h3" /></svg></span><div><h3>Brand baharu</h3><p>Mulakan ruang operasi yang berasingan.</p></div></div>
               <label>Nama brand<input name="name" maxlength="100" required placeholder="Contoh: Safrich" /></label>
-              <label>Slug link pendaftaran<input name="slug" pattern="[a-z0-9]+(-[a-z0-9]+)*" maxlength="80" required placeholder="contoh-brand" /></label>
+              <label>Slug link pendaftaran<input name="slug" pattern="[a-z0-9]+(-[a-z0-9]+)*" maxlength="80" required placeholder="contoh-brand" /><small>Huruf kecil, nombor dan tanda sengkang sahaja.</small></label>
               <button class="primary-button" type="submit">Cipta brand</button>
             </form>
-            <form class="panel master-form" id="master-admin-form"><h3>Jemput Admin</h3>
-              <label>Brand<select id="master-admin-brand" name="brand_id" required></select></label>
-              <label>Nama<input name="name" maxlength="120" required /></label>
-              <label>Emel<input name="email" type="email" required /></label>
-              <label>Telefon<input name="phone" type="tel" /></label>
+            <form class="panel master-form" id="master-admin-form">
+              <div class="master-form-heading"><span class="master-form-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M19 8v6M22 11h-6" /><circle cx="9" cy="7" r="4" /></svg></span><div><h3>Jemput Admin</h3><p>Berikan akses kepada satu brand.</p></div></div>
+              <div class="master-form-fields">
+                <label class="master-field-wide">Brand<select id="master-admin-brand" name="brand_id" required></select></label>
+                <label>Nama<input name="name" maxlength="120" required placeholder="Nama Admin" autocomplete="name" /></label>
+                <label>Telefon<input name="phone" type="tel" placeholder="Contoh: 0123456789" autocomplete="tel" /></label>
+                <label class="master-field-wide">Emel<input name="email" type="email" required placeholder="nama@contoh.com" autocomplete="email" /></label>
+              </div>
               <button class="primary-button" type="submit">Hantar jemputan</button><small>Admin menetapkan kata laluan melalui emel sendiri.</small>
             </form>
           </div>
-          <h3 class="master-list-heading">Semua brand</h3><div id="master-brand-list" class="master-card-grid"></div>
-          <h3 class="master-list-heading">Semua Admin</h3><div id="master-admin-list" class="master-card-grid"></div>
+          <div class="master-directory-grid">
+            <section class="master-directory" aria-labelledby="master-brands-heading"><h3 class="master-list-heading" id="master-brands-heading">Semua brand</h3><div id="master-brand-list" class="master-card-grid"></div></section>
+            <section class="master-directory" aria-labelledby="master-admins-heading"><h3 class="master-list-heading" id="master-admins-heading">Semua Admin</h3><div id="master-admin-list" class="master-card-grid"></div></section>
+          </div>
         </section>
         <dialog id="brand-confirm-dialog" class="brand-confirm-dialog">
           <h3>Nyahaktifkan brand?</h3><p id="brand-confirm-message"></p>
@@ -705,6 +718,7 @@
               <p>Daftar pasukan dan tentukan siapa yang menerima giliran lead.</p>
             </div>
             <div class="agent-management-actions">
+              <button class="secondary-button compact" id="copy-agent-registration-link" type="button">Link daftar agent</button>
               <button class="secondary-button compact agent-ready-all" id="get-lead-all-agents-button" type="button">GET LEAD ALL AGENT</button>
               <button class="secondary-button compact danger" id="stop-lead-all-agents-button" type="button">STOP LEAD ALL AGENT</button>
               <button class="primary-button compact" id="add-agent-button" type="button">+ Daftar ejen</button>

@@ -210,7 +210,27 @@ let masterAdmins = [];
 let brandContextVersion = 0;
 let pendingBrandRequestCount = 0;
 let pendingBrandConfirmation = null;
-const signupBrandSlug = new URLSearchParams(window.location.search).get("brand") || "safrich";
+function registrationBrandSlug(location) {
+  const path = location.pathname || "/";
+  const legacy = new URLSearchParams(location.search).get("brand");
+  if (!/^\/daftar(?:\/|$)/.test(path) && legacy === null) return null;
+  let slug;
+  try {
+    slug = /^\/daftar(?:\/|$)/.test(path)
+      ? decodeURIComponent(path.replace(/^\/daftar\/?/, "").replace(/\/$/, ""))
+      : legacy;
+  } catch { return ""; }
+  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) && slug.length <= 80 ? slug : "";
+}
+
+function agentRegistrationUrl(brand) {
+  if (!brand?.slug) return "";
+  return new URL(`/daftar/${encodeURIComponent(brand.slug)}`, window.location.origin).href;
+}
+
+const signupBrandSlug = registrationBrandSlug(window.location);
+let signupProjects = [];
+let signupBrandReady = false;
 const integrationRawKeys = new Map();
 const integrationSecretTimers = new Map();
 
@@ -228,7 +248,7 @@ const elements = {
   passwordToggle: document.querySelector("#password-toggle"),
   forgotPasswordButton: document.querySelector("#forgot-password-button"),
   signupForm: document.querySelector("#signup-form"),
-  signupToggle: document.querySelector("#signup-toggle"),
+  signupLoginButton: document.querySelector("#signup-login-button"),
   signupName: document.querySelector("#signup-name"),
   signupPhone: document.querySelector("#signup-phone"),
   signupEmail: document.querySelector("#signup-email"),
@@ -1259,7 +1279,7 @@ function renderSignupProjectOptions() {
     [...elements.signupProjectCheckboxes.querySelectorAll('input[name="signup-project"]:checked')]
       .map((input) => input.value),
   );
-  const activeProjects = state.projects.filter((project) => project.active);
+  const activeProjects = signupProjects.filter((project) => project.active);
   elements.signupProjectCheckboxes.innerHTML = activeProjects.length
     ? activeProjects.map((project) => `
       <label class="project-checkbox">
@@ -1271,18 +1291,25 @@ function renderSignupProjectOptions() {
 
 async function syncSignupProjects() {
   if (elements.signupForm.hidden) return false;
+  const wasReady = signupBrandReady;
   try {
+    if (!signupBrandSlug) throw new Error("Link daftar agent tidak sah. Minta link yang betul daripada Admin brand anda.");
     if (remoteDatabaseClient) {
       const { data, error } = await remoteDatabaseClient.functions.invoke("admin-manage-agent", {
         body: { action: "list_projects", brand_slug: signupBrandSlug },
       });
       if (error || !data?.ok || !Array.isArray(data.projects)) throw error || new Error(data?.error || "Senarai projek tidak sah");
-      state.projects = normalizeProjects(data.projects);
+      if (elements.signupForm.hidden) return false;
+      signupProjects = normalizeProjects(data.projects);
+      signupBrandReady = true;
       document.querySelector("#signup-brand-label").textContent = `Pendaftaran ejen · ${data.brand?.name || signupBrandSlug}`;
-      saveState();
       renderSignupProjectOptions();
+      if (!wasReady) setSignupError("");
+      const submit = elements.signupForm.querySelector('button[type="submit"]');
+      submit.disabled = submit.getAttribute("aria-busy") === "true" || !signupProjects.some(project => project.active);
       return true;
     }
+    if (remoteDatabaseRequired || signupBrandSlug !== "safrich") throw new Error("Pendaftaran belum dapat disambungkan. Cuba refresh atau hubungi Admin.");
     const url = new URL(getSheetEndpoint());
     url.searchParams.set("_", Date.now().toString());
     const response = await fetch(url, { cache: "no-store" });
@@ -1291,11 +1318,17 @@ async function syncSignupProjects() {
     if (payload?.ok === false || !Array.isArray(payload?.projects)) {
       throw new Error(payload?.error || "Senarai projek tidak sah");
     }
-    state.projects = normalizeProjects(payload.projects);
-    saveState();
+    signupProjects = normalizeProjects(payload.projects);
+    signupBrandReady = true;
     renderSignupProjectOptions();
+    elements.signupForm.querySelector('button[type="submit"]').disabled = !signupProjects.some(project => project.active);
     return true;
   } catch (error) {
+    signupBrandReady = false;
+    signupProjects = [];
+    elements.signupProjectCheckboxes.innerHTML = "";
+    elements.signupForm.querySelector('button[type="submit"]').disabled = true;
+    if (!elements.signupForm.hidden) setSignupError(error.message || "Link pendaftaran tidak tersedia. Hubungi Admin brand anda.");
     console.error("Signup project sync failed", error);
     return false;
   }
@@ -1306,14 +1339,20 @@ function showSignupForm(show) {
   elements.signupForm.hidden = !show;
   elements.loginForm.hidden = show;
   elements.forgotPasswordButton.hidden = show;
-  elements.signupToggle.textContent = show
-    ? "Sudah ada akaun? Log masuk"
-    : "Agent baru? Sign up untuk minta approval admin";
+  elements.signupLoginButton.hidden = !show;
+  document.querySelector(".login-card > .section-kicker").textContent = show ? "Pendaftaran ejen" : "Selamat kembali";
+  document.querySelector(".session-note").hidden = show;
+  document.querySelector("#login-title").textContent = show ? "Daftar sebagai ejen" : "Log masuk ke akaun anda";
+  document.querySelector(".login-subtitle").textContent = show ? "Hantar permohonan kepada Admin brand anda." : "Gunakan emel dan kata laluan yang didaftarkan oleh admin.";
   setLoginError("");
   setSignupError("");
   if (show) {
     elements.signupForm.reset();
-    renderSignupProjectOptions();
+    signupProjects = [];
+    signupBrandReady = false;
+    document.querySelector("#signup-brand-label").textContent = "Pendaftaran ejen";
+    elements.signupProjectCheckboxes.textContent = "Memuatkan projek brand…";
+    elements.signupForm.querySelector('button[type="submit"]').disabled = true;
     syncSignupProjects();
     signupProjectSyncTimer = window.setInterval(syncSignupProjects, SIGNUP_PROJECT_SYNC_INTERVAL_SECONDS * 1000);
     window.setTimeout(() => elements.signupName.focus(), 80);
@@ -1388,6 +1427,10 @@ async function handleLogin(event) {
 
 async function handleAgentSignup(event) {
   event.preventDefault();
+  if (!signupBrandSlug || !signupBrandReady) {
+    setSignupError("Brand belum disahkan. Minta link daftar agent daripada Admin dan cuba lagi.");
+    return;
+  }
   const submitButton = elements.signupForm.querySelector('button[type="submit"]');
   const name = elements.signupName.value.trim();
   const phone = elements.signupPhone.value.trim();
@@ -1479,12 +1522,13 @@ async function handleAgentSignup(event) {
     await syncSignupProjects();
     return;
   } finally {
-    submitButton.disabled = false;
+    submitButton.disabled = !signupBrandReady;
     submitButton.classList.remove("is-loading");
     submitButton.removeAttribute("aria-busy");
     setGlobalLoading(false);
   }
   elements.signupForm.reset();
+  window.history.replaceState(null, "", "/");
   showSignupForm(false);
   setLoginError("");
   elements.signupSuccessModal.classList.add("open");
@@ -1634,7 +1678,7 @@ async function requestPasswordReset(event) {
   event.preventDefault();
   const email = elements.resetEmail.value.trim().toLowerCase();
   if (remoteDatabaseClient) {
-    const redirectTo = `${window.location.origin}${window.location.pathname}?reset=1`;
+    const redirectTo = `${window.location.origin}/?reset=1`;
     const { error } = await remoteDatabaseClient.auth.resetPasswordForEmail(email, { redirectTo });
     if (error) {
       elements.resetRequestError.textContent = "Emel reset tidak dapat dihantar. Semak tetapan emel.";
@@ -2444,7 +2488,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261001-master-brands-v122")
+      .register("/sw.js?v=20261001-master-brands-v123")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -5800,11 +5844,13 @@ function renderUser() {
   if (!user) return;
 
   document.querySelector("#dashboard-view")?.classList.toggle("agent-dashboard", user.role === "agent");
+  document.body.classList.toggle("master-account", isMaster());
   elements.sidebarAvatar.textContent = initials(user.name);
   elements.sidebarUserName.textContent = user.name;
   elements.sidebarUserRole.textContent = user.role === "admin" ? "Administrator" : "Property Agent";
   if (isMaster()) elements.sidebarUserRole.textContent = "Master";
   document.querySelector("#active-brand-label").textContent = activeBrand?.name || (isMaster() ? "Tiada brand aktif" : "Safrich");
+  document.querySelector("#copy-agent-registration-link").disabled = !isAdmin() || !activeBrand?.slug || activeBrand.active === false;
   const brandSwitcher = document.querySelector("#master-brand-switcher");
   brandSwitcher.hidden = !isMaster();
   brandSwitcher.innerHTML = masterBrands.filter(b => b.active).map(b => `<option value="${escapeHtml(b.id)}" ${b.id === activeBrandId ? "selected" : ""}>${escapeHtml(b.name)}</option>`).join("");
@@ -6421,16 +6467,16 @@ async function loadMasterManagement() {
     masterBrands = brands.data?.brands || [];
     masterAdmins = admins.data?.admins || [];
     status.textContent = `${masterBrands.length} brand · ${masterAdmins.length} Admin`;
-    document.querySelector("#master-admin-brand").innerHTML = masterBrands.filter(b => b.active).map(b => `<option value="${escapeHtml(b.id)}">${escapeHtml(b.name)}</option>`).join("");
+    document.querySelector("#master-admin-brand").innerHTML = masterBrands.filter(b => b.active).map(b => `<option value="${escapeHtml(b.id)}" ${b.id === activeBrandId ? "selected" : ""}>${escapeHtml(b.name)}</option>`).join("");
     document.querySelector("#master-brand-list").innerHTML = masterBrands.map(b => `<article class="panel master-card">
-      <div class="master-card-heading"><h3>${escapeHtml(b.name)}</h3><span class="integration-status ${b.active ? "active" : "inactive"}">${b.active ? "Aktif" : "Tidak aktif"}</span></div>
-      <p>${escapeHtml(new URL(`/?brand=${encodeURIComponent(b.slug)}`,window.location.origin).href)}</p>
+      <div class="master-card-heading"><div class="master-card-identity"><span class="master-card-avatar" aria-hidden="true">${escapeHtml(initials(b.name))}</span><h3>${escapeHtml(b.name)}</h3></div><span class="integration-status ${b.active ? "active" : "inactive"}">${b.active ? "Aktif" : "Tidak aktif"}</span></div>
+      <div class="master-registration-link"><small>Link pendaftaran</small><p>${escapeHtml(agentRegistrationUrl(b))}</p></div>
       <div class="master-card-actions"><button class="primary-button" data-master-open="${b.id}" ${b.active ? "" : "disabled"}>Buka brand</button><button class="secondary-button" data-master-copy="${b.id}">Salin link daftar</button><button class="secondary-button" data-master-rename="${b.id}">Edit nama</button></div>
-      <details><summary>Kawalan brand</summary><div class="master-card-actions"><button class="secondary-button ${b.active ? "danger" : ""}" data-master-toggle="${b.id}">${b.active ? "Nyahaktif brand" : "Aktifkan semula"}</button></div></details></article>`).join("");
+      <details class="master-card-details"><summary>Kawalan brand</summary><div class="master-card-actions"><button class="secondary-button ${b.active ? "danger" : ""}" data-master-toggle="${b.id}">${b.active ? "Nyahaktif brand" : "Aktifkan semula"}</button></div></details></article>`).join("");
     document.querySelector("#master-admin-list").innerHTML = masterAdmins.length ? masterAdmins.map(a => `<article class="panel master-card">
-      <div class="master-card-heading"><h3>${escapeHtml(a.name)}</h3><span class="integration-status ${a.active ? "active" : "inactive"}">${a.active ? "Aktif" : "Tidak aktif"}</span></div>
-      <p>${escapeHtml(masterBrands.find(b => b.id === a.brand_id)?.name || "")} · ${escapeHtml(a.email)}</p>
-      <details><summary>Edit Admin</summary><form class="master-admin-edit" data-master-admin="${a.id}"><label>Nama<input name="name" value="${escapeHtml(a.name)}" maxlength="120" required /></label><label>Telefon<input name="phone" value="${escapeHtml(a.phone || "")}" /></label><label class="master-active-label"><input type="checkbox" name="active" ${a.active ? "checked" : ""} />Akaun aktif</label><button class="primary-button" type="submit">Simpan</button></form><button class="secondary-button" data-master-reset="${a.id}" type="button">Hantar reset kata laluan</button></details></article>`).join("") : '<p class="empty-state">Belum ada Admin.</p>';
+      <div class="master-card-heading"><div class="master-card-identity"><span class="master-card-avatar master-admin-avatar" aria-hidden="true">${escapeHtml(initials(a.name))}</span><h3>${escapeHtml(a.name)}</h3></div><span class="integration-status ${a.active ? "active" : "inactive"}">${a.active ? "Aktif" : "Tidak aktif"}</span></div>
+      <div class="master-admin-meta"><span>${escapeHtml(masterBrands.find(b => b.id === a.brand_id)?.name || "")}</span><p>${escapeHtml(a.email)}</p></div>
+      <details class="master-card-details"><summary>Edit Admin</summary><form class="master-admin-edit" data-master-admin="${a.id}"><label>Nama<input name="name" value="${escapeHtml(a.name)}" maxlength="120" required /></label><label>Telefon<input name="phone" type="tel" value="${escapeHtml(a.phone || "")}" /></label><label class="master-active-label"><input type="checkbox" name="active" ${a.active ? "checked" : ""} />Akaun aktif</label><button class="primary-button" type="submit">Simpan</button></form><button class="secondary-button" data-master-reset="${a.id}" type="button">Hantar reset kata laluan</button></details></article>`).join("") : '<p class="panel master-empty-state">Belum ada Admin. Hantar jemputan untuk mula membina pasukan.</p>';
     renderUser();
   } catch (e) { status.textContent = e?.message || "Pengurusan Master belum dapat dimuatkan."; }
 }
@@ -6512,7 +6558,7 @@ document.querySelector("#master-admin-list").addEventListener("click",event=>{
 document.querySelector("#master-brand-list").addEventListener("click",async event=>{
   if(!isMaster())return;const button=event.target.closest("button");if(!button)return;
   if(button.dataset.masterOpen){await changeMasterBrand(button.dataset.masterOpen);return;}
-  if(button.dataset.masterCopy){const brand=masterBrands.find(b=>b.id===button.dataset.masterCopy);await navigator.clipboard.writeText(new URL(`/?brand=${encodeURIComponent(brand.slug)}`,window.location.origin).href);showToast("Link disalin",brand.name,"success");return;}
+  if(button.dataset.masterCopy){const brand=masterBrands.find(b=>b.id===button.dataset.masterCopy);await copyIntegrationText(agentRegistrationUrl(brand),`Link daftar agent · ${brand.name}`);return;}
   if(button.dataset.masterRename){const brand=masterBrands.find(b=>b.id===button.dataset.masterRename);const name=window.prompt("Nama brand",brand.name);if(name?.trim())masterOperation(async()=>{const result=await remoteDatabaseClient.rpc("master_manage_brand",{p_action:"update",p_brand:{id:brand.id,name:name.trim()}});if(result.error)throw result.error;if(activeBrandId===brand.id)activeBrand={...activeBrand,name:name.trim()};});return;}
   if(button.dataset.masterToggle){pendingBrandConfirmation={brand:masterBrands.find(b=>b.id===button.dataset.masterToggle),step:1};document.querySelector("#brand-confirm-message").textContent=pendingBrandConfirmation.brand.active?"Semua Admin dan Ejen brand ini hilang akses. Ingestion, agihan dan push baharu dihentikan. Data tidak dipadam.":"Akses brand dibuka semula. Ejen perlu mengaktifkan GET LEAD semula.";document.querySelector("#brand-confirm-next").textContent="Teruskan";document.querySelector("#brand-confirm-dialog").showModal();}
 });
@@ -7969,7 +8015,11 @@ elements.loginForm.addEventListener("submit", handleLogin);
 elements.loginEmail.addEventListener("input", () => setLoginError(""));
 elements.loginPassword.addEventListener("input", () => setLoginError(""));
 elements.signupForm.addEventListener("submit", handleAgentSignup);
-elements.signupToggle.addEventListener("click", () => showSignupForm(elements.signupForm.hidden));
+elements.signupLoginButton.addEventListener("click", () => {
+  // Return to the canonical login URL; refresh must not reopen registration.
+  window.history.replaceState(null, "", "/");
+  showSignupForm(false);
+});
 elements.closeSignupSuccess.addEventListener("click", () => closeModal(elements.signupSuccessModal));
 [
   elements.signupName,
@@ -8109,6 +8159,10 @@ elements.manualLeadPhone.addEventListener("input", () => {
   elements.manualLeadError.textContent = "";
 });
 elements.addAgentButton.addEventListener("click", () => openAgentModal());
+document.querySelector("#copy-agent-registration-link").addEventListener("click", () => {
+  if (!isAdmin() || !activeBrand?.slug || activeBrand.active === false) return;
+  copyIntegrationText(agentRegistrationUrl(activeBrand), `Link daftar agent · ${activeBrand.name}`);
+});
 elements.getLeadAllAgentsButton?.addEventListener("click", () => setAdminAllAgentLeadAvailability(true));
 elements.stopLeadAllAgentsButton?.addEventListener("click", () => setAdminAllAgentLeadAvailability(false));
 elements.agentForm.addEventListener("submit", addAgent);
@@ -8366,6 +8420,11 @@ async function bootstrap() {
       openRemoteRecoveryModal();
       return;
     }
+    if (registrationBrandSlug(window.location) !== null) {
+      showLogin();
+      showSignupForm(true);
+      return;
+    }
     if (data.session?.user) {
       const loaded = await loadRemoteState(data.session.user.id);
       if (loaded) {
@@ -8385,6 +8444,7 @@ async function bootstrap() {
 
   if (remoteDatabaseRequired) {
     showLogin();
+    if (registrationBrandSlug(window.location) !== null) showSignupForm(true);
     showToast("Supabase belum tersambung", "Cuba refresh. Operasi server lama tidak akan digunakan.", "error");
     return;
   }
