@@ -200,6 +200,9 @@ let selectedPerformanceAgentId = "";
 let performanceLoadedAt = 0;
 let ownPerformanceLoadedAt = 0;
 let ownPerformanceLoading = false;
+let teamPerformanceDays = 7;
+const teamPerformanceCache = new Map();
+const teamPerformancePending = new Set();
 let initialDashboardSyncState = "idle";
 let resumeSyncPending = false;
 let runtimeWasHidden = false;
@@ -2643,7 +2646,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261001-copy-call-v133")
+      .register("/sw.js?v=20261002-team-dashboard-v134")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -5304,7 +5307,7 @@ function renderActiveLead() {
   if (isTeamSales()) {
     const salesLeads = visibleLeads.filter(item => item.status === "new" && item.assignedAgentId);
     elements.activeLeadContainer.classList.toggle("has-active-lead", salesLeads.length > 0);
-    elements.activeLeadContainer.innerHTML = salesLeads.length ? `<div class="sales-new-leads"><h3>Lead baharu <small>${salesLeads.length}</small></h3>${salesLeads.map(item => `<article class="sales-lead-card"><div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.project)}</span><small>${escapeHtml(displayLeadPhone(item))}</small></div><span class="lead-status-badge new">New</span>${renderNewLeadNotes(item)}<div class="sales-lead-actions">${renderSalesContactButton(item, "call")}${renderSalesContactButton(item, "whatsapp")}${renderLeadCopyButton(item)}</div>${renderSalesContactState(item)}</article>`).join("")}</div>` : '<div class="empty-lead"><h3>Tiada lead baharu</h3><p>Lead akan diagih secara automatik kepada Team Sales aktif yang layak.</p></div>';
+    elements.activeLeadContainer.innerHTML = salesLeads.length ? `<div class="sales-new-leads"><h3>Lead baharu <small>${salesLeads.length}</small></h3>${salesLeads.map(item => `<article class="sales-lead-card"><div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.project)}</span><small>${escapeHtml(displayLeadPhone(item))}</small></div><span class="lead-status-badge new">New</span>${renderNewLeadNotes(item)}${isAdmin() ? "" : `<div class="sales-lead-actions">${renderSalesContactButton(item, "call")}${renderSalesContactButton(item, "whatsapp")}${renderLeadCopyButton(item)}</div>${renderSalesContactState(item)}`}</article>`).join("")}</div>` : '<div class="empty-lead"><h3>Tiada lead baharu</h3><p>Lead akan diagih secara automatik kepada Team Sales aktif yang layak.</p></div>';
     return;
   }
 
@@ -6162,6 +6165,7 @@ function renderUser() {
 
   document.querySelector("#dashboard-view")?.classList.toggle("agent-dashboard", user.role === "agent");
   const salesDashboard = user.role === "agent" && isTeamSales();
+  document.querySelector("#dashboard-view")?.classList.toggle("team-admin-dashboard", isAdmin() && isTeamSales());
   document.querySelector("#dashboard-view")?.classList.toggle("team-sales-dashboard", salesDashboard);
   const newLeadSection = document.querySelector("#dashboard-view .new-lead-section");
   // Move the existing panel, preserving its controls and restoring Agent ordering.
@@ -6181,6 +6185,7 @@ function renderUser() {
   document.querySelectorAll(".master-only").forEach(item => { item.hidden = !isMaster(); });
   elements.logoutButton.hidden = true;
   if (elements.ownPerformance) elements.ownPerformance.hidden = isAdmin();
+  document.querySelector("#team-performance").hidden = !isAdmin() || !isTeamSales();
   elements.viewTitle.innerHTML =
     activeView === "dashboard"
       ? `<span class="desktop-greeting">Selamat datang, </span><span class="mobile-dashboard-brand"><span class="mobile-dashboard-brand-mark"><img src="assets/icon.svg" alt="" /></span><span>LeadLaju</span></span><span class="user-name">${escapeHtml(user.name.split(" ")[0])}</span>`
@@ -6713,6 +6718,65 @@ function performanceDateOffset(days) {
   return date.toISOString().slice(0, 10);
 }
 
+function renderTeamPerformance(report) {
+  const rows = report?.rows || [];
+  const total = (key) => rows.reduce((sum, row) => sum + (Number(row[key]) || 0), 0);
+  document.querySelector("#team-performance-status").textContent = `${report.from} hingga ${report.to} · ${rows.length} Team Sales${total("assignments") === 0 ? " · Tiada lead ditugaskan dalam tempoh ini" : ""}`;
+  document.querySelector("#team-performance-metrics").innerHTML = [
+    performanceMetric("Lead ditugaskan", total("assignments"), "", "lead"),
+    performanceMetric("Contacted", total("total_contacted"), "", "call"),
+    performanceMetric("Follow Up", total("total_follow_up"), "", "due"),
+    performanceMetric("Potential", total("total_potential"), "", "lead"),
+    performanceMetric("Cancelled / Rejected", total("total_cancelled_rejected"), "", "due"),
+    performanceMetric("Client", total("total_client"), "", "show"),
+    performanceMetric("Appointment", total("appointments"), "", "appointment"),
+    performanceMetric("Show Up", total("show_ups"), "", "show"),
+    performanceMetric("Follow Up Due", total("due_now"), "Tertunggak sekarang", "due"),
+  ].join("");
+}
+
+async function loadTeamPerformance() {
+  if (!isAdmin() || !isTeamSales()) return;
+  const panel = document.querySelector("#team-performance");
+  const status = document.querySelector("#team-performance-status");
+  panel.querySelectorAll("[data-team-performance-days]").forEach(button => button.setAttribute("aria-pressed", String(Number(button.dataset.teamPerformanceDays) === teamPerformanceDays)));
+  if (!remoteDatabaseMode || !remoteDatabaseClient) {
+    status.textContent = "Prestasi memerlukan sambungan Supabase.";
+    return;
+  }
+  const days = teamPerformanceDays;
+  const from = performanceDateOffset(1 - days);
+  const to = todayKey();
+  const brandVersion = brandContextVersion;
+  const userId = state.currentUserId;
+  const key = `${brandVersion}:${userId}:${days}:${to}`;
+  const cached = teamPerformanceCache.get(key);
+  if (cached && Date.now() - cached.loadedAt < 300000) {
+    renderTeamPerformance(cached.report);
+    panel.setAttribute("aria-busy", "false");
+    return;
+  }
+  if (teamPerformancePending.has(key)) return;
+  teamPerformancePending.add(key);
+  status.textContent = "Memuatkan prestasi...";
+  panel.setAttribute("aria-busy", "true");
+  document.querySelector("#team-performance-metrics").replaceChildren();
+  const stillCurrent = () => brandVersion === brandContextVersion && userId === state.currentUserId && days === teamPerformanceDays && isAdmin() && isTeamSales();
+  try {
+    const { data, error } = await remoteDatabaseClient.rpc("get_agent_performance_report", { p_from: from, p_to: to, p_agent_id: null, p_project_id: null });
+    if (error) throw error;
+    if (brandVersion !== brandContextVersion || userId !== state.currentUserId) return;
+    teamPerformanceCache.set(key, { report: data, loadedAt: Date.now() });
+    if (stillCurrent()) renderTeamPerformance(data);
+  } catch (error) {
+    if (stillCurrent()) status.textContent = "Prestasi gagal dimuatkan. Tekan tempoh sekali lagi untuk cuba semula.";
+    console.error("Team performance load failed", error);
+  } finally {
+    teamPerformancePending.delete(key);
+    if (stillCurrent()) panel.setAttribute("aria-busy", "false");
+  }
+}
+
 function performanceRange() {
   const period = elements.performancePeriod?.value || "7";
   if (period === "custom") {
@@ -6820,6 +6884,11 @@ function clearBrandOperationalState() {
   const current = getCurrentUser();
   const integration = state.integration;
   brandContextVersion++;
+  teamPerformanceCache.clear();
+  teamPerformancePending.clear();
+  document.querySelector("#team-performance-metrics").replaceChildren();
+  document.querySelector("#team-performance-status").textContent = "Memuatkan prestasi...";
+  document.querySelector("#team-performance").setAttribute("aria-busy", "false");
   monitorLastCanonicalSyncAt = null;
   monitorSyncFailed = false;
   salesContactStates.clear();
@@ -7052,6 +7121,7 @@ function renderAll() {
   syncMobileNavigation();
   updateWorkerLabels();
   if (remoteDatabaseMode && activeView === "dashboard" && !isAdmin() && Date.now() - ownPerformanceLoadedAt > 300000) loadOwnPerformance();
+  if (remoteDatabaseMode && activeView === "dashboard" && isAdmin() && isTeamSales()) loadTeamPerformance();
   if (remoteDatabaseMode && activeView === "performance" && isAdmin() && performanceReport && Date.now() - performanceLoadedAt > 300000) loadPerformanceReport();
 }
 
@@ -7136,6 +7206,7 @@ function switchView(viewName, { historyMode = "push" } = {}) {
   }
   if (viewName === "lead-monitor") renderLeadMonitor();
   if (viewName === "dashboard" && !isAdmin() && Date.now() - ownPerformanceLoadedAt > 300000) loadOwnPerformance();
+  if (viewName === "dashboard" && isAdmin() && isTeamSales()) loadTeamPerformance();
   if (viewName === "integrations") loadIntegrationStatus();
   if (viewName === "brands") loadMasterManagement();
   if (viewName === "bulletins") {
@@ -8577,6 +8648,10 @@ elements.refreshButton?.addEventListener("click", async () => {
   const startedAt = Date.now();
   try {
     const refreshed = await syncGoogleSheetFresh({ silent: true });
+    if (refreshed && isAdmin() && isTeamSales()) {
+      teamPerformanceCache.clear();
+      await loadTeamPerformance();
+    }
     if (!refreshed) showToast("Refresh gagal", "Data belum dapat disegerakkan. Cuba lagi sebentar.", "error");
   } catch (error) {
     console.error("Manual refresh failed", error);
@@ -8903,6 +8978,12 @@ function initializeFloatingNavigation() {
 }
 
 initializeFloatingNavigation();
+document.querySelector("#team-performance").addEventListener("click", event => {
+  const button = event.target.closest("[data-team-performance-days]");
+  if (!button || !isAdmin() || !isTeamSales()) return;
+  teamPerformanceDays = Number(button.dataset.teamPerformanceDays) === 1 ? 1 : 7;
+  loadTeamPerformance();
+});
 lockViewportZoom();
 window.addEventListener("online", flushContactOutbox);
 document.addEventListener("visibilitychange", () => {

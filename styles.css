@@ -5717,6 +5717,19 @@ td small {
   .lead-log-table .lead-log-summary td:first-child:has(.new-lead-notes) { grid-column: 1 / -1; }
   .lead-log-table .lead-log-summary td:first-child:has(.new-lead-notes) + td { grid-column: 1 / -1; }
 }
+.team-admin-dashboard > .dashboard-summary,
+.team-admin-dashboard > .stats-grid { display: none; }
+.team-performance { margin-bottom: 18px; }
+.team-performance .panel-heading { gap: 12px; flex-wrap: wrap; }
+.team-performance-period { display: flex; gap: 3px; padding: 3px; background: #eef3fb; border-radius: 11px; }
+.team-performance-period button { min-height: 44px; padding: 5px 14px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-700); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.team-performance-period button[aria-pressed="true"] { background: #fff; color: var(--blue); box-shadow: 0 2px 6px rgb(18 42 78 / 8%); }
+#team-performance-status { margin: 0; color: var(--ink-500); font-size: 11px; line-height: 1.4; }
+.team-performance .performance-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.team-performance .performance-metric { background: #fff; }
+.team-performance .metric-call { background: #fff7ed; }
+.team-performance .metric-show, .team-performance .metric-appointment { background: #effbf5; }
+.team-performance .metric-due { background: #fff3f5; }
 .master-mode-label { color: var(--ink-500); font-size: 12px; margin: 0; }
 .team-sales-brand #performance-view > .performance-table-wrap th:nth-child(8),
 .team-sales-brand .stat-card:has(#stat-contacted),
@@ -5727,8 +5740,32 @@ td small {
 .team-sales-brand .lead-log-summary .lead-message-action { min-width: 0; }
 .team-sales-brand .lead-log-summary .lead-message-action > .sales-contact-state { margin-top: 5px; }
 @media (max-width: 850px) {
-  .sales-lead-card { padding: 12px; gap: 10px; border-radius: 15px; }
+  .team-sales-brand #dashboard-view .own-performance,
+  .team-sales-brand #dashboard-view .team-performance { padding: 12px; border-radius: 14px; }
+  .team-sales-brand #dashboard-view .own-performance .panel-heading,
+  .team-sales-brand #dashboard-view .team-performance .panel-heading { margin-bottom: 8px; gap: 8px; }
+  .team-sales-brand #dashboard-view .own-performance h3,
+  .team-sales-brand #dashboard-view .team-performance h3 { font-size: 18px; line-height: 1.25; }
+  .team-sales-brand #dashboard-view .performance-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 10px 0; }
+  .team-sales-brand #dashboard-view .performance-metric,
+  .team-sales-brand #dashboard-view .performance-metric:last-child { grid-column: auto; display: flex; flex-direction: column; min-height: 82px; padding: 9px 7px; border-radius: 10px; gap: 5px; }
+  .team-sales-brand #dashboard-view .performance-metric-icon { display: none; }
+  .team-sales-brand #dashboard-view .performance-metric small { font-size: 10px; line-height: 1.3; font-weight: 700; overflow-wrap: anywhere; }
+  .team-sales-brand #dashboard-view .performance-metric strong { margin-top: auto; font-size: 22px; line-height: 1.1; }
+  .team-sales-brand #dashboard-view .performance-metric-detail { font-size: 9px; line-height: 1.3; }
+  .team-sales-brand #dashboard-view .metric-call { background: #fff7ed; }
+  .team-sales-brand #dashboard-view .metric-show,
+  .team-sales-brand #dashboard-view .metric-appointment { background: #effbf5; }
+  .team-sales-brand #dashboard-view .metric-due { background: #fff3f5; }
+  .team-sales-dashboard .new-lead-section { margin-top: 12px; }
+  .team-sales-brand #dashboard-follow-up { padding: 12px; border-radius: 14px; }
+  .team-sales-brand .dashboard-follow-up-item { gap: 6px; padding: 8px 0; }
+  .team-sales-brand .dashboard-follow-up-item strong { font-size: 12px; line-height: 1.3; }
+  .team-sales-brand .dashboard-follow-up-item small { margin-top: 3px; font-size: 10px; }
+  .sales-lead-card { padding: 10px; gap: 8px; border-radius: 13px; }
   .sales-lead-card strong { font-size: 15px; }
+  .sales-lead-card .new-lead-notes { padding: 8px; border-radius: 9px; }
+  .sales-lead-card .new-lead-notes > p { font-size: 11px; line-height: 1.4; }
   .team-sales-brand .lead-log-summary .lead-message-action { display: block; min-width: 0; }
   .team-sales-brand .lead-log-summary .sales-contact-whatsapp,
   .team-sales-brand .lead-log-summary .lead-follow-up-button { width: 100%; font-size: 11px; }

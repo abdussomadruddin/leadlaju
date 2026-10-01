@@ -13,9 +13,11 @@ const browser=await chromium.launch({channel:'chrome',headless:true});
 let checks=0;
 try {
  for(const [name,device] of [['desktop',{viewport:{width:1366,height:900}}],['iphone',devices['iPhone 13']],['android',devices['Pixel 7']],['small-phone',{viewport:{width:320,height:568},isMobile:true,hasTouch:true}]]) {
-  for(const role of ['agent','master']) {
+  for(const role of ['agent','admin','master']) {
+   console.log(`Checking ${name} ${role}`);
    const context=await browser.newContext({...device,serviceWorkers:'block'});
    const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+   page.setDefaultTimeout(20000);
    await page.route('**/api/runtime-config',r=>r.fulfill({json:{backend:'supabase',supabaseUrl:origin,supabasePublishableKey:'fixture'}}));
    await page.route('https://esm.sh/@supabase/supabase-js@2.116.0',r=>r.fulfill({contentType:'application/javascript',body:'export const createClient=(url,key,options)=>window.__client(options);'}));
    await page.route('**/sales-stamp',r=>r.fulfill({json:{brand:r.request().headers()['x-leadlaju-brand']}}));
@@ -43,17 +45,41 @@ try {
       return {data:{ok:true}};
     },functions:{invoke:async()=>({data:{ok:true,admins:[],integrations:[]}})},realtime:{setAuth:async()=>{}},channel:()=>{const c={on(){return c},subscribe(){return c}};return c},removeChannel:async()=>{}});
    },{role});
-   await page.goto(origin);await page.locator('#app-shell').waitFor({state:'visible'});
+   await page.goto(origin,{waitUntil:'domcontentloaded'});await page.locator('#app-shell').waitFor({state:'visible'});
    if(role==='master'){
     await page.locator('#master-brand-switcher').selectOption('00000000-0000-4000-8000-000000000002');
    }
    await page.waitForFunction(()=>document.body.classList.contains('team-sales-brand'));
+   if(role!=='agent'){
+    await page.locator('#team-performance-metrics .performance-metric').first().waitFor();
+    assert.equal(await page.locator('#team-performance').isVisible(),true);checks++;
+    assert.equal(await page.locator('#team-performance-metrics .performance-metric').count(),9);checks++;
+    assert.equal(await page.locator('#team-performance-metrics strong').first().innerText(),'3');checks++;
+    const lastReport=()=>page.evaluate(()=>window.__requests.filter(r=>r.name==='get_agent_performance_report').at(-1));
+    assert.equal((Date.parse((await lastReport()).args.p_to)-Date.parse((await lastReport()).args.p_from))/86400000,6);checks++;
+    await page.locator('[data-team-performance-days="1"]').click();
+    await page.waitForFunction(()=>window.__requests.filter(r=>r.name==='get_agent_performance_report').at(-1).args.p_from===window.__requests.filter(r=>r.name==='get_agent_performance_report').at(-1).args.p_to);
+    assert.equal(await page.locator('[data-team-performance-days="1"]').getAttribute('aria-pressed'),'true');checks++;
+    await page.locator('[data-team-performance-days="7"]').click();
+    await page.waitForFunction(()=>document.querySelector('#team-performance').getAttribute('aria-busy')==='false');
+    assert.equal(await page.locator('[data-team-performance-days="7"]').getAttribute('aria-pressed'),'true');checks++;
+    if(name!=='desktop'){
+     const size=await page.locator('#team-performance-metrics .performance-metric').first().boundingBox();
+     assert.ok(size.height<110,`${name}: compact team metrics`);checks++;
+    }
+   }
    // This fixture bypasses only the existing PWA access modal, never production auth.
    if(role==='agent')await page.evaluate(()=>{getAgentAppAccessState=()=> 'ready';ensureAgentPushAccess=async()=>true;agentPushAccessReady=true;renderAgentAccessGate('ready');renderAll();});
    if(role==='agent'){
     const order=()=>page.evaluate(()=>[...document.querySelector('#dashboard-view').children].filter(el=>el.matches('#own-performance,.new-lead-section,#dashboard-follow-up')).map(el=>el.id||'new-leads'));
     assert.deepEqual(await order(),['own-performance','new-leads','dashboard-follow-up']);checks++;
     assert.equal(await page.locator('#own-performance').isVisible(),true);checks++;
+    assert.equal(await page.locator('#team-performance').isVisible(),false);checks++;
+    if(name!=='desktop'){
+     await page.locator('#own-performance-metrics .performance-metric').first().waitFor();
+     const size=await page.locator('#own-performance-metrics .performance-metric').first().boundingBox();
+     assert.ok(size.height<110,`${name}: compact personal metrics`);checks++;
+    }
     assert.equal(await page.locator('#dashboard-follow-up').isVisible(),true);checks++;
     const boxes=await page.evaluate(()=>['#own-performance','.new-lead-section','#dashboard-follow-up'].map(selector=>document.querySelector('#dashboard-view '+selector).getBoundingClientRect().top));
     assert.ok(boxes[0]<boxes[1]&&boxes[1]<boxes[2]);checks++;
@@ -75,14 +101,25 @@ try {
    assert.equal(await page.locator('#toast-message').innerText().then(t=>/CALL NOW|5 minit/.test(t)),false);checks++;
    assert.equal(await page.locator('#nav-lead-count').innerText(),'3');checks++;
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,`${name}: no overflow`);checks++;
-   const call=page.locator('.sales-lead-card [data-sales-contact="call"]').first();
+   if(role!=='agent'){
+    assert.equal(await page.locator('.sales-lead-card .sales-lead-actions').count(),0);checks++;
+    await page.screenshot({path:path.join(artifacts,`${name}-${role}-team-performance.png`),fullPage:true});
+    await page.evaluate(()=>switchView('leads'));
+    assert.equal(await page.locator('.lead-log-summary [data-sales-contact="call"]').count(),3);checks++;
+   }
+   const contactRoot=role==='agent'?'.sales-lead-card':'.lead-log-summary';
+   const call=page.locator(`${contactRoot} [data-sales-contact="call"][data-sales-lead="sales-lead-1"]`);
    assert.match(await call.getAttribute('href'),/^tel:/);checks++;
    // Preserve actual button handlers but suppress external phone navigation in QA.
    await call.evaluate(el=>el.href='javascript:void(0)');await call.click();
    await page.waitForFunction(()=>window.__requests.some(r=>r.name==='team_sales_contact'));
+   await page.waitForFunction(()=>state.leads.find(l=>l.id==='sales-lead-1')?.status==='contacted');
+   // The mocked transport has no real Realtime subscription; repaint the
+   // confirmed snapshot as the production broadcast catch-up normally does.
+   await page.evaluate(()=>renderAll());
    await page.waitForFunction(()=>document.querySelectorAll('.sales-lead-card').length===2);
    assert.equal(await page.evaluate(()=>window.__requests.find(r=>r.name==='team_sales_contact').args.p_channel),'call');checks++;
-   const wa=page.locator('.sales-lead-card [data-sales-contact="whatsapp"]').first();
+   const wa=page.locator(`${contactRoot} [data-sales-contact="whatsapp"][data-sales-lead="sales-lead-2"]`);
    assert.match(await wa.getAttribute('href'),/wa.me/);checks++;
    await page.evaluate(()=>window.__fail=true);await wa.evaluate(el=>el.href='javascript:void(0)');await wa.click();
    await page.waitForFunction(()=>document.querySelector('.sales-contact-state')?.textContent.includes('Belum disahkan'));
@@ -90,6 +127,7 @@ try {
    await page.waitForTimeout(250);await page.evaluate(()=>{window.__fail=false;return flushContactOutbox();});
    await page.waitForFunction(()=>document.querySelectorAll('.sales-lead-card').length===1);
    assert.equal(await page.evaluate(()=>state.leads.every(l=>l.followUpCount===0)),true,'Ordinary WA does not increment Follow Up');checks++;
+   await page.evaluate(()=>switchView('dashboard'));
    await page.screenshot({path:path.join(artifacts,`${name}-${role}-dashboard.png`),fullPage:true});
    await page.evaluate(()=>switchView('leads'));
    assert.equal(await page.locator('.lead-log-summary .new-lead-notes').count(),3);checks++;
@@ -132,6 +170,7 @@ try {
     assert.equal(workbook.worksheets.some(s=>s.getSheetValues().flat(2).some(v=>/CALL NOW|≤5 min/.test(String(v)))),false);checks++;
     await page.locator('#master-brand-switcher').selectOption('00000000-0000-4000-8000-000000000001');
     await page.waitForFunction(()=>!document.body.classList.contains('team-sales-brand'));
+    assert.equal(await page.locator('#team-performance').isVisible(),false,'Safrich has no Team report panel');checks++;
     assert.equal(await page.locator('.sales-lead-card').count(),0,'Brand switching clears Sales cards');checks++;
     assert.equal(await page.locator('#projects-view h2').innerText(),'Projek','Safrich retains original terminology');checks++;
     assert.equal(await page.locator('#project-name').getAttribute('placeholder'),'Nama projek');checks++;
