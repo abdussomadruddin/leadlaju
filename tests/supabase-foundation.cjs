@@ -373,11 +373,11 @@ test('production runtime config enables Supabase without requiring a query flag'
 
 test('all production devices invalidate the old app shell for the mandatory agent PWA gate', () => {
   const worker = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
-  assert.match(worker, /leadlaju-pwa-v20261001-release-monitor-v128/);
+  assert.match(worker, /leadlaju-pwa-v20261001-team-sales-templates-v129/);
   assert.match(worker, /existingClient\.navigate\(targetUrl\)/);
-  assert.match(html, /app\.js\?v=20261001-release-monitor-v128/);
+  assert.match(html, /app\.js\?v=20261001-team-sales-templates-v129/);
   assert.match(html, /vendor\/exceljs\.min\.js\?v=4\.4\.0/);
-  assert.match(app, /register\("\/sw\.js\?v=20261001-release-monitor-v128"\)/);
+  assert.match(app, /register\("\/sw\.js\?v=20261001-team-sales-templates-v129"\)/);
   assert.doesNotMatch(app, /get\("backend"\) === "sheet"/);
   assert.match(app, /remoteDatabaseRequired = window\.location\.protocol !== "file:"/);
   assert.match(app, /if \(remoteDatabaseRequired\)[\s\S]*Operasi server lama tidak akan digunakan/);

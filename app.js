@@ -2575,7 +2575,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261001-release-monitor-v128")
+      .register("/sw.js?v=20261001-team-sales-templates-v129")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -3327,8 +3327,13 @@ function openManualLeadModal() {
     return;
   }
   elements.manualLeadForm.reset();
+  const projects = state.projects.filter((project) => project.active);
+  elements.manualLeadProject.innerHTML = `<option value="">${systemWorkerText("Pilih projek")}</option>` +
+    projects.map((project) => `<option value="${escapeHtml(project.id)}">${escapeHtml(project.name)}</option>`).join("");
+  elements.manualLeadProject.disabled = projects.length === 0;
+  elements.manualLeadForm.querySelector('button[type="submit"]').disabled = projects.length === 0;
   elements.manualLeadSource.value = "Manual Lead";
-  elements.manualLeadError.textContent = "";
+  elements.manualLeadError.textContent = projects.length ? "" : systemWorkerText("Tiada projek aktif. Tambah atau aktifkan projek dahulu.");
   elements.manualLeadModal.classList.add("open");
   elements.manualLeadModal.setAttribute("aria-hidden", "false");
   window.setTimeout(() => elements.manualLeadName.focus(), 100);
@@ -3344,7 +3349,8 @@ async function addManualLead(event) {
   const name = elements.manualLeadName.value.trim();
   const phone = elements.manualLeadPhone.value.trim();
   const email = elements.manualLeadEmail.value.trim();
-  const project = elements.manualLeadProject.value.trim();
+  const selectedProject = state.projects.find((project) => project.active && project.id === elements.manualLeadProject.value);
+  const project = selectedProject?.name || "";
   const source = elements.manualLeadSource.value;
 
   if (!name || !phone || !project) {
@@ -3402,6 +3408,8 @@ function leadImportHeader(value) {
     nombor_telefon: "phone",
     emel: "email",
     projek: "project",
+    product: "project",
+    produk: "project",
     bandar: "city",
   };
   return aliases[normalized] || normalized;
@@ -3475,7 +3483,7 @@ function normalizeLeadImportRows(table) {
   const headers = table[0].map(leadImportHeader);
   const required = LEAD_IMPORT_HEADERS;
   const missing = required.filter((header) => !headers.includes(header));
-  if (missing.length) throw new Error(`Kolum wajib tiada: ${missing.join(", ")}.`);
+  if (missing.length) throw new Error(`Kolum wajib tiada: ${missing.map((header) => header === "project" && isTeamSales() ? "product" : header).join(", ")}.`);
   if (table.length - 1 > 1000) throw new Error("Maksimum 1,000 baris bagi setiap import.");
 
   const projects = new Map(state.projects
@@ -3606,7 +3614,7 @@ function downloadFile(blob, filename) {
 
 function leadSampleRows() {
   return [
-    LEAD_IMPORT_HEADERS,
+    LEAD_IMPORT_HEADERS.map((header) => header === "project" && isTeamSales() ? "product" : header),
     ["Nama Lead", "60123456789", "lead@example.com", "Kuala Lumpur", state.projects.find((project) => project.active)?.name || systemWorkerText("Nama Projek")],
   ];
 }
@@ -6041,6 +6049,12 @@ function renderUser() {
   if (!user) return;
 
   document.querySelector("#dashboard-view")?.classList.toggle("agent-dashboard", user.role === "agent");
+  const salesDashboard = user.role === "agent" && isTeamSales();
+  document.querySelector("#dashboard-view")?.classList.toggle("team-sales-dashboard", salesDashboard);
+  const newLeadSection = document.querySelector("#dashboard-view .new-lead-section");
+  // Move the existing panel, preserving its controls and restoring Agent ordering.
+  if (salesDashboard && elements.ownPerformance.nextElementSibling !== newLeadSection) newLeadSection.before(elements.ownPerformance);
+  else if (!salesDashboard && newLeadSection.nextElementSibling !== elements.ownPerformance) newLeadSection.after(elements.ownPerformance);
   document.body.classList.toggle("master-account", isMaster());
   document.body.classList.toggle("team-sales-brand", isTeamSales());
   elements.sidebarAvatar.textContent = initials(user.name);
@@ -6906,6 +6920,7 @@ async function downloadPerformanceReport() {
 }
 
 function renderAll() {
+  document.querySelector("#lead-import-column-hint").textContent = `Isi name, phone, email, city dan ${isTeamSales() ? "product" : "project"}. Maklumat lain diisi automatik oleh sistem.`;
   enforceSingleActiveLead();
   syncExpiryAssignmentTimer();
   renderUser();

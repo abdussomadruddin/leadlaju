@@ -24,7 +24,7 @@
     <meta name="apple-mobile-web-app-title" content="LeadLaju" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>LeadLaju - Lead Management</title>
-    <link rel="manifest" href="manifest.webmanifest?v=20261001-release-monitor-v128" />
+    <link rel="manifest" href="manifest.webmanifest?v=20261001-team-sales-templates-v129" />
     <link rel="icon" href="assets/icon.svg?v=20260625-pwa-notifications" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="assets/apple-touch-icon.png?v=20260625-pwa-notifications" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -33,9 +33,9 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20261001-release-monitor-v128" />
+    <link rel="stylesheet" href="styles.css?v=20261001-team-sales-templates-v129" />
     <script src="vendor/exceljs.min.js?v=4.4.0" defer></script>
-    <script src="app.js?v=20261001-release-monitor-v128" defer></script>
+    <script src="app.js?v=20261001-team-sales-templates-v129" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -808,7 +808,7 @@
                 <div>
                   <span class="section-kicker">1. Sediakan fail</span>
                   <h3>Muat turun template</h3>
-                  <p>Isi name, phone, email, city dan project. Maklumat lain diisi automatik oleh sistem.</p>
+                  <p id="lead-import-column-hint">Isi name, phone, email, city dan project. Maklumat lain diisi automatik oleh sistem.</p>
                 </div>
                 <div class="form-actions">
                   <button class="secondary-button" id="download-sample-csv" type="button">Download CSV</button>
@@ -938,7 +938,9 @@
           <label for="manual-lead-email">Emel</label>
           <input id="manual-lead-email" type="email" placeholder="aishah@gmail.com" />
           <label for="manual-lead-project">Projek</label>
-          <input id="manual-lead-project" type="text" placeholder="DSTH Puncak Awani, Sungai Buloh" required />
+          <select id="manual-lead-project" required>
+            <option value="">Pilih projek</option>
+          </select>
           <label for="manual-lead-source">Sumber</label>
           <select id="manual-lead-source">
             <option value="Manual Lead">Manual Lead</option>

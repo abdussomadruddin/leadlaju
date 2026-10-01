@@ -50,6 +50,19 @@ try {
    await page.waitForFunction(()=>document.body.classList.contains('team-sales-brand'));
    // This fixture bypasses only the existing PWA access modal, never production auth.
    if(role==='agent')await page.evaluate(()=>{getAgentAppAccessState=()=> 'ready';ensureAgentPushAccess=async()=>true;agentPushAccessReady=true;renderAgentAccessGate('ready');renderAll();});
+   if(role==='agent'){
+    const order=()=>page.evaluate(()=>[...document.querySelector('#dashboard-view').children].filter(el=>el.matches('#own-performance,.new-lead-section,#dashboard-follow-up')).map(el=>el.id||'new-leads'));
+    assert.deepEqual(await order(),['own-performance','new-leads','dashboard-follow-up']);checks++;
+    assert.equal(await page.locator('#own-performance').isVisible(),true);checks++;
+    assert.equal(await page.locator('#dashboard-follow-up').isVisible(),true);checks++;
+    const boxes=await page.evaluate(()=>['#own-performance','.new-lead-section','#dashboard-follow-up'].map(selector=>document.querySelector('#dashboard-view '+selector).getBoundingClientRect().top));
+    assert.ok(boxes[0]<boxes[1]&&boxes[1]<boxes[2]);checks++;
+    assert.equal(await page.locator('#dashboard-view .stats-grid').isVisible(),false);checks++;
+    await page.evaluate(()=>{activeBrand.distribution_mode='agent';renderUser();});
+    assert.deepEqual(await order(),['new-leads','own-performance','dashboard-follow-up']);checks++;
+    await page.evaluate(()=>{activeBrand.distribution_mode='team_sales';renderAll();});
+    assert.deepEqual(await order(),['own-performance','new-leads','dashboard-follow-up']);checks++;
+   }
    assert.equal(await page.locator('.sales-lead-card').count(),3);checks++;
    assert.equal(await page.locator('#agent-lead-controls').isVisible(),false);checks++;
    assert.equal(await page.locator('#dashboard-view').innerText().then(t=>/CALL NOW|GET LEAD|STOP LEAD|≤5 min|5 minit|Sasaran 5m|Giliran agihan/.test(t)),false);checks++;

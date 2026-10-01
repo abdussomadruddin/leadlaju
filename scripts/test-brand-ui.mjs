@@ -140,6 +140,47 @@ try {
     await page.screenshot({path:path.join(artifacts,`${name}-monitor.png`)});
   }
   assert.deepEqual(errors,[],`${name}: no runtime errors`);checks++;
+  if(['desktop','iphone','android','small-phone'].includes(name)){
+    for(const mode of ['agent','team_sales']){
+      await page.evaluate(mode=>{
+        activeBrand.distribution_mode=mode;
+        state.projects=[{id:'selected',name:'Brand Product <One>',active:true},{id:'inactive',name:'Inactive',active:false}];
+        renderAll();switchView('leads');
+      },mode);
+      assert.match(await page.locator('#lead-import-column-hint').innerText(),mode==='team_sales'?/dan product\./:/dan project\./);checks++;
+      await page.locator('#manual-lead-button-2').click();
+      assert.equal(await page.locator('#manual-lead-project').evaluate(el=>el.tagName),'SELECT');checks++;
+      assert.equal(await page.locator('#manual-lead-project option').count(),2);checks++;
+      assert.equal(await page.locator('label[for="manual-lead-project"]').innerText(),mode==='team_sales'?'Produk':'Projek');checks++;
+      await page.locator('#manual-lead-project').selectOption('selected');
+      assert.equal(await page.locator('#manual-lead-project option:checked').innerText(),'Brand Product <One>');checks++;
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);checks++;
+      await page.screenshot({path:path.join(artifacts,`${name}-manual-${mode}.png`)});
+      await page.locator('[data-close-modal="manual-lead-modal"]').click();
+      const exports=await page.evaluate(async()=>{
+        const original=downloadFile;const captures=[];
+        downloadFile=(blob,filename)=>captures.push({blob,filename});
+        try {downloadLeadSampleCsv();await downloadLeadSampleXlsx();}
+        finally {downloadFile=original;}
+        return Promise.all(captures.map(async({blob,filename})=>{
+          const table=await readLeadImportRows(new File([blob],filename));
+          return {header:table[0][4],rows:normalizeLeadImportRows(table)};
+        }));
+      });
+      for(const exported of exports){
+        assert.equal(exported.header,mode==='team_sales'?'product':'project');checks++;
+        assert.equal(exported.rows[0].project,'Brand Product <One>');checks++;
+        assert.deepEqual(exported.rows[0].errors,[]);checks++;
+      }
+      const aliases=await page.evaluate(()=>['project','product','produk','projek'].map(header=>normalizeLeadImportRows([['name','phone','email','city',header],['Test','60123456789','','','Brand Product <One>']])[0].errors));
+      assert.deepEqual(aliases,[[],[],[],[]]);checks++;
+      await page.evaluate(()=>{state.projects=[];openManualLeadModal();});
+      assert.equal(await page.locator('#manual-lead-form button[type="submit"]').isDisabled(),true);checks++;
+      assert.match(await page.locator('#manual-lead-error').innerText(),/Tiada (projek|produk) aktif/);checks++;
+      await page.locator('[data-close-modal="manual-lead-modal"]').click();
+    }
+  }
+  assert.deepEqual(errors,[],`${name}: no runtime errors after manual lead/template checks`);checks++;
   await context.close();
  }
  console.log(`PASS: ${checks} UI assertions. Mocked server transport; desktop, iPhone, Android and 320px. Screenshots: ${artifacts}`);

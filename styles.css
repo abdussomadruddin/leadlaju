@@ -524,6 +524,11 @@ svg {
 }
 
 .dashboard-follow-up { margin-top: 16px; }
+.agent-dashboard.team-sales-dashboard .own-performance { margin-top: 0; }
+.agent-dashboard.team-sales-dashboard .new-lead-section { margin-top: 20px; }
+.agent-dashboard.team-sales-dashboard .dashboard-summary,
+.agent-dashboard.team-sales-dashboard .stats-grid,
+.agent-dashboard.team-sales-dashboard .bottom-grid { display: none; }
 .dashboard-follow-up-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); }
 .dashboard-follow-up-item > div:first-child { min-width: 0; }
 .dashboard-follow-up-item strong { display: block; font-size: 13px; overflow-wrap: anywhere; }

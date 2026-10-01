@@ -1,13 +1,13 @@
-const CACHE_NAME = "leadlaju-pwa-v20261001-release-monitor-v128";
+const CACHE_NAME = "leadlaju-pwa-v20261001-team-sales-templates-v129";
 const LEAD_HANDOFF_CACHE = "leadlaju-notification-snapshots";
 const LEAD_HANDOFF_SCHEMA_VERSION = 1;
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20261001-release-monitor-v128",
+  "/styles.css?v=20261001-team-sales-templates-v129",
   "/vendor/exceljs.min.js?v=4.4.0",
-  "/app.js?v=20261001-release-monitor-v128",
-  "/manifest.webmanifest?v=20261001-release-monitor-v128",
+  "/app.js?v=20261001-team-sales-templates-v129",
+  "/manifest.webmanifest?v=20261001-team-sales-templates-v129",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",
   "/assets/icon-512.png",
