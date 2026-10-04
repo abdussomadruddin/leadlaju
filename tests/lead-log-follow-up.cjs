@@ -51,7 +51,8 @@ test('follow-up has its own filter with all six counts including zero', () => {
   assert.match(app, /followUpCounts\.get\(count\) \|\| 0/);
   assert.match(app, /followUpFilter === "follow_up"/);
   assert.match(app, /followUpFilter\.startsWith\("follow_up_"\)/);
-  assert.match(app, /\(filter === "all" \|\| visualStatus === filter\) &&/);
+  assert.match(app, /filter === "all" \|\| visualStatus === filter/);
+  assert.match(app, /filter === "group_follow_up"/);
   assert.match(app, /leadFollowUpFilter\.addEventListener\("change", resetLeadLogPage\)/);
 });
 

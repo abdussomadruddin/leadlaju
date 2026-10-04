@@ -5369,6 +5369,11 @@ td small {
 .own-performance { margin-top: 20px; }
 .performance-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin: 16px 0; }
 .performance-metric { display: grid; gap: 5px; min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: #f8faff; }
+button.performance-metric { text-align: left; font: inherit; color: inherit; cursor: pointer; }
+button.performance-metric:focus-visible { outline: 3px solid #2563eb; outline-offset: 2px; }
+#sales-drilldown-notice { padding: 10px 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+#sales-drilldown-notice[hidden] { display: none; }
+#sales-drilldown-notice button { padding: 8px 12px; border: 1px solid var(--line); border-radius: 9px; background: #fff; color: #2563eb; }
 .performance-metric small, .performance-metric span { color: var(--ink-700); font-size: 11px; }
 .performance-metric strong { color: var(--ink-900); font-family: "Manrope", sans-serif; font-size: 23px; }
 .performance-filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 12px 0 16px; padding: 16px; }

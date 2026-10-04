@@ -288,5 +288,45 @@ try {
    const result=(await commitUser(salesAdmin,sales,`select public.admin_ingest_manual_lead($1) x`,[{id:`push-${source}`,name:'Push Fixture',phone:'60120000000',project:'Same Project',source}])).rows[0].x;
    check((await client.query(`select count(*)::int n from public.notification_outbox n join public.leads l on l.id=n.lead_id and l.brand_id=n.brand_id where l.id=$1 and n.notification_type='sales_new_lead' and n.user_id=l.assigned_agent_id and n.assignment_revision=l.assignment_revision`,[result.lead_id])).rows[0].n===1,`${source} creates the owner's new lead push`);
  }
+ // Reminder thresholds, dedupe and delivery cancellation run against real SQL.
+ await client.query("update public.profiles set active=true where brand_id=$1",[sales]);
+ await client.query("update leadlaju_private.sales_reminder_release set activated_at=now()-interval '2 hours'");
+ const reminderLeads=(await client.query("select id,assigned_agent_id,assignment_revision from public.leads where brand_id=$1 and status='new' and queue_state='sales_assigned' order by id limit 3",[sales])).rows;
+ check(reminderLeads.length===3,'Reminder fixture has three assigned New leads');
+ await client.query("update public.leads set created_at=now()-interval '20 minutes' where id=$1",[reminderLeads[0].id]);
+ await client.query("update public.leads set created_at=now()-interval '70 minutes' where id=$1",[reminderLeads[1].id]);
+ await client.query("update public.leads set created_at=now()-interval '3 hours' where id=$1",[reminderLeads[2].id]);
+ await client.query('select leadlaju_private.enqueue_sales_contact_reminders(now())');
+ const reminderCount=()=>client.query("select count(*)::int n from public.notification_outbox where notification_type like 'sales_contact_%'");
+ const initial=(await reminderCount()).rows[0].n;
+ check(initial===3,'20-minute owner, late 60-minute owner and one Admin summary');
+ check((await client.query("select count(*)::int n from public.notification_outbox where lead_id=$1 and notification_type='sales_contact_15'",[reminderLeads[1].id])).rows[0].n===0,'Late assignment only sends latest reminder');
+ check((await client.query("select count(*)::int n from public.notification_outbox where lead_id=$1 and notification_type like 'sales_contact_%'",[reminderLeads[2].id])).rows[0].n===0,'Historical lead does not cause reminder flood');
+ await client.query('select leadlaju_private.enqueue_sales_contact_reminders(now())');
+ check((await reminderCount()).rows[0].n===initial,'Duplicate scheduler produces no duplicate reminders');
+ const notice=(await client.query("select * from public.notification_outbox where lead_id=$1 and notification_type='sales_contact_15'",[reminderLeads[0].id])).rows[0];
+ const validate=()=>client.query('select public.validate_sales_contact_reminder($1,$2,$3) x',[notice.user_id,notice.notification_type,notice.payload]);
+ check(Boolean((await validate()).rows[0].x),'Relevant owner reminder is deliverable');
+ check((await client.query('select public.validate_sales_contact_reminder($1,$2,$3) x',[agentA,notice.notification_type,notice.payload])).rows[0].x===null,'Cross-brand recipient cannot receive reminder');
+ await rejects(()=>asUser(agentA,sa,()=>validate()),'User cannot call service-only reminder validation');
+ await client.query("update public.leads set status='contacted',queue_state='contacted' where id=$1",[notice.lead_id]);
+ check((await validate()).rows[0].x===null,'Contacted lead cancels queued reminder');
+ await client.query("update public.leads set status='new',queue_state='sales_assigned',assignment_revision=assignment_revision+1 where id=$1",[notice.lead_id]);
+ check((await validate()).rows[0].x===null,'Changed assignment revision cancels stale reminder');
+ await client.query('update public.brands set active=false where id=$1',[sales]);
+ check((await validate()).rows[0].x===null,'Inactive brand cannot receive reminders');
+ await client.query('update public.brands set active=true where id=$1',[sales]);
+ await client.query("update public.leads set created_at=now()-interval '70 minutes' where id=any($1::uuid[])",[[reminderLeads[0].id,reminderLeads[2].id]]);
+ await client.query('select leadlaju_private.enqueue_sales_contact_reminders(now())');
+ const summary=(await client.query("select * from public.notification_outbox where notification_type='sales_contact_admin' order by id desc limit 1")).rows[0];
+ check(summary.payload.items.length===2,'Two newly overdue leads combine into one Admin summary');
+ check((await client.query("select count(*)::int n from public.notification_outbox where lead_id=$1 and notification_type='sales_contact_60'",[reminderLeads[0].id])).rows[0].n===1,'15-minute lead gets its one-hour stage once');
+ const validateSummary=()=>client.query('select public.validate_sales_contact_reminder($1,$2,$3) x',[summary.user_id,summary.notification_type,summary.payload]);
+ await client.query("update public.leads set status='contacted',queue_state='contacted' where id=$1",[reminderLeads[0].id]);
+ check((await validateSummary()).rows[0].x.items.length===1,'Retry removes Contacted lead from Admin summary');
+ await client.query("update public.leads set status='contacted',queue_state='contacted' where id=$1",[reminderLeads[2].id]);
+ check((await validateSummary()).rows[0].x===null,'Entirely obsolete summary is cancelled');
+ await client.query('select leadlaju_private.enqueue_sales_contact_reminders(now())');
+ check((await client.query("select sent_at is not null done from public.notification_outbox where id=$1",[summary.id])).rows[0].done,'Scheduler retires obsolete outbox rows even before claim');
  console.log(`PASS: ${checks} real PostgreSQL brand isolation and distribution assertions`);
 } finally { if(client) await client.end(); await pg.stop(); }

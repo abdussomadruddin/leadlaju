@@ -1176,6 +1176,7 @@ function startAuthenticatedApp(user, options = {}) {
   renderAll();
   enforceAgentNotificationAccess();
   if (pendingNotificationLeadId) openNotificationLead(pendingNotificationLeadId);
+  if (new URLSearchParams(window.location.search).get("reminder") === "sales-overdue") openSalesOverdueReminder();
   if (new URLSearchParams(window.location.search).get("status") === "new") {
     elements.leadFilter.value = "new";
     renderLeadsTable();
@@ -2647,7 +2648,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261004-sales-waiting-v135")
+      .register("/sw.js?v=20261004-sales-reminders-v136")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -5261,6 +5262,11 @@ async function handleSalesContact(leadId, channel, destination) {
 }
 
 function compareLeadLogOrder(left, right) {
+  if (isTeamSales()) {
+    const priority = Number(right.status === "new") - Number(left.status === "new");
+    if (priority) return priority;
+    if (left.status === "new" && right.status === "new") return (left.createdAt || left.receivedAt || 0) - (right.createdAt || right.receivedAt || 0);
+  }
   const bottomStatuses = ["passed", "rejected", "cancelled"];
   const leftBottom = Number(bottomStatuses.includes(getLeadVisualStatus(left)));
   const rightBottom = Number(bottomStatuses.includes(getLeadVisualStatus(right)));
@@ -5333,7 +5339,7 @@ function renderActiveLead() {
   renderAgentLeadControls();
 
   if (isTeamSales()) {
-    const salesLeads = visibleLeads.filter(item => item.status === "new" && item.assignedAgentId);
+    const salesLeads = visibleLeads.filter(item => item.status === "new" && item.assignedAgentId).sort(compareLeadLogOrder);
     elements.activeLeadContainer.classList.toggle("has-active-lead", salesLeads.length > 0);
     elements.activeLeadContainer.innerHTML = salesLeads.length ? `<div class="sales-new-leads"><h3>Lead baharu <small>${salesLeads.length}</small></h3>${salesLeads.map(item => `<article class="sales-lead-card"><div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.project)}</span><small>${escapeHtml(displayLeadPhone(item))}</small></div><span class="lead-status-badge new">New</span>${renderSalesLeadWaitingTime(item)}${renderNewLeadNotes(item)}${isAdmin() ? "" : `<div class="sales-lead-actions">${renderSalesContactButton(item, "call")}${renderSalesContactButton(item, "whatsapp")}${renderLeadCopyButton(item)}</div>${renderSalesContactState(item)}`}</article>`).join("")}</div>` : '<div class="empty-lead"><h3>Tiada lead baharu</h3><p>Lead akan diagih secara automatik kepada Team Sales aktif yang layak.</p></div>';
     return;
@@ -5667,6 +5673,58 @@ async function copyLeadDetails(leadId) {
   }
 }
 
+let salesPerformanceRange = null;
+let salesLeadDrilldown = null;
+
+function openSalesOverdueReminder() {
+  if (!isTeamSales() || !isAdmin()) return;
+  elements.leadSearch.value = "";
+  leadLogVisibleLimit = LEAD_LOG_PAGE_SIZE;
+  [elements.leadFilter, elements.leadFollowUpFilter, elements.leadAgentFilter, elements.leadPeriodFilter].forEach(select => { if (select) select.value = "all"; });
+  salesLeadDrilldown = { brandId: activeBrandId, overdue: true };
+  switchView("leads");
+  renderLeadsTable();
+  elements.leadFilter.value = "new";
+  renderLeadsTable();
+}
+
+function matchesSalesDrilldown(lead) {
+  if (!salesLeadDrilldown || !isTeamSales() || salesLeadDrilldown.brandId !== activeBrandId) return true;
+  if (salesLeadDrilldown.overdue) return lead.status === "new" && lead.assignedAgentId && Number(lead.createdAt || lead.receivedAt) <= Date.now() - 3600000;
+  return (lead.assignmentHistory || []).some(item => item.agentId === lead.assignedAgentId && todayKey(new Date(item.assignedAt).getTime()) >= salesLeadDrilldown.from && todayKey(new Date(item.assignedAt).getTime()) <= salesLeadDrilldown.to);
+}
+
+function openSalesPerformance(status) {
+  if (!isTeamSales()) return;
+  elements.leadSearch.value = "";
+  leadLogVisibleLimit = LEAD_LOG_PAGE_SIZE;
+  [elements.leadFilter, elements.leadFollowUpFilter, elements.leadAgentFilter, elements.leadPeriodFilter].forEach(select => { if (select) select.value = "all"; });
+  if (status === "due") {
+    salesLeadDrilldown = null;
+    leadLogVisibleLimit = LEAD_LOG_PAGE_SIZE;
+    [elements.followUpAgentFilter, elements.followUpProjectFilter, elements.followUpPeriodFilter].forEach(select => { if (select) select.value = "all"; });
+    switchView("follow-up-due");
+    return;
+  }
+  salesLeadDrilldown = { ...salesPerformanceRange, brandId: activeBrandId };
+  switchView("leads");
+  renderLeadsTable();
+  elements.leadFilter.value = status;
+  renderLeadsTable();
+}
+
+document.addEventListener("click", event => {
+  const card = event.target.closest("[data-sales-performance]");
+  if (card) openSalesPerformance(card.dataset.salesPerformance);
+  if (event.target.closest("[data-sales-filter-reset]")) {
+    salesLeadDrilldown = null;
+    leadLogVisibleLimit = LEAD_LOG_PAGE_SIZE;
+    elements.leadSearch.value = "";
+    [elements.leadFilter, elements.leadFollowUpFilter, elements.leadAgentFilter, elements.leadPeriodFilter].forEach(select => { if (select) select.value = "all"; });
+    renderLeadsTable();
+  }
+});
+
 function renderLeadsTable() {
   const focusedNote = document.activeElement;
   if (focusedNote?.matches("[data-lead-note]") && elements.leadsTableBody.contains(focusedNote)) {
@@ -5677,9 +5735,9 @@ function renderLeadsTable() {
   const selectedStatus = elements.leadFilter.value || "all";
   const selectedFollowUp = elements.leadFollowUpFilter.value || "all";
   const selectedAgentId = elements.leadAgentFilter?.value || "all";
-  const visibleLeads = isAdmin()
+  const visibleLeads = (isAdmin()
     ? state.leads.filter((lead) => !isVisuallyExpiredAssignment(lead))
-    : state.leads.filter((lead) => lead.assignedAgentId === state.currentUserId && !isVisuallyExpiredAssignment(lead));
+    : state.leads.filter((lead) => lead.assignedAgentId === state.currentUserId && !isVisuallyExpiredAssignment(lead))).filter(matchesSalesDrilldown);
   const statusCounts = Object.fromEntries(LEAD_STATUS_OPTIONS.map((status) => [status.value, 0]));
   const followUpCounts = new Map();
   const agentCounts = new Map();
@@ -5697,6 +5755,7 @@ function renderLeadsTable() {
   });
   const statusOptionsMarkup = [
     `<option value="all">Semua status (${visibleLeads.length})</option>`,
+    ...(isTeamSales() ? ['<option value="group_follow_up">Need Follow Up + All Offer Presented</option>', '<option value="group_cancelled_rejected">Cancelled + Rejected</option>'] : []),
     ...LEAD_STATUS_OPTIONS.map(
       (status) => `<option value="${status.value}">${status.label} (${statusCounts[status.value] || 0})</option>`,
     ),
@@ -5727,6 +5786,7 @@ function renderLeadsTable() {
   populateMonthPeriodFilter(elements.leadPeriodFilter, visibleLeads, (lead) => lead.createdAt || lead.receivedAt);
   const rows = state.leads
     .filter((lead) => {
+      if (!matchesSalesDrilldown(lead)) return false;
       if (isVisuallyExpiredAssignment(lead)) return false;
       if (!isAdmin() && lead.assignedAgentId !== state.currentUserId) return false;
       const matchesAgent =
@@ -5743,7 +5803,7 @@ function renderLeadsTable() {
         String(lead.notes || "").toLowerCase().includes(search);
       const visualStatus = getLeadVisualStatus(lead);
       return matchesAgent && matchesSearch &&
-        (filter === "all" || visualStatus === filter) &&
+        (filter === "all" || visualStatus === filter || (filter === "group_follow_up" && ["need_follow_up", "all_offer_presented"].includes(visualStatus)) || (filter === "group_cancelled_rejected" && ["cancelled", "rejected"].includes(visualStatus))) &&
         (followUpFilter === "all" || (followUpFilter === "follow_up" && Number(lead.followUpCount) > 0) || (followUpFilter.startsWith("follow_up_") && Number(lead.followUpCount) === Number(followUpFilter.slice(10)))) &&
         matchesMonthPeriodFilter(lead.createdAt || lead.receivedAt, elements.leadPeriodFilter);
     })
@@ -5751,6 +5811,18 @@ function renderLeadsTable() {
 
   if (elements.leadLogCount) {
     elements.leadLogCount.textContent = `${rows.length} lead`;
+  }
+  let drilldownNotice = document.querySelector("#sales-drilldown-notice");
+  if (!drilldownNotice && elements.leadLogCount) {
+    drilldownNotice = document.createElement("div");
+    drilldownNotice.id = "sales-drilldown-notice";
+    elements.leadLogCount.parentElement.insertAdjacentElement("afterend", drilldownNotice);
+  }
+  if (drilldownNotice) {
+    const active = isTeamSales() && salesLeadDrilldown?.brandId === activeBrandId;
+    drilldownNotice.hidden = !active;
+    const statusLabel = ({ all: "Semua status", group_follow_up: "Need Follow Up + All Offer Presented", group_cancelled_rejected: "Cancelled + Rejected" })[filter] || LEAD_STATUS_OPTIONS.find(item => item.value === filter)?.label || filter;
+    drilldownNotice.innerHTML = active ? `<small>Penapis aktif: ${escapeHtml(statusLabel)} · ${salesLeadDrilldown.overdue ? "New melebihi 1 jam" : `Assignment ${escapeHtml(salesLeadDrilldown.from)} hingga ${escapeHtml(salesLeadDrilldown.to)}`}</small> <button type="button" data-sales-filter-reset>Reset penapis</button>` : "";
   }
   const shownRows = rows.slice(0, leadLogVisibleLimit);
   elements.leadLogMoreWrap.hidden = shownRows.length >= rows.length;
@@ -6747,6 +6819,7 @@ function performanceDateOffset(days) {
 }
 
 function renderTeamPerformance(report) {
+  salesPerformanceRange = { from: report.from, to: report.to };
   const rows = report?.rows || [];
   const total = (key) => rows.reduce((sum, row) => sum + (Number(row[key]) || 0), 0);
   document.querySelector("#team-performance-status").textContent = `${report.from} hingga ${report.to} · ${rows.length} Team Sales${total("assignments") === 0 ? " · Tiada lead ditugaskan dalam tempoh ini" : ""}`;
@@ -6826,6 +6899,7 @@ function performanceRateLabel(row) {
 }
 
 function performanceMetric(label, value, detail = "", icon = "lead") {
+  const action = isTeamSales() ? ({ Contacted: "contacted", "Total Contacted": "contacted", "Follow Up": "group_follow_up", Potential: "potential", "Cancelled / Rejected": "group_cancelled_rejected", Client: "client", "Follow Up Due": "due" })[label] : null;
   const icons = {
     lead: '<circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M17 5a3 3 0 0 1 0 6m1 4a5 5 0 0 1 3 5"/>',
     call: '<path d="M7 3h4l1 5-2 2a14 14 0 0 0 4 4l2-2 5 1v4c0 2-2 3-4 3C10 20 4 14 4 7c0-2 1-4 3-4Z"/>',
@@ -6833,10 +6907,11 @@ function performanceMetric(label, value, detail = "", icon = "lead") {
     show: '<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
     due: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   };
-  return `<div class="performance-metric metric-${icon}"><small>${escapeHtml(label)}</small><span class="performance-metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24">${icons[icon] || icons.lead}</svg></span><strong>${escapeHtml(value)}</strong>${detail ? `<span class="performance-metric-detail">${escapeHtml(detail)}</span>` : ""}</div>`;
+  return `<${action ? 'button type="button" data-sales-performance="' + action + '"' : "div"} class="performance-metric metric-${icon}"><small>${escapeHtml(label)}</small><span class="performance-metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24">${icons[icon] || icons.lead}</svg></span><strong>${escapeHtml(value)}</strong>${detail ? `<span class="performance-metric-detail">${escapeHtml(detail)}</span>` : ""}</${action ? "button" : "div"}>`;
 }
 
 function renderOwnPerformance(current, previous) {
+  if (isTeamSales()) salesPerformanceRange = { from: current.from, to: current.to };
   const row = current?.rows?.find((item) => item.agent_id === state.currentUserId);
   const prior = previous?.rows?.find((item) => item.agent_id === state.currentUserId);
   if (!row) {
@@ -6848,6 +6923,7 @@ function renderOwnPerformance(current, previous) {
   elements.ownPerformanceMetrics.innerHTML = [
     performanceMetric("Lead ditugaskan", row.assignments, `Sebelumnya ${prior?.assignments || 0}`, "lead"),
     isTeamSales() ? performanceMetric("Total Contacted", row.total_contacted || 0, `Sebelumnya ${prior?.total_contacted || 0}`, "call") : performanceMetric("CALL NOW ≤5 min", performanceRateLabel(row), `Sebelumnya ${prior ? performanceRateLabel(prior) : "—"}`, "call"),
+    ...(isTeamSales() ? [["Follow Up", "total_follow_up", "due"], ["Potential", "total_potential", "lead"], ["Cancelled / Rejected", "total_cancelled_rejected", "due"], ["Client", "total_client", "show"]].map(([label, key, icon]) => performanceMetric(label, row[key] || 0, `Sebelumnya ${prior?.[key] || 0}`, icon)) : []),
     performanceMetric("Appointment", row.appointments, `Sebelumnya ${prior?.appointments || 0}`, "appointment"),
     performanceMetric("Show Up", row.show_ups, `Sebelumnya ${prior?.show_ups || 0}`, "show"),
     performanceMetric("Follow Up Due", row.due_now, "Perlu tindakan", "due"),
@@ -6909,6 +6985,8 @@ async function loadMasterManagement() {
 }
 
 function clearBrandOperationalState() {
+  salesLeadDrilldown = null;
+  salesPerformanceRange = null;
   const current = getCurrentUser();
   const integration = state.integration;
   brandContextVersion++;
@@ -8727,6 +8805,7 @@ if ("serviceWorker" in navigator) {
       if (event.data.leadId) syncNotificationLead(event.data.leadId);
     }
     if (event.data?.type === "OPEN_VIEW") {
+      if (event.data.reminderType === "sales-overdue") { openSalesOverdueReminder(); return; }
       if (event.data.view === "leads" && event.data.leadIds?.length > 1) {
         elements.leadSearch.value = "";
         elements.leadFilter.value = "new";

@@ -47,13 +47,27 @@ Deno.serve(async (request) => {
   for (const [outboxId, rows] of groups) {
     const first = rows[0];
     const brandId = String(first.payload?.brandId || "");
+    const salesReminder = ["sales_contact_15", "sales_contact_60", "sales_contact_admin"].includes(first.notification_type);
     const canDeliver = async () => {
       if (!brandId) return false;
       const { data: brand } = await admin.from("brands").select("id").eq("id", brandId).eq("active", true).maybeSingle();
       const { data: recipient } = await admin.from("profiles").select("id").eq("id", first.user_id).eq("brand_id", brandId).eq("active", true).eq("approval_status", "approved").maybeSingle();
-      return Boolean(brand && recipient);
+      if (!brand || !recipient) return false;
+      if (salesReminder) {
+        const { data, error } = await admin.rpc("validate_sales_contact_reminder", { p_user_id: first.user_id, p_type: first.notification_type, p_payload: first.payload });
+        if (error) throw new Error(`Reminder validation failed: ${error.message}`);
+        if (!data) return false;
+        first.payload = data;
+      }
+      return true;
     };
-    if (!await canDeliver()) {
+    let allowed: boolean;
+    try { allowed = await canDeliver(); } catch (cause) {
+      await admin.rpc("finish_notification_outbox", { p_outbox_id: outboxId, p_success: false, p_error: String(cause) });
+      failed += 1;
+      continue;
+    }
+    if (!allowed) {
       await admin.rpc("finish_notification_outbox", { p_outbox_id: outboxId, p_success: true, p_error: null });
       continue;
     }
@@ -78,7 +92,7 @@ Deno.serve(async (request) => {
           followUpDueCount: count,
         };
       }
-      const notification = JSON.stringify({
+      const notification = () => JSON.stringify({
         title: String(first.payload?.title || "LeadLaju notification"),
         body: String(first.payload?.body || "Ada update baru dalam LeadLaju."),
         tag: String(first.payload?.tag || `leadlaju-${outboxId}`),
@@ -92,14 +106,16 @@ Deno.serve(async (request) => {
         potentialCount: Number(first.payload?.potentialCount) || 0,
         followUpDueCount: Number(first.payload?.followUpDueCount) || 0,
         bulletinId: first.payload?.bulletinId || null,
+        leadId: first.payload?.leadId || null,
       });
       let delivered = 0;
+      let cancelled = false;
       const deliveryErrors: string[] = [];
       for (const row of rows) {
         if (!row.endpoint || !row.p256dh || !row.auth_secret) continue;
-        if (!await canDeliver()) break;
         try {
-          await webpush.sendNotification({ endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth_secret } }, notification, { TTL: first.notification_type === "bulletin" ? 86400 : 300, urgency: first.notification_type === "bulletin" ? "normal" : "high" });
+          if (!await canDeliver()) { cancelled = true; break; }
+          await webpush.sendNotification({ endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth_secret } }, notification(), { TTL: first.notification_type === "bulletin" ? 86400 : 300, urgency: first.notification_type === "bulletin" ? "normal" : "high" });
           delivered += 1;
           await admin.from("push_subscriptions").update({ last_success_at: new Date().toISOString(), failure_count: 0, updated_at: new Date().toISOString() }).eq("id", row.subscription_id);
         } catch (cause) {
@@ -111,7 +127,7 @@ Deno.serve(async (request) => {
         }
       }
       const noSubscription = rows.every((row) => !row.endpoint);
-      const success = delivered > 0 || noSubscription;
+      const success = cancelled || delivered > 0 || (!salesReminder && noSubscription);
       await admin.rpc("finish_notification_outbox", { p_outbox_id: outboxId, p_success: success, p_error: success ? null : `Push failed: ${deliveryErrors.join(",")}` });
       if (success) sent += 1; else failed += 1;
       continue;

@@ -127,6 +127,27 @@ try {
    await page.waitForTimeout(250);await page.evaluate(()=>{window.__fail=false;return flushContactOutbox();});
    await page.waitForFunction(()=>document.querySelectorAll('.sales-lead-card').length===1);
    assert.equal(await page.evaluate(()=>state.leads.every(l=>l.followUpCount===0)),true,'Ordinary WA does not increment Follow Up');checks++;
+   await page.evaluate(()=>{
+    state.leads.forEach((lead,index)=>{lead.assignmentHistory=[{agentId:lead.assignedAgentId,assignedAt:new Date(Date.now()-(index===1?8:0)*86400000).toISOString()}];});
+    renderAll();
+   });
+   await page.evaluate(()=>switchView('dashboard'));
+   const metricsRoot=role==='agent'?'#own-performance-metrics':'#team-performance-metrics';
+   await page.locator(`${metricsRoot} [data-sales-performance="contacted"]`).click();
+   assert.equal(await page.locator('#lead-filter').inputValue(),'contacted');checks++;
+   assert.equal(await page.locator('#lead-log-count').innerText(),'1 lead','Card uses assignment date and current ownership');checks++;
+   assert.equal(await page.locator('#sales-drilldown-notice').isVisible(),true);checks++;
+   await page.locator('[data-sales-filter-reset]').click();
+   assert.equal(await page.locator('#lead-log-count').innerText(),'3 lead');checks++;
+   for(const status of ['group_follow_up','potential','group_cancelled_rejected','client']){
+    await page.evaluate(()=>switchView('dashboard'));
+    await page.locator(`${metricsRoot} [data-sales-performance="${status}"]`).click();
+    assert.equal(await page.locator('#lead-filter').inputValue(),status);checks++;
+    await page.locator('[data-sales-filter-reset]').click();
+   }
+   await page.evaluate(()=>switchView('dashboard'));
+   await page.locator(`${metricsRoot} [data-sales-performance="due"]`).click();
+   assert.equal(await page.locator('#follow-up-due-view').isVisible(),true);checks++;
    await page.evaluate(()=>switchView('dashboard'));
    await page.screenshot({path:path.join(artifacts,`${name}-${role}-dashboard.png`),fullPage:true});
    await page.evaluate(()=>switchView('leads'));
