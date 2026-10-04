@@ -1,13 +1,13 @@
-const CACHE_NAME = "leadlaju-pwa-v20261004-sales-reminders-v136";
+const CACHE_NAME = "leadlaju-pwa-v20261004-sales-reminders-v137";
 const LEAD_HANDOFF_CACHE = "leadlaju-notification-snapshots";
 const LEAD_HANDOFF_SCHEMA_VERSION = 1;
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20261004-sales-reminders-v136",
+  "/styles.css?v=20261004-sales-reminders-v137",
   "/vendor/exceljs.min.js?v=4.4.0",
-  "/app.js?v=20261004-sales-reminders-v136",
-  "/manifest.webmanifest?v=20261004-sales-reminders-v136",
+  "/app.js?v=20261004-sales-reminders-v137",
+  "/manifest.webmanifest?v=20261004-sales-reminders-v137",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",
   "/assets/icon-512.png",
@@ -221,6 +221,7 @@ async function showLeadNotificationSerialized(payload = {}, timing = createLeadT
       leadSnapshot: payload.leadSnapshot || null,
       view: payload.view || null,
       reminderType: payload.reminderType || null,
+      brandId: payload.brandId || null,
       potentialCount: Number(payload.potentialCount) || 0,
       bulletinId: payload.bulletinId || null,
     }
@@ -372,6 +373,7 @@ self.addEventListener("notificationclick", (event) => {
             : notificationData.leadId ? "OPEN_LEAD" : view ? "OPEN_VIEW" : "OPEN_DASHBOARD",
           view,
           reminderType: notificationData.reminderType || null,
+          brandId: notificationData.brandId || null,
           leadId: notificationData.leadId || null,
           leadIds: notificationData.leadIds || [],
           leadSnapshot: notificationData.leadSnapshot || null,

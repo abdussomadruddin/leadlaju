@@ -107,6 +107,7 @@ Deno.serve(async (request) => {
         followUpDueCount: Number(first.payload?.followUpDueCount) || 0,
         bulletinId: first.payload?.bulletinId || null,
         leadId: first.payload?.leadId || null,
+        brandId,
       });
       let delivered = 0;
       let cancelled = false;

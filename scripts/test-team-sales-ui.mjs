@@ -47,6 +47,8 @@ try {
    },{role});
    await page.goto(origin,{waitUntil:'domcontentloaded'});await page.locator('#app-shell').waitFor({state:'visible'});
    if(role==='master'){
+    // The real UI intentionally rejects switching while startup requests run.
+    await page.waitForFunction(()=>!globalLoadingCount&&!pendingBrandRequestCount&&!syncInProgress);
     await page.locator('#master-brand-switcher').selectOption('00000000-0000-4000-8000-000000000002');
    }
    await page.waitForFunction(()=>document.body.classList.contains('team-sales-brand'));
@@ -148,6 +150,12 @@ try {
    await page.evaluate(()=>switchView('dashboard'));
    await page.locator(`${metricsRoot} [data-sales-performance="due"]`).click();
    assert.equal(await page.locator('#follow-up-due-view').isVisible(),true);checks++;
+   await page.evaluate(()=>switchView('dashboard'));
+   await page.locator(`${metricsRoot} [data-sales-performance="contacted"]`).click();
+   await page.evaluate(()=>openNotificationLead('sales-lead-2'));
+   assert.equal(await page.locator('#lead-log-count').innerText(),'1 lead','Push clears an older assignment-date drilldown');checks++;
+   assert.equal(await page.locator('#sales-drilldown-notice').isVisible(),false);checks++;
+   await page.evaluate(()=>{elements.leadSearch.value='';renderLeadsTable();});
    await page.evaluate(()=>switchView('dashboard'));
    await page.screenshot({path:path.join(artifacts,`${name}-${role}-dashboard.png`),fullPage:true});
    await page.evaluate(()=>switchView('leads'));

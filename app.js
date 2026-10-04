@@ -2393,6 +2393,7 @@ function getRequestedStartView() {
 async function openNotificationLead(leadId) {
   const requestedId = String(leadId || "").trim();
   if (!requestedId) return;
+  salesLeadDrilldown = null;
   pendingNotificationLeadId = requestedId;
   if (!getCurrentUser()) return;
   let lead = state.leads.find((item) => item.id === requestedId || item.dedupeKey === requestedId);
@@ -2648,7 +2649,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261004-sales-reminders-v136")
+      .register("/sw.js?v=20261004-sales-reminders-v137")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -5676,8 +5677,9 @@ async function copyLeadDetails(leadId) {
 let salesPerformanceRange = null;
 let salesLeadDrilldown = null;
 
-function openSalesOverdueReminder() {
+function openSalesOverdueReminder(brandId = new URLSearchParams(window.location.search).get("brand")) {
   if (!isTeamSales() || !isAdmin()) return;
+  if (brandId && brandId !== activeBrandId) return;
   elements.leadSearch.value = "";
   leadLogVisibleLimit = LEAD_LOG_PAGE_SIZE;
   [elements.leadFilter, elements.leadFollowUpFilter, elements.leadAgentFilter, elements.leadPeriodFilter].forEach(select => { if (select) select.value = "all"; });
@@ -8805,8 +8807,9 @@ if ("serviceWorker" in navigator) {
       if (event.data.leadId) syncNotificationLead(event.data.leadId);
     }
     if (event.data?.type === "OPEN_VIEW") {
-      if (event.data.reminderType === "sales-overdue") { openSalesOverdueReminder(); return; }
+      if (event.data.reminderType === "sales-overdue") { openSalesOverdueReminder(event.data.brandId); return; }
       if (event.data.view === "leads" && event.data.leadIds?.length > 1) {
+        salesLeadDrilldown = null;
         elements.leadSearch.value = "";
         elements.leadFilter.value = "new";
         [elements.leadFollowUpFilter, elements.leadAgentFilter, elements.leadPeriodFilter].forEach((field) => { if (field) field.value = "all"; });
