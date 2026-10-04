@@ -1157,6 +1157,7 @@ function startAuthenticatedApp(user, options = {}) {
   tickTimer = window.setInterval(() => {
     clearExpiredLocalCooldowns();
     updateCountdown();
+    updateSalesLeadWaitingTimes();
     if (activeView === "lead-monitor" && monitorLastCanonicalSyncAt &&
       Date.now() - monitorLastCanonicalSyncAt >= 90000 &&
       elements.monitorHealth.textContent !== "Tidak disahkan") renderLeadMonitor();
@@ -2646,7 +2647,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261002-team-dashboard-v134")
+      .register("/sw.js?v=20261004-sales-waiting-v135")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -5283,6 +5284,33 @@ function leadDisplayNotes(lead, value = lead.notes) {
   return notes;
 }
 
+function salesLeadWaitingTime(lead, now = Date.now()) {
+  const startedAt = Number(lead.createdAt || lead.receivedAt);
+  if (!Number.isFinite(startedAt) || startedAt <= 0) return "—";
+  const elapsed = Math.floor(Math.max(0, now - startedAt) / 1000);
+  const days = Math.floor(elapsed / 86400);
+  const hours = Math.floor((elapsed % 86400) / 3600);
+  const minutes = Math.floor((elapsed % 3600) / 60);
+  const seconds = elapsed % 60;
+  return `${days} hari ${hours} jam ${String(minutes).padStart(2, "0")} minit ${String(seconds).padStart(2, "0")} saat`;
+}
+
+function renderSalesLeadWaitingTime(lead) {
+  if (!isTeamSales() || lead.status !== "new") return "";
+  return `<span class="sales-lead-waiting">Belum contact <strong data-sales-waiting-lead="${escapeHtml(lead.id)}">${salesLeadWaitingTime(lead)}</strong></span>`;
+}
+
+function updateSalesLeadWaitingTimes() {
+  if (!isTeamSales() || document.hidden) return;
+  const now = Date.now();
+  const leads = new Map(state.leads.map(lead => [lead.id, lead]));
+  document.querySelectorAll("[data-sales-waiting-lead]").forEach(counter => {
+    const lead = leads.get(counter.dataset.salesWaitingLead);
+    counter.parentElement.hidden = !lead || lead.status !== "new";
+    if (lead?.status === "new") counter.textContent = salesLeadWaitingTime(lead, now);
+  });
+}
+
 function renderNewLeadNotes(lead) {
   const notes = leadDisplayNotes(lead);
   if (!notes) return "";
@@ -5307,7 +5335,7 @@ function renderActiveLead() {
   if (isTeamSales()) {
     const salesLeads = visibleLeads.filter(item => item.status === "new" && item.assignedAgentId);
     elements.activeLeadContainer.classList.toggle("has-active-lead", salesLeads.length > 0);
-    elements.activeLeadContainer.innerHTML = salesLeads.length ? `<div class="sales-new-leads"><h3>Lead baharu <small>${salesLeads.length}</small></h3>${salesLeads.map(item => `<article class="sales-lead-card"><div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.project)}</span><small>${escapeHtml(displayLeadPhone(item))}</small></div><span class="lead-status-badge new">New</span>${renderNewLeadNotes(item)}${isAdmin() ? "" : `<div class="sales-lead-actions">${renderSalesContactButton(item, "call")}${renderSalesContactButton(item, "whatsapp")}${renderLeadCopyButton(item)}</div>${renderSalesContactState(item)}`}</article>`).join("")}</div>` : '<div class="empty-lead"><h3>Tiada lead baharu</h3><p>Lead akan diagih secara automatik kepada Team Sales aktif yang layak.</p></div>';
+    elements.activeLeadContainer.innerHTML = salesLeads.length ? `<div class="sales-new-leads"><h3>Lead baharu <small>${salesLeads.length}</small></h3>${salesLeads.map(item => `<article class="sales-lead-card"><div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.project)}</span><small>${escapeHtml(displayLeadPhone(item))}</small></div><span class="lead-status-badge new">New</span>${renderSalesLeadWaitingTime(item)}${renderNewLeadNotes(item)}${isAdmin() ? "" : `<div class="sales-lead-actions">${renderSalesContactButton(item, "call")}${renderSalesContactButton(item, "whatsapp")}${renderLeadCopyButton(item)}</div>${renderSalesContactState(item)}`}</article>`).join("")}</div>` : '<div class="empty-lead"><h3>Tiada lead baharu</h3><p>Lead akan diagih secara automatik kepada Team Sales aktif yang layak.</p></div>';
     return;
   }
 
@@ -5762,7 +5790,7 @@ function renderLeadsTable() {
           const expanded = expandedLeadLogIds.has(lead.id);
           return `
             <tr class="lead-log-summary" data-lead-row="${lead.id}">
-              <td data-label="Nama"><strong>${escapeHtml(lead.name)}</strong>${renderNewLeadNotes(lead)}</td>
+              <td data-label="Nama"><strong>${escapeHtml(lead.name)}</strong>${renderSalesLeadWaitingTime(lead)}${renderNewLeadNotes(lead)}</td>
               <td data-label="${projectLabel()}"><strong>${escapeHtml(lead.project || "Tidak dinyatakan")}</strong></td>
               <td data-label="Status"><select class="lead-status-select ${visualStatus}" data-lead-status="${lead.id}" aria-label="Status ${escapeHtml(lead.name)}">${statusOptions}</select></td>
               <td data-label="Call">${callButton}</td>
@@ -8730,6 +8758,7 @@ window.addEventListener("focus", () => {
   beginResumeSync();
 });
 document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) updateSalesLeadWaitingTimes();
   if (document.hidden) {
     runtimeWasHidden = true;
   } else {
