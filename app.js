@@ -2649,7 +2649,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261004-sales-reminders-v137")
+      .register("/sw.js?v=20261004-sales-reminders-v138")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -5693,6 +5693,7 @@ function openSalesOverdueReminder(brandId = new URLSearchParams(window.location.
 function matchesSalesDrilldown(lead) {
   if (!salesLeadDrilldown || !isTeamSales() || salesLeadDrilldown.brandId !== activeBrandId) return true;
   if (salesLeadDrilldown.overdue) return lead.status === "new" && lead.assignedAgentId && Number(lead.createdAt || lead.receivedAt) <= Date.now() - 3600000;
+  if (salesLeadDrilldown.agentIds && !salesLeadDrilldown.agentIds.includes(lead.assignedAgentId)) return false;
   return (lead.assignmentHistory || []).some(item => item.agentId === lead.assignedAgentId && todayKey(new Date(item.assignedAt).getTime()) >= salesLeadDrilldown.from && todayKey(new Date(item.assignedAt).getTime()) <= salesLeadDrilldown.to);
 }
 
@@ -6821,7 +6822,7 @@ function performanceDateOffset(days) {
 }
 
 function renderTeamPerformance(report) {
-  salesPerformanceRange = { from: report.from, to: report.to };
+  salesPerformanceRange = { from: report.from, to: report.to, agentIds: (report.rows || []).map(row => row.agent_id) };
   const rows = report?.rows || [];
   const total = (key) => rows.reduce((sum, row) => sum + (Number(row[key]) || 0), 0);
   document.querySelector("#team-performance-status").textContent = `${report.from} hingga ${report.to} · ${rows.length} Team Sales${total("assignments") === 0 ? " · Tiada lead ditugaskan dalam tempoh ini" : ""}`;
@@ -6913,7 +6914,7 @@ function performanceMetric(label, value, detail = "", icon = "lead") {
 }
 
 function renderOwnPerformance(current, previous) {
-  if (isTeamSales()) salesPerformanceRange = { from: current.from, to: current.to };
+  if (isTeamSales()) salesPerformanceRange = { from: current.from, to: current.to, agentIds: [state.currentUserId] };
   const row = current?.rows?.find((item) => item.agent_id === state.currentUserId);
   const prior = previous?.rows?.find((item) => item.agent_id === state.currentUserId);
   if (!row) {
