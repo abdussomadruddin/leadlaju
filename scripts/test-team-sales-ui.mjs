@@ -27,6 +27,7 @@ try {
     const brands=[{id:a,name:'Safrich',slug:'safrich',active:true,distribution_mode:'agent'},{id:b,name:'Sales Brand',slug:'sales-brand',active:true,distribution_mode:'team_sales'}];
     const profile={id:uid,name:'Fixture Account',role,brand_id:role==='master'?null:b,email:'fixture@test.invalid',active:true,approval_status:'approved',eligible_project_ids:[]};
     const leads=[1,2,3].map(n=>({id:`sales-lead-${n}`,brand_id:b,name:`Sales Lead ${n} with a long readable name`,phone:'60120000000',email:'lead@test.invalid',project:'Sales Project',notes:'RM3500-RM5000\nNama Fixture\n+60 12-0000 000\nYa\nKerja Swasta\nlead@test.invalid\nSales Project',status:'new',queue_state:'sales_assigned',assigned_agent_id:uid,assignment_revision:1,status_revision:0,follow_up_count:0,received_at:new Date().toISOString(),created_at:new Date().toISOString()}));
+    for(const lead of leads)lead.assignment_history=[{agentId:uid,assignedAt:lead.received_at}];
     const report=args=>({from:args.p_from,to:args.p_to,generated_at:new Date().toISOString(),rows:[{agent_id:uid,agent_name:'Fixture Account',assignments:3,total_contacted:1,total_follow_up:0,total_potential:0,total_cancelled_rejected:0,total_client:0,appointments:0,show_ups:0,due_now:0,within_five:1}],weeks:[{agent_id:uid,week_start:args.p_from,assignments:3,total_contacted:1,appointments:0,show_ups:0,within_five:1}]});
     window.__client=options=>({auth:{getSession:async()=>({data:{session:{user:{id:uid}}}}),getUser:async()=>({data:{user:{id:uid}}})},from:table=>{
       const f={};const q={select(){return q},eq(k,v){f[k]=v;return q},single:async()=>({data:table==='profiles'?profile:brands.find(x=>x.id===f.id)}),maybeSingle:async()=>({data:profile})};return q;
@@ -135,6 +136,15 @@ try {
    });
    await page.evaluate(()=>switchView('dashboard'));
    const metricsRoot=role==='agent'?'#own-performance-metrics':'#team-performance-metrics';
+   const metricLabels=await page.locator(`${metricsRoot} .performance-metric > small`).allTextContents();
+   assert.equal(metricLabels[1],'New');checks++;
+   assert.equal(metricLabels.includes('Show Up'),false);checks++;
+   assert.equal(await page.locator(`${metricsRoot} [data-sales-performance="new"] strong`).innerText(),'1');checks++;
+   await page.locator(`${metricsRoot} [data-sales-performance="new"]`).click();
+   assert.equal(await page.locator('#lead-filter').inputValue(),'new');checks++;
+   assert.equal(await page.locator('#lead-log-count').innerText(),'1 lead');checks++;
+   await page.locator('[data-sales-filter-reset]').click();
+   await page.evaluate(()=>switchView('dashboard'));
    await page.locator(`${metricsRoot} [data-sales-performance="contacted"]`).click();
    assert.equal(await page.locator('#lead-filter').inputValue(),'contacted');checks++;
    assert.equal(await page.locator('#lead-log-count').innerText(),'1 lead','Card uses assignment date and current ownership');checks++;

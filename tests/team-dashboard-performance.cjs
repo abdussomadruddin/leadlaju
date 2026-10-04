@@ -17,7 +17,7 @@ function fixture() {
     remoteDatabaseClient:{rpc:async(name,args)=>new Promise(resolve=>requests.push({name,args,resolve}))},
     state:{currentUserId:'admin'},brandContextVersion:1,teamPerformanceDays:7,
     teamPerformanceCache:new Map(),teamPerformancePending:new Set(),performanceDateOffset:n=>n===0?'2026-10-02':'2026-09-26',todayKey:()=> '2026-10-02',Date,console });
-  vm.runInContext(app.slice(app.indexOf('function renderTeamPerformance('),app.indexOf('\nfunction performanceRange(')),c);
+  vm.runInContext(app.slice(app.indexOf('function salesNewLeadCount('),app.indexOf('\nfunction performanceRange(')),c);
   return {c,node,requests};
 }
 const report={from:'2026-09-26',to:'2026-10-02',rows:[{assignments:3,total_contacted:2,due_now:1},{assignments:4,total_contacted:3,due_now:2}]};

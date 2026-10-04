@@ -2649,7 +2649,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261004-sales-reminders-v138")
+      .register("/sw.js?v=20261004-sales-new-card-v139")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -6821,6 +6821,18 @@ function performanceDateOffset(days) {
   return date.toISOString().slice(0, 10);
 }
 
+function salesNewLeadCount(report, agentIds = (report?.rows || []).map(row => row.agent_id)) {
+  return (state.leads || []).filter(lead => lead.status === "new" && agentIds.includes(lead.assignedAgentId) &&
+    (lead.assignmentHistory || []).some(item => item.agentId === lead.assignedAgentId &&
+      todayKey(new Date(item.assignedAt).getTime()) >= report.from && todayKey(new Date(item.assignedAt).getTime()) <= report.to)).length;
+}
+
+function refreshSalesNewMetric() {
+  if (!isTeamSales() || !salesPerformanceRange) return;
+  const metric = document.querySelector(`${isAdmin() ? "#team-performance-metrics" : "#own-performance-metrics"} [data-sales-performance="new"] strong`);
+  if (metric) metric.textContent = salesNewLeadCount(salesPerformanceRange, salesPerformanceRange.agentIds);
+}
+
 function renderTeamPerformance(report) {
   salesPerformanceRange = { from: report.from, to: report.to, agentIds: (report.rows || []).map(row => row.agent_id) };
   const rows = report?.rows || [];
@@ -6828,13 +6840,13 @@ function renderTeamPerformance(report) {
   document.querySelector("#team-performance-status").textContent = `${report.from} hingga ${report.to} · ${rows.length} Team Sales${total("assignments") === 0 ? " · Tiada lead ditugaskan dalam tempoh ini" : ""}`;
   document.querySelector("#team-performance-metrics").innerHTML = [
     performanceMetric("Lead ditugaskan", total("assignments"), "", "lead"),
+    performanceMetric("New", salesNewLeadCount(report), "Belum contact", "lead"),
     performanceMetric("Contacted", total("total_contacted"), "", "call"),
     performanceMetric("Follow Up", total("total_follow_up"), "", "due"),
     performanceMetric("Potential", total("total_potential"), "", "lead"),
     performanceMetric("Cancelled / Rejected", total("total_cancelled_rejected"), "", "due"),
     performanceMetric("Client", total("total_client"), "", "show"),
     performanceMetric("Appointment", total("appointments"), "", "appointment"),
-    performanceMetric("Show Up", total("show_ups"), "", "show"),
     performanceMetric("Follow Up Due", total("due_now"), "Tertunggak sekarang", "due"),
   ].join("");
 }
@@ -6902,7 +6914,7 @@ function performanceRateLabel(row) {
 }
 
 function performanceMetric(label, value, detail = "", icon = "lead") {
-  const action = isTeamSales() ? ({ Contacted: "contacted", "Total Contacted": "contacted", "Follow Up": "group_follow_up", Potential: "potential", "Cancelled / Rejected": "group_cancelled_rejected", Client: "client", "Follow Up Due": "due" })[label] : null;
+  const action = isTeamSales() ? ({ New: "new", Contacted: "contacted", "Total Contacted": "contacted", "Follow Up": "group_follow_up", Potential: "potential", "Cancelled / Rejected": "group_cancelled_rejected", Client: "client", "Follow Up Due": "due" })[label] : null;
   const icons = {
     lead: '<circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M17 5a3 3 0 0 1 0 6m1 4a5 5 0 0 1 3 5"/>',
     call: '<path d="M7 3h4l1 5-2 2a14 14 0 0 0 4 4l2-2 5 1v4c0 2-2 3-4 3C10 20 4 14 4 7c0-2 1-4 3-4Z"/>',
@@ -6925,10 +6937,11 @@ function renderOwnPerformance(current, previous) {
   elements.ownPerformanceStatus.textContent = `${current.from} hingga ${current.to} · Dibandingkan dengan 7 hari sebelumnya`;
   elements.ownPerformanceMetrics.innerHTML = [
     performanceMetric("Lead ditugaskan", row.assignments, `Sebelumnya ${prior?.assignments || 0}`, "lead"),
+    ...(isTeamSales() ? [performanceMetric("New", salesNewLeadCount(current, [state.currentUserId]), "Belum contact", "lead")] : []),
     isTeamSales() ? performanceMetric("Total Contacted", row.total_contacted || 0, `Sebelumnya ${prior?.total_contacted || 0}`, "call") : performanceMetric("CALL NOW ≤5 min", performanceRateLabel(row), `Sebelumnya ${prior ? performanceRateLabel(prior) : "—"}`, "call"),
     ...(isTeamSales() ? [["Follow Up", "total_follow_up", "due"], ["Potential", "total_potential", "lead"], ["Cancelled / Rejected", "total_cancelled_rejected", "due"], ["Client", "total_client", "show"]].map(([label, key, icon]) => performanceMetric(label, row[key] || 0, `Sebelumnya ${prior?.[key] || 0}`, icon)) : []),
     performanceMetric("Appointment", row.appointments, `Sebelumnya ${prior?.appointments || 0}`, "appointment"),
-    performanceMetric("Show Up", row.show_ups, `Sebelumnya ${prior?.show_ups || 0}`, "show"),
+    ...(!isTeamSales() ? [performanceMetric("Show Up", row.show_ups, `Sebelumnya ${prior?.show_ups || 0}`, "show")] : []),
     performanceMetric("Follow Up Due", row.due_now, "Perlu tindakan", "due"),
   ].join("");
 }
@@ -7208,6 +7221,7 @@ async function downloadPerformanceReport() {
 }
 
 function renderAll() {
+  refreshSalesNewMetric();
   document.querySelector("#lead-import-column-hint").textContent = `Isi name, phone, email, city dan ${isTeamSales() ? "product" : "project"}. Maklumat lain diisi automatik oleh sistem.`;
   enforceSingleActiveLead();
   syncExpiryAssignmentTimer();

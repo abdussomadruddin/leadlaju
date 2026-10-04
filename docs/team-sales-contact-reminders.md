@@ -22,7 +22,7 @@ The database receipts are private, RLS-enabled and inaccessible to API roles.
    `infinity`, so the scheduler cannot enqueue historical reminders.
 3. Deploy `process-notification-outbox`; run the rollback-only production tests
    `scripts/test-sales-reminders-production.sql` and `scripts/test-team-sales-production.sql`.
-4. Deploy frontend/PWA cache v138 and verify production assets/READY state.
+4. Deploy frontend/PWA cache v139 and verify production assets/READY state.
 5. Activate once through trusted operator SQL:
 
 ```sql
