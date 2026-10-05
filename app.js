@@ -2649,7 +2649,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261004-sales-new-card-v139")
+      .register("/sw.js?v=20261006-follow-up-sections-v140")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -4804,6 +4804,7 @@ async function remindAllAgentsForFollowUp() {
 }
 
 async function checkFollowUpReminder() {
+  if (remoteDatabaseMode) return; // Production owner reminders are exclusively server-scheduled.
   if (document.body.classList.contains("logged-out")) return;
   const slot = getDueFollowUpReminderSlot();
   if (!slot) return;
@@ -6756,9 +6757,33 @@ function followUpOverdueLabel(item) {
   return remainingHours ? `${days} hari ${remainingHours} jam overdue` : `${days} hari overdue`;
 }
 
+let followUpSection = "due";
+let pendingFollowUpSection = new URLSearchParams(window.location.search).get("section");
+
+function followUpSectionRows(section) {
+  if (section === "due") return Array.isArray(state.followUpDue) ? state.followUpDue : [];
+  return state.leads.filter(lead => lead.status === section &&
+    (isAdmin() || lead.assignedAgentId === state.currentUserId) && !isVisuallyExpiredAssignment(lead))
+    .sort((a, b) => section === "new" ? new Date(a.createdAt || a.receivedAt) - new Date(b.createdAt || b.receivedAt) : new Date(b.createdAt || b.receivedAt) - new Date(a.createdAt || a.receivedAt))
+    .map(lead => ({ ...lead, assignedAgentName: getAgent(lead.assignedAgentId)?.name || lead.assignedAgentName || "Belum diagih", followUpActivityAt: lead.createdAt || lead.receivedAt }));
+}
+
+function followUpNavigationCount() {
+  return new Set(["new", "contacted", "due"].flatMap(section => followUpSectionRows(section).map(lead => lead.id))).size;
+}
+
 function renderFollowUpDue() {
   if (!elements.followUpDueList) return;
   const rows = Array.isArray(state.followUpDue) ? state.followUpDue : [];
+  const sectionRows = followUpSectionRows(followUpSection);
+  elements.followUpDueList.dataset.section = followUpSection;
+  document.querySelectorAll("[data-follow-up-section]").forEach(button => {
+    button.setAttribute("aria-pressed", String(button.dataset.followUpSection === followUpSection));
+    const count = followUpSectionRows(button.dataset.followUpSection).length;
+    button.querySelector("b").textContent = count || "";
+    button.querySelector("b").hidden = count === 0;
+  });
+  document.querySelector("#follow-up-description").textContent = followUpSection === "new" ? "Lead baharu yang belum dihubungi." : followUpSection === "contacted" ? "Lead yang sudah dihubungi." : "Lead Contacted tanpa kemas kini remark selama 24 jam.";
   const dashboardPanel = document.querySelector("#dashboard-follow-up");
   if (dashboardPanel) {
     dashboardPanel.hidden = isAdmin() || getCurrentUser()?.role !== "agent";
@@ -6773,28 +6798,40 @@ function renderFollowUpDue() {
   const selectedProject = elements.followUpProjectFilter?.value || "all";
 
   if (isAdmin() && elements.followUpAgentFilter) {
-    const agents = [...new Map(rows.map((item) => [item.assignedAgentId, item.assignedAgentName])).entries()];
+    const agents = [...new Map(sectionRows.map((item) => [item.assignedAgentId, item.assignedAgentName])).entries()];
     elements.followUpAgentFilter.innerHTML = '<option value="all">Semua ejen</option>' + agents
       .map(([id, name]) => `<option value="${escapeHtml(id)}">${escapeHtml(name)}</option>`).join("");
     elements.followUpAgentFilter.value = agents.some(([id]) => id === selectedAgent) ? selectedAgent : "all";
   }
   if (isAdmin() && elements.followUpProjectFilter) {
-    const projects = [...new Set(rows.map((item) => item.project).filter(Boolean))].sort();
+    const projects = [...new Set(sectionRows.map((item) => item.project).filter(Boolean))].sort();
     elements.followUpProjectFilter.innerHTML = `<option value="all">${systemWorkerText("Semua projek")}</option>` + projects
       .map((project) => `<option value="${escapeHtml(project)}">${escapeHtml(project)}</option>`).join("");
     elements.followUpProjectFilter.value = projects.includes(selectedProject) ? selectedProject : "all";
   }
 
-  populateMonthPeriodFilter(elements.followUpPeriodFilter, rows, (item) => item.followUpActivityAt);
-  const filtered = rows.filter((item) =>
+  populateMonthPeriodFilter(elements.followUpPeriodFilter, sectionRows, (item) => item.followUpActivityAt);
+  const filtered = sectionRows.filter((item) =>
     (!isAdmin() || elements.followUpAgentFilter?.value === "all" || item.assignedAgentId === elements.followUpAgentFilter.value) &&
     (!isAdmin() || elements.followUpProjectFilter?.value === "all" || item.project === elements.followUpProjectFilter.value) &&
     matchesMonthPeriodFilter(item.followUpActivityAt, elements.followUpPeriodFilter)
   );
 
-  elements.navFollowUpCount.hidden = rows.length === 0;
-  elements.navFollowUpCount.textContent = rows.length;
-  elements.followUpCount.textContent = `${filtered.length} case`;
+  const navigationCount = followUpNavigationCount();
+  elements.navFollowUpCount.hidden = navigationCount === 0;
+  elements.navFollowUpCount.textContent = navigationCount;
+  elements.followUpCount.textContent = `${filtered.length} lead`;
+  if (followUpSection !== "due") {
+    elements.followUpDueList.innerHTML = filtered.length ? filtered.map(item => {
+      const lead = state.leads.find(row => row.id === item.id);
+      const call = isTeamSales() ? renderSalesContactButton(lead, "call") : canRevealLeadContact(lead) && lead.phone
+        ? `<a class="contact-edit-button sales-contact-call" href="tel:${escapeHtml(String(lead.phone).replace(/[^+\d]/g, ""))}">Call</a>`
+        : `<button class="log-call-now-button" type="button" data-follow-up-call="${escapeHtml(lead.id)}" ${canAccessLead(lead) && lead.assignedAgentId ? "" : "disabled"}>CALL NOW</button>`;
+      return `<article class="follow-up-due-item"><div class="follow-up-lead"><span class="member-avatar">${initials(item.name)}</span><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.project)}</small></span></div><div class="follow-up-owner"><small>${workerLabel()}</small><strong>${escapeHtml(item.assignedAgentName)}</strong></div><div class="follow-up-note"><small>Nota / Remark</small><p>${escapeHtml(leadDisplayNotes(lead) || "Belum ada remark")}</p></div><div class="follow-up-time"><strong>${followUpSection === "new" ? "New" : "Contacted"}</strong>${renderSalesLeadWaitingTime(lead)}</div><div class="follow-up-due-actions">${call}${isTeamSales() && lead.status === "new" ? renderSalesContactButton(lead, "whatsapp") : renderLeadFollowUpButton(lead, "data-follow-up-due-action")}${renderLeadCopyButton(lead, "data-follow-up-due-copy")}</div></article>`;
+    }).join("") : `<div class="follow-up-empty"><strong>Tiada lead ${followUpSection === "new" ? "New" : "Contacted"}</strong><p>Tiada lead yang sepadan dengan penapis ini.</p></div>`;
+    syncMobileNavigation();
+    return;
+  }
   elements.followUpDueList.innerHTML = filtered.length ? filtered.map((item) => {
     const lead = state.leads.find((row) => row.id === item.id);
     return `
@@ -7252,7 +7289,7 @@ const viewTitles = {
   brands: "Pengurusan Brand",
   leads: "Log Lead",
   appointments: "Appointment Tracker",
-  "follow-up-due": "Follow Up Due",
+  "follow-up-due": "Follow Up",
   agents: "Pengurusan Ejen",
   performance: "Prestasi Ejen",
   projects: "Projek",
@@ -7308,6 +7345,7 @@ function switchView(viewName, { historyMode = "push" } = {}) {
     return;
   }
   activeView = viewName;
+  if (viewName === "follow-up-due") { followUpSection = pendingFollowUpSection === "new" ? "new" : "due"; pendingFollowUpSection = null; renderFollowUpDue(); }
   document.querySelectorAll(".view").forEach((view) => view.classList.remove("active"));
   targetView.classList.add("active");
   document.querySelectorAll(".nav-item").forEach((item) => {
@@ -8691,12 +8729,21 @@ elements.appointmentList?.addEventListener("click", (event) => {
   if (remove) deleteAppointment(remove.dataset.appointmentDelete);
 });
 function handleFollowUpDueClick(event) {
+  const call = event.target.closest("[data-follow-up-call]");
+  if (call) { handleCall(call.dataset.followUpCall); return; }
   const copy = event.target.closest("[data-follow-up-due-copy]");
   if (copy) { copyLeadDetails(copy.dataset.followUpDueCopy); return; }
   const action = event.target.closest("[data-follow-up-due-action]");
   if (action) recordLeadFollowUp(action.dataset.followUpDueAction, action);
 }
 elements.followUpDueList?.addEventListener("click", handleFollowUpDueClick);
+document.querySelector(".follow-up-sections")?.addEventListener("click", event => {
+  const button = event.target.closest("[data-follow-up-section]");
+  if (!button) return;
+  followUpSection = button.dataset.followUpSection;
+  [elements.followUpAgentFilter, elements.followUpProjectFilter, elements.followUpPeriodFilter].forEach(filter => { if (filter) filter.value = "all"; });
+  renderFollowUpDue();
+});
 document.querySelector("#dashboard-follow-up-list")?.addEventListener("click", handleFollowUpDueClick);
 elements.leadsTableBody.addEventListener("change", (event) => {
   const statusField = event.target.closest("[data-lead-status]");
@@ -8822,6 +8869,13 @@ if ("serviceWorker" in navigator) {
       if (event.data.leadId) syncNotificationLead(event.data.leadId);
     }
     if (event.data?.type === "OPEN_VIEW") {
+      if (["sales_new_daily", "sales_due_daily"].includes(event.data.reminderType)) {
+        switchView("follow-up-due");
+        followUpSection = event.data.reminderType === "sales_new_daily" ? "new" : "due";
+        [elements.followUpAgentFilter, elements.followUpProjectFilter, elements.followUpPeriodFilter].forEach(filter => { if (filter) filter.value = "all"; });
+        renderFollowUpDue();
+        return;
+      }
       if (event.data.reminderType === "sales-overdue") { openSalesOverdueReminder(event.data.brandId); return; }
       if (event.data.view === "leads" && event.data.leadIds?.length > 1) {
         salesLeadDrilldown = null;

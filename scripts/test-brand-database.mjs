@@ -39,6 +39,8 @@ try {
  const legacyId='20000000-0000-4000-8000-000000000001';
  let legacyCounts;
  for(const file of files) {
+   // Test the previous reminder contract before applying its replacement below.
+   if(file.endsWith('_team_sales_daily_follow_up_rules.sql')) continue;
    if(file.endsWith('_master_brand_isolation.sql')) {
      await client.query(`insert into public.projects(id,name,source_project_id) values($1,'Legacy Safrich Project','legacy-source')`,[legacyId]);
      legacyCounts=(await client.query(`select table_name,(xpath('/row/c/text()',query_to_xml(format('select count(*) c from public.%I',table_name),false,true,'')))[1]::text::int count from information_schema.tables where table_schema='public' and table_type='BASE TABLE'`)).rows;
@@ -328,5 +330,56 @@ try {
  check((await validateSummary()).rows[0].x===null,'Entirely obsolete summary is cancelled');
  await client.query('select leadlaju_private.enqueue_sales_contact_reminders(now())');
  check((await client.query("select sent_at is not null done from public.notification_outbox where id=$1",[summary.id])).rows[0].done,'Scheduler retires obsolete outbox rows even before claim');
+ const dailyMigration=files.find(file=>file.endsWith('_team_sales_daily_follow_up_rules.sql'));
+ await client.query(fs.readFileSync(path.join(root,'supabase/migrations',dailyMigration),'utf8'));
+ await rejects(()=>asUser(salesAdmin,sales,()=>client.query('select leadlaju_private.enqueue_sales_contact_reminders(now())')),'Admin cannot invoke the global daily scheduler');
+ await rejects(()=>asUser(agentA,sa,()=>client.query('select public.validate_sales_contact_reminder($1,$2,$3)',[agentA,'sales_due_daily',{}])),'Agent cannot invoke service-only daily validation');
+ const dailyNow=(await client.query("select (date_trunc('day',now() at time zone 'Asia/Kuala_Lumpur')+interval '10 hours') at time zone 'Asia/Kuala_Lumpur' t")).rows[0].t;
+ await client.query("update public.leads set status='need_follow_up',queue_state='need_follow_up' where brand_id=$1",[sales]);
+ await client.query("update public.leads set status='new',queue_state='sales_assigned',created_at=$2::timestamptz-interval '2 days' where id=any($1::uuid[])",[[reminderLeads[0].id,reminderLeads[1].id],dailyNow]);
+ await client.query("update public.leads set status='contacted',queue_state='contacted',created_at=$2::timestamptz-interval '3 days' where id=$1",[reminderLeads[2].id,dailyNow]);
+ await client.query("update public.leads set follow_up_activity_at=$2::timestamptz-interval '25 hours' where id=$1",[reminderLeads[2].id,dailyNow]);
+ for(const hour of [10,11,12,13,14,15,16]) {
+   const at=new Date(dailyNow.getTime()+(hour-10)*3600000);
+   await client.query('select leadlaju_private.enqueue_sales_contact_reminders($1)',[at]);
+   const count=(await client.query("select count(*)::int n from public.notification_outbox where notification_type='sales_new_daily' and (payload->>'slotAt')::timestamptz=$1",[at])).rows[0].n;
+   check(count>0,`New reminder includes ${hour}:00 Kuala Lumpur`);
+   const repeated=(await client.query('select leadlaju_private.enqueue_sales_contact_reminders($1) n',[at])).rows[0].n;
+   check(repeated===0,`Slot ${hour}:00 is deduplicated`);
+ }
+ for(const hour of [9,15,21]) {
+   const at=new Date(dailyNow.getTime()+(hour-10)*3600000);
+   await client.query('select leadlaju_private.enqueue_sales_contact_reminders($1)',[at]);
+   check((await client.query("select count(*)::int n from public.notification_outbox where notification_type='sales_due_daily' and (payload->>'slotAt')::timestamptz=$1",[at])).rows[0].n===1,`Due reminder at ${hour}:00 only goes to its owner`);
+ }
+ check((await client.query("select count(*)::int n from public.notification_outbox n join public.profiles p on p.id=n.user_id where n.notification_type in ('sales_new_daily','sales_due_daily') and p.role<>'agent'")).rows[0].n===0,'No Admin receives daily Team Sales reminders');
+ const daily=(await client.query("select * from public.notification_outbox where notification_type='sales_new_daily' order by id desc limit 1")).rows[0];
+ daily.payload.slotAt=new Date(Date.now()-60000).toISOString();
+ check(Boolean((await client.query('select public.validate_sales_contact_reminder($1,$2,$3) x',[daily.user_id,daily.notification_type,daily.payload])).rows[0].x),'Daily owner reminder can be delivered within slot');
+ check((await client.query('select public.validate_sales_contact_reminder($1,$2,$3) x',[salesAdmin,daily.notification_type,daily.payload])).rows[0].x===null,'Admin cannot receive owner reminder');
+ daily.payload.slotAt=new Date(Date.now()-16*60000).toISOString();
+ check((await client.query('select public.validate_sales_contact_reminder($1,$2,$3) x',[daily.user_id,daily.notification_type,daily.payload])).rows[0].x===null,'Expired slot cancels delayed retry');
+ const dueDaily=(await client.query("select * from public.notification_outbox where notification_type='sales_due_daily' limit 1")).rows[0];
+ dueDaily.payload.slotAt=new Date(Date.now()-60000).toISOString();
+ await client.query("update public.leads set notes=notes||' updated' where id=$1",[reminderLeads[2].id]);
+ check((await client.query('select public.validate_sales_contact_reminder($1,$2,$3) x',[dueDaily.user_id,dueDaily.notification_type,dueDaily.payload])).rows[0].x===null,'Note update cancels due reminder before retry');
+ await client.query("update public.leads set created_at=$2::timestamptz-interval '15 days 1 second' where id=any($1::uuid[])",[[reminderLeads[0].id,reminderLeads[2].id],dailyNow]);
+ await client.query('select leadlaju_private.enqueue_sales_contact_reminders($1)',[dailyNow]);
+ check((await client.query("select count(*)::int n from public.leads where id=any($1::uuid[]) and status='need_follow_up'",[[reminderLeads[0].id,reminderLeads[2].id]])).rows[0].n===2,'New and Contacted older than 15 days become Need Follow Up');
+ check((await client.query("select count(*)::int n from public.lead_events where lead_id=any($1::uuid[]) and payload->>'reason'='lead_age_over_15_days'",[[reminderLeads[0].id,reminderLeads[2].id]])).rows[0].n===2,'Auto status retains auditable history');
+ const agentFixture=(await client.query("select id from public.leads where brand_id=$1 limit 1",[sa])).rows[0].id;
+ await client.query("update public.leads set assigned_agent_id=$2,status='contacted',queue_state='contacted',expires_at=null,created_at=$3::timestamptz-interval '3 days' where id=$1",[agentFixture,agentA,dailyNow]);
+ await client.query("update public.leads set follow_up_activity_at=$2::timestamptz-interval '25 hours' where id=$1",[agentFixture,dailyNow]);
+ await client.query("select leadlaju_private.enqueue_sales_contact_reminders($1::timestamptz-interval '1 hour')",[dailyNow]);
+ check((await client.query("select count(*)::int n from public.notification_outbox where user_id=$1 and notification_type='sales_due_daily'",[agentA])).rows[0].n===1,'Agent receives grouped 09:00 due reminder');
+ check((await client.query("select count(*)::int n from public.notification_outbox where user_id=$1 and notification_type='sales_new_daily'",[agentA])).rows[0].n===0,'Hourly New reminders remain exclusive to Team Sales');
+ await client.query("update public.leads set created_at=$2::timestamptz-interval '15 days 1 second' where id=$1",[agentFixture,dailyNow]);
+ await client.query('select leadlaju_private.enqueue_sales_contact_reminders($1)',[dailyNow]);
+ check((await client.query('select status from public.leads where id=$1',[agentFixture])).rows[0].status==='need_follow_up','Agent auto status uses ingress age too');
+ await client.query("update public.leads set status='new',queue_state='queued',assigned_agent_id=null,received_at=null,created_at=$2::timestamptz-interval '15 days' where id=$1",[agentFixture,dailyNow]);
+ await client.query('select leadlaju_private.enqueue_sales_contact_reminders($1)',[dailyNow]);
+ check((await client.query('select status from public.leads where id=$1',[agentFixture])).rows[0].status==='new','Exactly 15 days does not promote early');
+ await client.query("select leadlaju_private.enqueue_sales_contact_reminders($1::timestamptz+interval '1 second')",[dailyNow]);
+ check((await client.query('select status from public.leads where id=$1',[agentFixture])).rows[0].status==='need_follow_up','Unassigned Agent New lead promotes strictly after 15 days');
  console.log(`PASS: ${checks} real PostgreSQL brand isolation and distribution assertions`);
 } finally { if(client) await client.end(); await pg.stop(); }

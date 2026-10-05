@@ -47,7 +47,7 @@ Deno.serve(async (request) => {
   for (const [outboxId, rows] of groups) {
     const first = rows[0];
     const brandId = String(first.payload?.brandId || "");
-    const salesReminder = ["sales_contact_15", "sales_contact_60", "sales_contact_admin"].includes(first.notification_type);
+    const salesReminder = ["sales_contact_15", "sales_contact_60", "sales_contact_admin", "sales_new_daily", "sales_due_daily"].includes(first.notification_type);
     const canDeliver = async () => {
       if (!brandId) return false;
       const { data: brand } = await admin.from("brands").select("id").eq("id", brandId).eq("active", true).maybeSingle();

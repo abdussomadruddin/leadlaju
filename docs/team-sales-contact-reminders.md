@@ -1,5 +1,7 @@
 # Team Sales contact reminders
 
+Historical release notes: the 15/60-minute reminder and Admin summary contract below is superseded by `team-sales-daily-reminders.md`. Follow Up Due and 15-day ingress-age rules now apply to both modes; hourly New reminders are Team Sales only.
+
 Agent-mode brands are unchanged. Team Sales dashboard status buttons use current
 ownership and assignment history dates in Asia/Kuala_Lumpur, matching the server
 performance report. Follow Up Due is current outstanding work, not date-filtered.

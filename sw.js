@@ -1,13 +1,13 @@
-const CACHE_NAME = "leadlaju-pwa-v20261004-sales-new-card-v139";
+const CACHE_NAME = "leadlaju-pwa-v20261006-follow-up-sections-v140";
 const LEAD_HANDOFF_CACHE = "leadlaju-notification-snapshots";
 const LEAD_HANDOFF_SCHEMA_VERSION = 1;
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20261004-sales-new-card-v139",
+  "/styles.css?v=20261006-follow-up-sections-v140",
   "/vendor/exceljs.min.js?v=4.4.0",
-  "/app.js?v=20261004-sales-new-card-v139",
-  "/manifest.webmanifest?v=20261004-sales-new-card-v139",
+  "/app.js?v=20261006-follow-up-sections-v140",
+  "/manifest.webmanifest?v=20261006-follow-up-sections-v140",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",
   "/assets/icon-512.png",

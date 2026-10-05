@@ -2077,6 +2077,14 @@ svg {
   overflow: hidden;
 }
 
+.follow-up-sections { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; padding: 8px; border-bottom: 1px solid var(--line); background: #f8faff; }
+.follow-up-sections button { display: flex; align-items: center; justify-content: center; gap: 5px; min-width: 0; min-height: 44px; padding: 8px 5px; border: 0; border-radius: 12px; background: transparent; color: #63718b; font-size: 12px; font-weight: 700; cursor: pointer; transition: background .18s ease, color .18s ease; }
+.follow-up-sections button[aria-pressed="true"] { background: #e7efff; color: #205ccc; }
+.follow-up-sections b { font-size: 10px; padding: 3px 5px; border-radius: 7px; background: #e5eaf3; }
+.follow-up-sections b[hidden] { display: none; }
+@media (max-width: 600px) { .follow-up-sections button { font-size: 11px; } .follow-up-due-actions { flex-wrap: wrap; } }
+@media (prefers-reduced-motion: reduce) { .follow-up-sections button { transition: none; } }
+
 .follow-up-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -2205,6 +2213,8 @@ svg {
 }
 
 @media (max-width: 650px) {
+  #follow-up-due-list:not([data-section="due"]) .follow-up-due-actions { grid-template-columns: minmax(0, .9fr) minmax(0, 1.35fr) minmax(0, .7fr); }
+  #follow-up-due-list:not([data-section="due"]) .follow-up-due-actions > :is(button,a) { width: 100%; min-width: 0; padding: 8px 5px; font-size: 11px; }
   .follow-up-toolbar {
     display: grid;
     grid-template-columns: 1fr 1fr;

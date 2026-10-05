@@ -103,6 +103,28 @@ try {
    await page.evaluate(()=>{playNotificationSound=async()=>{};return sendSystemNotification(state.leads[0],{force:true,toast:true});});
    assert.equal(await page.locator('#toast-message').innerText().then(t=>/CALL NOW|5 minit/.test(t)),false);checks++;
    assert.equal(await page.locator('#nav-lead-count').innerText(),'3');checks++;
+   await page.evaluate(()=>switchView('follow-up-due'));
+   assert.equal(await page.locator('[data-follow-up-section]').count(),3);checks++;
+   assert.equal(await page.locator('#nav-follow-up-count').innerText(),'3');checks++;
+   await page.locator('[data-follow-up-section="new"]').click();
+   assert.equal(await page.locator('#follow-up-due-list .follow-up-due-item').count(),3);checks++;
+   assert.doesNotMatch(await page.locator('#follow-up-due-list').innerText(),/60120000000|12-0000 000|lead@test.invalid/);checks++;
+   await page.evaluate(()=>{activeBrand.distribution_mode='agent';renderFollowUpDue();});
+   assert.equal(await page.locator('[data-follow-up-section]').count(),3);checks++;
+   assert.equal(await page.locator('#follow-up-due-list [data-sales-contact]').count(),0);checks++;
+   assert.doesNotMatch(await page.locator('#follow-up-due-list').innerText(),/60120000000|12-0000 000|lead@test.invalid/);checks++;
+   await page.evaluate(()=>{activeBrand.distribution_mode='team_sales';renderFollowUpDue();});
+   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,`${name}: follow-up no overflow`);checks++;
+   await page.screenshot({path:path.join(artifacts,`${name}-${role}-follow-up-new.png`),fullPage:true,animations:'disabled'});
+   await page.locator('[data-follow-up-section="contacted"]').click();
+   assert.equal(await page.locator('#follow-up-due-list .follow-up-due-item').count(),0);checks++;
+   await page.evaluate(()=>{state.leads[0].status='contacted';state.followUpDue=[{...state.leads[0],followUpActivityAt:state.leads[0].createdAt}];renderFollowUpDue();});
+   assert.equal(await page.locator('#follow-up-due-list .follow-up-due-item').count(),1);checks++;
+   assert.equal(await page.locator('#nav-follow-up-count').innerText(),'3');checks++;
+   await page.locator('[data-follow-up-section="due"]').click();
+   assert.equal(await page.locator('#follow-up-due-list .follow-up-due-item').count(),1);checks++;
+   await page.evaluate(()=>{state.leads[0].status='new';state.followUpDue=[];renderFollowUpDue();});
+   await page.evaluate(()=>switchView('dashboard'));
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,`${name}: no overflow`);checks++;
    if(role!=='agent'){
     assert.equal(await page.locator('.sales-lead-card .sales-lead-actions').count(),0);checks++;
