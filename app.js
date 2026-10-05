@@ -35,7 +35,6 @@ const DEFAULT_GOOGLE_SHEET_ENDPOINT = "";
 const LEAD_STATUS_OPTIONS = [
   { value: "new", label: "New" },
   { value: "contacted", label: "Contacted" },
-  { value: "passed", label: "Passed" },
   { value: "all_offer_presented", label: "All Offer Presented" },
   { value: "need_follow_up", label: "Need Follow Up" },
   { value: "potential", label: "Potential" },
@@ -2110,12 +2109,72 @@ function showToast(title, message, tone = "success") {
   toastTimer = window.setTimeout(() => elements.toast.classList.remove("visible"), 3200);
 }
 
+let lastInteractionButton = null;
+let lastInteractionAt = 0;
+const globalButtonFeedback = new Set();
+const pendingButtonFeedback = new WeakMap();
+
+function beginButtonFeedback(button) {
+  if (!button) return () => {};
+  if (pendingButtonFeedback.has(button)) return () => {};
+  const previousBusy = button.getAttribute("aria-busy");
+  button.dataset.actionPending = "true";
+  button.setAttribute("aria-busy", "true");
+  button.classList.add("is-action-pending");
+  const spinner = document.createElement("span");
+  spinner.className = "action-feedback-spinner";
+  spinner.setAttribute("aria-hidden", "true");
+  button.append(spinner);
+  const finish = () => {
+    spinner.remove();
+    button.classList.remove("is-action-pending");
+    delete button.dataset.actionPending;
+    if (previousBusy === null) button.removeAttribute("aria-busy");
+    else button.setAttribute("aria-busy", previousBusy);
+    pendingButtonFeedback.delete(button);
+  };
+  pendingButtonFeedback.set(button, finish);
+  return finish;
+}
+
+async function runButtonActionFeedback(button, action) {
+  const finish = beginButtonFeedback(button);
+  try { return await action(); } finally { finish(); }
+}
+
+function showImmediatePressFeedback(button) {
+  if (!button || button.disabled || button.getAttribute("aria-disabled") === "true") return;
+  lastInteractionButton = button;
+  lastInteractionAt = Date.now();
+  const box = button.getBoundingClientRect();
+  if (!box.width || !box.height) return;
+  const ring = document.createElement("span");
+  ring.className = "action-press-feedback";
+  ring.setAttribute("aria-hidden", "true");
+  Object.assign(ring.style, { left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, height: `${box.height}px`, borderRadius: getComputedStyle(button).borderRadius });
+  document.body.append(ring);
+  window.setTimeout(() => ring.remove(), 280);
+}
+
+document.addEventListener("pointerdown", event => {
+  showImmediatePressFeedback(event.target.closest('button, a.contact-edit-button, [role="button"]'));
+}, { capture: true, passive: true });
+document.addEventListener("click", event => {
+  const button = event.target.closest('button, a.contact-edit-button, [role="button"]');
+  if (button?.dataset.actionPending === "true") {
+    event.preventDefault(); event.stopImmediatePropagation(); return;
+  }
+  if (event.detail === 0) showImmediatePressFeedback(button);
+}, true);
+
 function setGlobalLoading(active, message = "Sedang diproses...") {
+  if (active && lastInteractionButton && Date.now() - lastInteractionAt < 750) globalButtonFeedback.add(beginButtonFeedback(lastInteractionButton));
   globalLoadingCount = Math.max(0, globalLoadingCount + (active ? 1 : -1));
   const visible = globalLoadingCount > 0;
   elements.globalLoadingMessage.textContent = message;
   elements.globalLoadingOverlay.classList.toggle("visible", visible);
   elements.globalLoadingOverlay.setAttribute("aria-hidden", String(!visible));
+  if (!visible) { globalButtonFeedback.forEach(finish => finish()); globalButtonFeedback.clear(); }
 }
 
 const LIFECYCLE_INTRO_DURATION_MS = 3000;
@@ -2649,7 +2708,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261006-follow-up-sections-v140")
+      .register("/sw.js?v=20261006-instant-action-feedback-v141")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -2967,7 +3026,7 @@ function normalizeSheetStatus(value) {
     return "contacted";
   }
   if (["passed", "pass", "expired", "missed", "tamat", "terlepas", "dipindahkan"].includes(compactStatus)) {
-    return "passed";
+    return "rejected";
   }
   if (["all offer presented", "offer presented", "all offers presented", "semua tawaran dibentang"].includes(compactStatus)) {
     return "all_offer_presented";
@@ -3002,6 +3061,7 @@ function normalizeSheetStatus(value) {
 
 function getLeadVisualStatus(lead) {
   if (!lead) return "new";
+  if (lead.status === "passed") return "rejected";
   if (lead.status === "queued") return "new";
   return lead.status || "new";
 }
@@ -5038,7 +5098,7 @@ function stopExpiryWatchdog() {
 
 function setCallButtonLoading(leadId, isLoading) {
   const article = elements.activeLeadContainer.querySelector(".lead-alert");
-  const buttons = [...document.querySelectorAll(`[data-lead-call="${CSS.escape(leadId)}"]`)];
+  const buttons = [...document.querySelectorAll(`[data-lead-call="${CSS.escape(leadId)}"], [data-follow-up-call="${CSS.escape(leadId)}"]`)];
   if (article?.dataset.leadId === leadId) {
     const dashboardButton = article.querySelector(".call-button");
     if (dashboardButton) buttons.push(dashboardButton);
@@ -5665,6 +5725,7 @@ function leadDetailsCopyText(lead) {
 async function copyLeadDetails(leadId) {
   const lead = state.leads.find((item) => item.id === leadId);
   if (!lead || !canAccessLead(lead) || !canRevealLeadContact(lead)) return false;
+  const finishFeedback = beginButtonFeedback(lastInteractionButton);
   try {
     await navigator.clipboard.writeText(leadDetailsCopyText(lead));
     showToast("Details disalin", `${lead.name} telah disalin.`, "success");
@@ -5672,6 +5733,8 @@ async function copyLeadDetails(leadId) {
   } catch {
     showToast("Copy gagal", "Benarkan akses clipboard dan cuba lagi.", "error");
     return false;
+  } finally {
+    finishFeedback();
   }
 }
 
@@ -5713,6 +5776,11 @@ function openSalesPerformance(status) {
   salesLeadDrilldown = { ...salesPerformanceRange, brandId: activeBrandId };
   switchView("leads");
   renderLeadsTable();
+  if (['group_follow_up', 'group_cancelled_rejected'].includes(status)) {
+    const option = new Option(status === 'group_follow_up' ? 'Need Follow Up + All Offer Presented' : 'Cancelled + Rejected', status);
+    option.hidden = true;
+    elements.leadFilter.add(option);
+  }
   elements.leadFilter.value = status;
   renderLeadsTable();
 }
@@ -5759,7 +5827,7 @@ function renderLeadsTable() {
   });
   const statusOptionsMarkup = [
     `<option value="all">Semua status (${visibleLeads.length})</option>`,
-    ...(isTeamSales() ? ['<option value="group_follow_up">Need Follow Up + All Offer Presented</option>', '<option value="group_cancelled_rejected">Cancelled + Rejected</option>'] : []),
+    ...(['group_follow_up', 'group_cancelled_rejected'].includes(selectedStatus) ? [`<option hidden value="${selectedStatus}">${selectedStatus === 'group_follow_up' ? 'Need Follow Up + All Offer Presented' : 'Cancelled + Rejected'}</option>`] : []),
     ...LEAD_STATUS_OPTIONS.map(
       (status) => `<option value="${status.value}">${status.label} (${statusCounts[status.value] || 0})</option>`,
     ),
@@ -6913,7 +6981,7 @@ async function loadTeamPerformance() {
   teamPerformancePending.add(key);
   status.textContent = "Memuatkan prestasi...";
   panel.setAttribute("aria-busy", "true");
-  document.querySelector("#team-performance-metrics").replaceChildren();
+  // Keep the previous cards readable while the new range loads; no blank flash.
   const stillCurrent = () => brandVersion === brandContextVersion && userId === state.currentUserId && days === teamPerformanceDays && isAdmin() && isTeamSales();
   try {
     const { data, error } = await remoteDatabaseClient.rpc("get_agent_performance_report", { p_from: from, p_to: to, p_agent_id: null, p_project_id: null });
@@ -7679,6 +7747,7 @@ async function deleteProject(projectId, button) {
   if (!confirmPermanentDelete(systemWorkerText("projek"), project.name)) return;
 
   button.disabled = true;
+  const finishFeedback = beginButtonFeedback(button);
   try {
     const { data, error } = await remoteDatabaseClient.rpc("admin_delete_project", { p_project_id: projectId });
     if (error) throw error;
@@ -7701,6 +7770,7 @@ async function deleteProject(projectId, button) {
     console.error("Project deletion failed", error);
     showToast("Projek tidak dipadam", "Server belum dapat mengesahkan pemadaman. Cuba lagi.", "error");
   } finally {
+    finishFeedback();
     button.disabled = false;
   }
 }
@@ -8094,6 +8164,7 @@ async function recordLeadFollowUp(leadId, button) {
     return false;
   }
   button.disabled = true;
+  const finishFeedback = beginButtonFeedback(button);
   try {
     if (remoteDatabaseMode) {
       const { data, error } = await remoteDatabaseClient.rpc("record_lead_follow_up", {
@@ -8122,6 +8193,7 @@ async function recordLeadFollowUp(leadId, button) {
     showToast("Follow Up gagal", error?.message || "Semak sambungan dan cuba lagi.", "error");
     return false;
   } finally {
+    finishFeedback();
     button.disabled = false;
   }
 }
@@ -8749,7 +8821,7 @@ elements.leadsTableBody.addEventListener("change", (event) => {
   const statusField = event.target.closest("[data-lead-status]");
   if (statusField) updateLeadStatusFromLog(statusField.dataset.leadStatus, statusField.value, statusField);
 });
-elements.manualLeadForm.addEventListener("submit", addManualLead);
+elements.manualLeadForm.addEventListener("submit", event => runButtonActionFeedback(event.submitter, () => addManualLead(event)));
 elements.manualLeadPhone.addEventListener("input", () => {
   elements.manualLeadError.textContent = "";
 });
@@ -8815,7 +8887,6 @@ elements.refreshButton?.addEventListener("click", async () => {
   button.disabled = true;
   button.setAttribute("aria-busy", "true");
   button.classList.add("is-syncing");
-  const startedAt = Date.now();
   try {
     const refreshed = await syncGoogleSheetFresh({ silent: true });
     if (refreshed && isAdmin() && isTeamSales()) {
@@ -8827,7 +8898,7 @@ elements.refreshButton?.addEventListener("click", async () => {
     console.error("Manual refresh failed", error);
     showToast("Refresh gagal", "Data belum dapat disegerakkan. Cuba lagi sebentar.", "error");
   } finally {
-    await new Promise((resolve) => window.setTimeout(resolve, Math.max(0, 650 - (Date.now() - startedAt))));
+    // Finish as soon as sync is done; CSS supplies the smooth transition.
     button.classList.remove("is-syncing");
     button.removeAttribute("aria-busy");
     button.disabled = false;
@@ -9173,6 +9244,7 @@ document.addEventListener("click", event => {
   const link = event.target.closest("[data-sales-contact]");
   if (!link || !isTeamSales()) return;
   event.preventDefault();
-  handleSalesContact(link.dataset.salesLead, link.dataset.salesContact, link.href);
+  runButtonActionFeedback(link, () => handleSalesContact(link.dataset.salesLead, link.dataset.salesContact, link.href))
+    .catch(error => { console.error("Contact action failed", error); showToast("Tindakan belum selesai", "Semak sambungan dan cuba lagi.", "error"); });
 });
 bootstrap();

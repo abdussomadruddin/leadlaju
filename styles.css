@@ -4284,14 +4284,20 @@ td small {
   position: fixed;
   z-index: 100;
   inset: 0;
-  display: none;
+  display: grid;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 160ms ease, visibility 160ms ease;
   place-items: center;
   background: rgba(8, 14, 27, 0.64);
   backdrop-filter: blur(4px);
 }
 
 .global-loading-overlay.visible {
-  display: grid;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
 }
 
 .global-loading-content {
@@ -4299,6 +4305,21 @@ td small {
   justify-items: center;
   gap: 15px;
   color: #fff;
+  transform: translateY(5px);
+  transition: transform 160ms ease;
+}
+.global-loading-overlay.visible .global-loading-content { transform: translateY(0); }
+
+.action-press-feedback { position: fixed; z-index: 1000; pointer-events: none; border: 2px solid rgb(51 112 234 / 48%); background: rgb(69 126 237 / 8%); animation: action-press 260ms ease-out both; }
+@keyframes action-press { from { opacity: .9; transform: scale(.96); } to { opacity: 0; transform: scale(1.035); } }
+.is-action-pending { position: relative; }
+.action-feedback-spinner { position: absolute; top: -4px; right: -4px; width: 17px; height: 17px; box-sizing: border-box; border: 2px solid #d7e5ff; border-top-color: #2563eb; border-radius: 50%; background: #fff; pointer-events: none; animation: loading-spin 700ms linear infinite; box-shadow: 0 0 0 2px #fff; }
+#team-performance[aria-busy="true"] .performance-metric { opacity: .65; }
+.performance-metric { transition: opacity 160ms ease; }
+@media (prefers-reduced-motion: reduce) {
+  .action-press-feedback { animation: none; opacity: .35; }
+  .action-feedback-spinner { animation: none; }
+  .global-loading-overlay, .global-loading-content, .performance-metric { transition: none; transform: none; }
 }
 
 .netflix-loader {

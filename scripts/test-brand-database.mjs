@@ -381,5 +381,8 @@ try {
  check((await client.query('select status from public.leads where id=$1',[agentFixture])).rows[0].status==='new','Exactly 15 days does not promote early');
  await client.query("select leadlaju_private.enqueue_sales_contact_reminders($1::timestamptz+interval '1 second')",[dailyNow]);
  check((await client.query('select status from public.leads where id=$1',[agentFixture])).rows[0].status==='need_follow_up','Unassigned Agent New lead promotes strictly after 15 days');
+ await client.query("update public.leads set status='passed',queue_state='passed' where id=$1",[agentFixture]);
+ check((await client.query('select status,queue_state from public.leads where id=$1',[agentFixture])).rows[0].status==='rejected','Retired Passed writes normalize to Rejected');
+ check((await client.query('select queue_state from public.leads where id=$1',[agentFixture])).rows[0].queue_state==='rejected','Retired queue state normalizes without touching assignment history');
  console.log(`PASS: ${checks} real PostgreSQL brand isolation and distribution assertions`);
 } finally { if(client) await client.end(); await pg.stop(); }

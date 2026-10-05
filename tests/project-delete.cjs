@@ -34,6 +34,7 @@ test('cancelled deletion never calls Supabase; confirmed deletion removes only t
   let confirmed = false;
   const context = {
     guardLifecycleMutation: () => true,
+    beginButtonFeedback: () => () => {},
     isAdmin: () => true,
     systemWorkerText: text => text,
     remoteDatabaseMode: true,

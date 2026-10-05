@@ -665,13 +665,14 @@ test('dashboard and Google Sheet use one official lead status list', () => {
   const source = fs.readFileSync('app.js', 'utf8');
   const script = fs.readFileSync('tests/fixtures/legacy-google-apps-script.txt', 'utf8');
   const expected = [
-    'New', 'Contacted', 'Passed', 'All Offer Presented',
+    'New', 'Contacted', 'All Offer Presented',
     'Need Follow Up', 'Potential', 'Rejected', 'Cancelled', 'Client',
   ];
   expected.forEach((status) => {
     assert.match(source, new RegExp(`label: "${status}"`));
     assert.match(script, new RegExp(`"${status}"`));
   });
+  assert.doesNotMatch(source, /value: "passed", label: "Passed"/);
   assert.match(script, /function normalizeLegacyLeadStatuses_\(sheet, headers\)/);
   assert.match(script, /if \(\["potential", "potensi", "prospect", "prospek", "hot lead"\]/);
 });

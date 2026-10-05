@@ -106,6 +106,21 @@ try {
    await page.evaluate(()=>switchView('follow-up-due'));
    assert.equal(await page.locator('[data-follow-up-section]').count(),3);checks++;
    assert.equal(await page.locator('#nav-follow-up-count').innerText(),'3');checks++;
+   await page.evaluate(()=>{
+    const button=document.querySelector('[data-follow-up-section="new"]');
+    window.__feedbackStarted=false;
+    window.__feedbackPromise=runButtonActionFeedback(button,()=>{window.__feedbackStarted=true;return new Promise(resolve=>{window.__finishFeedback=resolve;});});
+   });
+   assert.equal(await page.evaluate(()=>window.__feedbackStarted),true);checks++;
+   assert.equal(await page.locator('[data-follow-up-section="new"]').getAttribute('aria-busy'),'true');checks++;
+   assert.equal(await page.locator('[data-follow-up-section="new"] .action-feedback-spinner').count(),1);checks++;
+   await page.locator('[data-follow-up-section="new"]').click();
+   assert.equal(await page.locator('[data-follow-up-section="new"]').getAttribute('aria-pressed'),'false');checks++;
+   await page.emulateMedia({reducedMotion:'reduce'});
+   assert.equal(await page.locator('.action-feedback-spinner').evaluate(el=>getComputedStyle(el).animationName),'none');checks++;
+   await page.evaluate(()=>window.__finishFeedback());
+   await page.waitForFunction(()=>!document.querySelector('.action-feedback-spinner'));
+   await page.emulateMedia({reducedMotion:'no-preference'});
    await page.locator('[data-follow-up-section="new"]').click();
    assert.equal(await page.locator('#follow-up-due-list .follow-up-due-item').count(),3);checks++;
    assert.doesNotMatch(await page.locator('#follow-up-due-list').innerText(),/60120000000|12-0000 000|lead@test.invalid/);checks++;
