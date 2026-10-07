@@ -26,8 +26,8 @@ test('admin remains exempt from the mandatory agent app gate', () => {
 });
 
 test('new cache version distributes the mandatory access gate', () => {
-  assert.match(html, /20261006-instant-action-feedback-v141/);
-  assert.match(sw, /leadlaju-pwa-v20261006-instant-action-feedback-v141/);
+  assert.match(html, /20261007-dashboard-login-retry-v142/);
+  assert.match(sw, /leadlaju-pwa-v20261007-dashboard-login-retry-v142/);
 });
 
 test('manual refresh syncs in place without a page reload or icon flash', () => {

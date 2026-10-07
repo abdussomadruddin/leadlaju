@@ -771,8 +771,13 @@ async function initRemoteDatabase() {
         const headers = new Headers(options.headers);
         if (activeBrandId) headers.set("x-leadlaju-brand", activeBrandId);
         pendingBrandRequestCount++;
-        try { return await fetch(url, { ...options, headers }); }
-        finally { pendingBrandRequestCount--; }
+        const controller = new AbortController();
+        const abort = () => controller.abort();
+        options.signal?.addEventListener('abort', abort, { once: true });
+        if (options.signal?.aborted) controller.abort();
+        const timeout = window.setTimeout(abort, REMOTE_REQUEST_TIMEOUT_MS);
+        try { return await fetch(url, { ...options, headers, signal: controller.signal }); }
+        finally { window.clearTimeout(timeout); options.signal?.removeEventListener('abort', abort); pendingBrandRequestCount--; }
       } },
     });
     // Keep this callback synchronous: Auth holds its initialization lock here.
@@ -846,7 +851,29 @@ function mapActivity(row) {
   };
 }
 
-async function loadRemoteState(userId) {
+let lastRemoteLoadError = null;
+function isTransientRemoteLoadError(error) {
+  return ['57014', '53300', '57P01', '08000', '08006'].includes(error?.code) ||
+    [502, 503, 504].includes(Number(error?.status)) ||
+    /timeout|timed out|failed to fetch|network|fetch failed|aborterror|aborted|load failed|connection.*(closed|reset)/i.test(`${error?.name || ''} ${error?.message || ''}`);
+}
+
+async function readDashboardSnapshot() {
+  const controller = new AbortController();
+  let timer;
+  const request = remoteDatabaseClient.rpc('get_dashboard_state');
+  request.abortSignal?.(controller.signal);
+  try {
+    return await Promise.race([request, new Promise((_, reject) => {
+      timer = window.setTimeout(() => {
+        controller.abort();
+        reject(new Error('Supabase dashboard request timed out'));
+      }, REMOTE_REQUEST_TIMEOUT_MS);
+    })]);
+  } finally { window.clearTimeout(timer); }
+}
+
+async function loadRemoteState(userId, attempt = 0) {
   if (!remoteDatabaseClient || !userId) return false;
   const requestBrandVersion = brandContextVersion;
   const wasRemoteDatabaseMode = remoteDatabaseMode;
@@ -874,21 +901,17 @@ async function loadRemoteState(userId) {
           state = { ...structuredClone(defaultState), currentUserId: userId, agents: [mapProfile(own.data)], leads: [], projects: [], appointments: [], activities: [], bulletins: [], followUpDue: [] };
           activeBrand = null;
           remoteDatabaseMode = true;
+          lastRemoteLoadError = null;
           return true;
         }
       } else activeBrandId = profile.brand_id;
     }
     const brandResult = await remoteDatabaseClient.from("brands").select("id,name,slug,active,distribution_mode").eq("id", activeBrandId).single();
-    if (brandResult.error || !brandResult.data?.active) throw new Error("Brand tidak aktif. Hubungi Master.");
+    if (brandResult.error) throw brandResult.error;
+    if (!brandResult.data?.active) throw new Error("Brand tidak aktif. Hubungi Master.");
     if (requestBrandVersion !== brandContextVersion) return false;
     activeBrand = brandResult.data;
-    const { data: snapshot, error } = await Promise.race([
-      remoteDatabaseClient.rpc("get_dashboard_state"),
-      new Promise((_, reject) => window.setTimeout(
-        () => reject(new Error("Supabase dashboard request timed out")),
-        REMOTE_REQUEST_TIMEOUT_MS,
-      )),
-    ]);
+    const { data: snapshot, error } = await readDashboardSnapshot();
     if (error) throw error;
     if (requestBrandVersion !== brandContextVersion) return false;
     const profiles = (snapshot?.profiles || []).map(mapProfile);
@@ -943,10 +966,18 @@ async function loadRemoteState(userId) {
     } else {
       markCurrentLeadNotificationsSeen();
     }
+    lastRemoteLoadError = null;
     return true;
   } catch (error) {
     console.error("Remote load failed", error);
     if (requestBrandVersion !== brandContextVersion) return false;
+    lastRemoteLoadError = error;
+    if (isTransientRemoteLoadError(error) && attempt < 2) {
+      if (loginPending) setLoginError('Sambungan sementara perlahan. Mencuba semula…');
+      await new Promise(resolve => window.setTimeout(resolve, attempt ? 1000 : 400));
+      if (requestBrandVersion !== brandContextVersion) return false;
+      return loadRemoteState(userId, attempt + 1);
+    }
     monitorSyncFailed = true;
     if (activeView === "lead-monitor") renderLeadMonitor();
     remoteDatabaseMode = wasRemoteDatabaseMode;
@@ -1492,8 +1523,10 @@ async function performLogin(event) {
     }
     const loaded = await loadRemoteState(data.user.id);
     if (!loaded) {
-      await remoteDatabaseClient.auth.signOut();
-      setLoginError("Akaun berjaya disahkan tetapi data sistem tidak dapat dimuatkan.");
+      if (!isTransientRemoteLoadError(lastRemoteLoadError)) await remoteDatabaseClient.auth.signOut();
+      setLoginError(isTransientRemoteLoadError(lastRemoteLoadError)
+        ? 'Sesi anda masih aktif. Data belum dapat dimuatkan; tekan Log masuk untuk cuba semula.'
+        : "Akaun berjaya disahkan tetapi data sistem tidak dapat dimuatkan.");
       return;
     }
     const signedInUser = getCurrentUser();
@@ -2708,7 +2741,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261006-instant-action-feedback-v141")
+      .register("/sw.js?v=20261007-dashboard-login-retry-v142")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -9129,7 +9162,7 @@ async function bootstrap() {
           return;
         }
       }
-      await remoteDatabaseClient.auth.signOut();
+      if (loaded || !isTransientRemoteLoadError(lastRemoteLoadError)) await remoteDatabaseClient.auth.signOut();
     }
     showLogin();
     return;
