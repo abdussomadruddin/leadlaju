@@ -1,13 +1,13 @@
-const CACHE_NAME = "leadlaju-pwa-v20261007-dashboard-login-retry-v142";
+const CACHE_NAME = "leadlaju-pwa-v20261007-individual-new-lead-push-v143";
 const LEAD_HANDOFF_CACHE = "leadlaju-notification-snapshots";
 const LEAD_HANDOFF_SCHEMA_VERSION = 1;
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20261007-dashboard-login-retry-v142",
+  "/styles.css?v=20261007-individual-new-lead-push-v143",
   "/vendor/exceljs.min.js?v=4.4.0",
-  "/app.js?v=20261007-dashboard-login-retry-v142",
-  "/manifest.webmanifest?v=20261007-dashboard-login-retry-v142",
+  "/app.js?v=20261007-individual-new-lead-push-v143",
+  "/manifest.webmanifest?v=20261007-individual-new-lead-push-v143",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",
   "/assets/icon-512.png",
@@ -226,33 +226,12 @@ async function showLeadNotificationSerialized(payload = {}, timing = createLeadT
       bulletinId: payload.bulletinId || null,
     }
   };
-  if (String(options.tag).startsWith("leadlaju-sales-") && payload.leadId) {
-    const snapshot = payload.leadSnapshot || {};
-    const groupTag = `leadlaju-sales-group-${snapshot.brand_id || ""}-${snapshot.assigned_agent_id || ""}`;
-    const existing = await self.registration.getNotifications();
-    const previous = existing.find((item) => item.data?.groupKey === groupTag && Date.now() - Number(item.data?.groupUpdatedAt || 0) < 15000);
-    const leadIds = [...new Set([...(previous?.data?.leadIds || []), payload.leadId])];
-    options.tag = previous?.tag || `${groupTag}-${payload.leadId}`;
-    options.data.leadIds = leadIds;
-    options.data.groupKey = groupTag;
-    options.data.groupUpdatedAt = Date.now();
-    if (leadIds.length > 1) {
-      title = `${leadIds.length} lead baharu masuk`;
-      options.body = "Tekan untuk lihat semua lead baharu anda.";
-      options.data.leadId = null;
-      options.data.leadSnapshot = null;
-      options.data.view = "leads";
-      options.data.url = "/?view=leads&status=new";
-    }
-  }
-  if (String(options.tag).startsWith("leadlaju-active-")) {
-    const existing = await self.registration.getNotifications();
-    existing
-      .filter((notification) =>
-        notification.tag.startsWith("leadlaju-lead-") ||
-        notification.tag === options.tag,
-      )
-      .forEach((notification) => notification.close());
+  if (payload.leadId && payload.leadSnapshot) {
+    const snapshot = payload.leadSnapshot;
+    options.tag = `leadlaju-new-${snapshot.brand_id || ''}-${snapshot.assigned_agent_id || ''}-${payload.leadId}-${snapshot.assignment_revision || 0}`;
+    options.data.view = 'follow-up-due';
+    options.data.reminderType = 'new-lead';
+    options.data.url = '/?view=follow-up-due&section=new';
   }
   await self.registration.showNotification(title, options);
 }
@@ -370,7 +349,7 @@ self.addEventListener("notificationclick", (event) => {
         existingClient.postMessage({
           type: notificationData.reminderType === "potential"
             ? "OPEN_POTENTIAL_REMINDER"
-            : notificationData.leadId ? "OPEN_LEAD" : view ? "OPEN_VIEW" : "OPEN_DASHBOARD",
+            : notificationData.reminderType === 'new-lead' ? 'OPEN_VIEW' : notificationData.leadId ? "OPEN_LEAD" : view ? "OPEN_VIEW" : "OPEN_DASHBOARD",
           view,
           reminderType: notificationData.reminderType || null,
           brandId: notificationData.brandId || null,

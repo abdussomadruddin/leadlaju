@@ -1033,12 +1033,24 @@ function handleRemoteBroadcast(message) {
     .finally(queueRemoteReload);
 }
 
+let realtimeReloadRunning = false;
+let realtimeReloadRequested = false;
 function queueRemoteReload() {
-  window.clearTimeout(remoteReloadTimer);
-  remoteReloadTimer = window.setTimeout(async () => {
-    if (!remoteDatabaseMode || !state.currentUserId) return;
-    if (await loadRemoteState(state.currentUserId)) renderAll();
-  }, 25);
+  realtimeReloadRequested = true;
+  if (realtimeReloadRunning || !remoteDatabaseMode || !state.currentUserId) return;
+  realtimeReloadRunning = true;
+  return (async () => {
+    try {
+      while (realtimeReloadRequested && remoteDatabaseMode && state.currentUserId) {
+        realtimeReloadRequested = false;
+        const version = brandContextVersion;
+        if (await loadRemoteState(state.currentUserId) && version === brandContextVersion) {
+          teamPerformanceCache.clear();
+          renderAll();
+        }
+      }
+    } finally { realtimeReloadRunning = false; }
+  })();
 }
 
 async function persistProfile(agent) {
@@ -2741,7 +2753,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261007-dashboard-login-retry-v142")
+      .register("/sw.js?v=20261007-individual-new-lead-push-v143")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -4552,14 +4564,17 @@ async function sendSystemNotification(lead, options = {}) {
   const title = `Lead baru: ${lead.project || systemWorkerText("Projek baru")}`;
   const notificationOptions = {
     body: isTeamSales() ? `${lead.name}\nLead baharu tersedia untuk Call atau WhatsApp.` : `${lead.name}\nNombor dibuka selepas CALL NOW. Diberikan kepada ${agent?.name || "ejen"}.`,
-    tag: isTeamSales() ? `leadlaju-sales-${lead.id}` : `leadlaju-active-${lead.assignedAgentId}`,
+    tag: `leadlaju-new-${activeBrandId}-${lead.assignedAgentId}-${lead.id}-${lead.assignmentRevision || 0}`,
     renotify: true,
     requireInteraction: true,
     icon: NOTIFICATION_ICON,
     badge: NOTIFICATION_BADGE,
     data: {
       leadId: lead.id,
-      url: `${getNotificationStartUrl("leads")}&lead=${encodeURIComponent(lead.id)}`,
+      url: `${getNotificationStartUrl("follow-up-due")}&section=new`,
+      view: 'follow-up-due',
+      reminderType: 'new-lead',
+      brandId: activeBrandId,
     },
   };
 
@@ -4577,7 +4592,8 @@ async function sendSystemNotification(lead, options = {}) {
     const notification = new Notification(title, notificationOptions);
     notification.onclick = () => {
       window.focus();
-      openNotificationLead(lead.id);
+      followUpSection = 'new';
+      switchView('follow-up-due');
       notification.close();
     };
   } catch (error) {
@@ -8973,9 +8989,10 @@ if ("serviceWorker" in navigator) {
       if (event.data.leadId) syncNotificationLead(event.data.leadId);
     }
     if (event.data?.type === "OPEN_VIEW") {
-      if (["sales_new_daily", "sales_due_daily"].includes(event.data.reminderType)) {
+      if (["new-lead", "sales_new_daily", "sales_due_daily"].includes(event.data.reminderType)) {
         switchView("follow-up-due");
-        followUpSection = event.data.reminderType === "sales_new_daily" ? "new" : "due";
+        followUpSection = event.data.reminderType === "sales_due_daily" ? "due" : "new";
+        if (event.data.leadSnapshot) consumeAssignmentHandoff(event.data);
         [elements.followUpAgentFilter, elements.followUpProjectFilter, elements.followUpPeriodFilter].forEach(filter => { if (filter) filter.value = "all"; });
         renderFollowUpDue();
         return;

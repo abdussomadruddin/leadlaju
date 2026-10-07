@@ -161,13 +161,15 @@ Deno.serve(async (request) => {
     const notification = JSON.stringify({
       title: `Lead baru: ${project || "Projek baru"}`,
       body: salesLead ? `${lead.name}\nLead baharu tersedia untuk Call atau WhatsApp.` : `${lead.name}\nNombor dibuka selepas CALL NOW.`,
-      tag: salesLead ? `leadlaju-sales-${lead.id}` : `leadlaju-active-${first.user_id}`,
+      tag: `leadlaju-new-${brandId}-${first.user_id}-${lead.id}-${revision}`,
       renotify: true,
       requireInteraction: true,
       icon: "/assets/icon-192.png",
       badge: "/assets/badge-96.png",
-      url: "/?view=leads",
-      view: "leads",
+      url: "/?view=follow-up-due&section=new",
+      view: "follow-up-due",
+      reminderType: "new-lead",
+      brandId,
       leadId: lead.id,
       leadSnapshot,
     });

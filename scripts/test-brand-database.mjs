@@ -34,6 +34,8 @@ try {
  create function cron.schedule(text,text,text) returns bigint language sql as $$insert into cron.job(jobname,schedule,command) values($1,$2,$3) on conflict(jobname) do update set schedule=$2,command=$3 returning jobid$$;
  create function cron.unschedule(bigint) returns boolean language sql as $$with d as(delete from cron.job where jobid=$1 returning *) select exists(select 1 from d)$$;
  create schema vault; create table vault.secrets(name text,secret text); create view vault.decrypted_secrets as select name,secret as decrypted_secret from vault.secrets;
+ create schema net; create table net.test_requests(id bigint generated always as identity,url text);
+ create function net.http_post(url text,headers jsonb,body jsonb,timeout_milliseconds integer) returns bigint language sql as $$insert into net.test_requests(url) values($1) returning id$$;
  `);
  const files=fs.readdirSync(path.join(root,'supabase/migrations')).filter(f=>f.endsWith('.sql')).sort();
  const legacyId='20000000-0000-4000-8000-000000000001';
@@ -413,5 +415,11 @@ try {
  await client.query('select leadlaju_private.enqueue_sales_contact_reminders($1)',[evening]);
  check((await client.query("select count(*)::int n from public.notification_outbox where user_id=(select assigned_agent_id from public.leads where id=$2) and notification_type='sales_new_daily' and (payload->>'slotAt')::timestamptz=$1",[evening,salesFixture])).rows[0].n===1,'Team Sales New reminder at 17:00 deduplicates');
  check((await client.query("select count(*)::int n from public.notification_outbox n join public.profiles p on p.id=n.user_id where notification_type='sales_new_daily' and (payload->>'slotAt')::timestamptz=$1 and (p.role<>'agent' or p.brand_id=$2)",[evening,sa])).rows[0].n===0,'17:00 New reminders exclude Admin and Agent-mode brands');
+ await client.query("insert into vault.secrets(name,secret) values('notification_worker_secret','local-fixture-only')");
+ const wakesBefore=(await client.query('select count(*)::int n from net.test_requests')).rows[0].n;
+ await client.query("insert into public.notification_outbox(brand_id,user_id,notification_type,dedupe_key,payload) values($1,$2,'sales_new_lead','immediate-fixture','{}')",[sales,(await client.query('select assigned_agent_id from public.leads where id=$1',[salesFixture])).rows[0].assigned_agent_id]);
+ check((await client.query('select count(*)::int n from net.test_requests')).rows[0].n===wakesBefore+1,'New lead immediately queues trusted worker HTTP without a timer');
+ await client.query("insert into public.notification_outbox(brand_id,user_id,notification_type,dedupe_key,payload) values($1,$2,'sales_due_daily','due-no-wake-fixture','{}')",[sa,agentA]);
+ check((await client.query('select count(*)::int n from net.test_requests')).rows[0].n===wakesBefore+1,'Scheduled reminder does not trigger New lead wake');
  console.log(`PASS: ${checks} real PostgreSQL brand isolation and distribution assertions`);
 } finally { if(client) await client.end(); await pg.stop(); }
