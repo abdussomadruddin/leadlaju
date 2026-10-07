@@ -41,6 +41,7 @@ try {
  for(const file of files) {
    // Test the previous reminder contract before applying its replacement below.
    if(file.endsWith('_team_sales_daily_follow_up_rules.sql')) continue;
+   if(file.endsWith('_follow_up_due_half_hour_slots.sql')) continue;
    if(file.endsWith('_master_brand_isolation.sql')) {
      await client.query(`insert into public.projects(id,name,source_project_id) values($1,'Legacy Safrich Project','legacy-source')`,[legacyId]);
      legacyCounts=(await client.query(`select table_name,(xpath('/row/c/text()',query_to_xml(format('select count(*) c from public.%I',table_name),false,true,'')))[1]::text::int count from information_schema.tables where table_schema='public' and table_type='BASE TABLE'`)).rows;
@@ -384,5 +385,24 @@ try {
  await client.query("update public.leads set status='passed',queue_state='passed' where id=$1",[agentFixture]);
  check((await client.query('select status,queue_state from public.leads where id=$1',[agentFixture])).rows[0].status==='rejected','Retired Passed writes normalize to Rejected');
  check((await client.query('select queue_state from public.leads where id=$1',[agentFixture])).rows[0].queue_state==='rejected','Retired queue state normalizes without touching assignment history');
+ const dueSlotMigration=files.find(file=>file.endsWith('_follow_up_due_half_hour_slots.sql'));
+ await client.query(fs.readFileSync(path.join(root,'supabase/migrations',dueSlotMigration),'utf8'));
+ await client.query("update public.leads set assigned_agent_id=$3,status='contacted',queue_state='contacted',created_at=$2::timestamptz-interval '3 days',follow_up_activity_at=$2::timestamptz-interval '25 hours' where id=$1",[agentFixture,dailyNow,agentA]);
+ await client.query("update public.leads set follow_up_activity_at=$2::timestamptz-interval '25 hours' where id=$1",[agentFixture,dailyNow]);
+ const slotDay=new Date(new Date(dailyNow).getTime()+86400000+8*3600000).toISOString().slice(0,10);
+ for(const hour of [9,11,13,15,17]){
+   const at=`${slotDay}T${String(hour).padStart(2,'0')}:30:00+08:00`;
+   await client.query('select leadlaju_private.enqueue_sales_contact_reminders($1)',[at]);
+   await client.query('select leadlaju_private.enqueue_sales_contact_reminders($1)',[at]);
+   const rows=(await client.query("select payload from public.notification_outbox where user_id=$1 and notification_type='sales_due_daily' and (payload->>'slotAt')::timestamptz=$2",[agentA,at])).rows;
+   check(rows.length===1,`Agent Due ${hour}:30 deduplicates scheduler calls`);
+   check(rows[0].payload.url==='/?view=follow-up-due&section=due','Due push opens Follow Up Due section');
+ }
+ for(const time of ['09:00:00','09:29:59','09:45:00','21:00:00']){
+   const at=`${slotDay}T${time}+08:00`;
+   const before=(await client.query("select count(*)::int n from public.notification_outbox where notification_type='sales_due_daily'")).rows[0].n;
+   await client.query('select leadlaju_private.enqueue_sales_contact_reminders($1)',[at]);
+   check((await client.query("select count(*)::int n from public.notification_outbox where notification_type='sales_due_daily'")).rows[0].n===before,'No Due outside new slot window');
+ }
  console.log(`PASS: ${checks} real PostgreSQL brand isolation and distribution assertions`);
 } finally { if(client) await client.end(); await pg.stop(); }
