@@ -42,6 +42,7 @@ try {
    // Test the previous reminder contract before applying its replacement below.
    if(file.endsWith('_team_sales_daily_follow_up_rules.sql')) continue;
    if(file.endsWith('_follow_up_due_half_hour_slots.sql')) continue;
+   if(file.endsWith('_new_lead_reminder_5pm.sql')) continue;
    if(file.endsWith('_master_brand_isolation.sql')) {
      await client.query(`insert into public.projects(id,name,source_project_id) values($1,'Legacy Safrich Project','legacy-source')`,[legacyId]);
      legacyCounts=(await client.query(`select table_name,(xpath('/row/c/text()',query_to_xml(format('select count(*) c from public.%I',table_name),false,true,'')))[1]::text::int count from information_schema.tables where table_schema='public' and table_type='BASE TABLE'`)).rows;
@@ -404,5 +405,13 @@ try {
    await client.query('select leadlaju_private.enqueue_sales_contact_reminders($1)',[at]);
    check((await client.query("select count(*)::int n from public.notification_outbox where notification_type='sales_due_daily'")).rows[0].n===before,'No Due outside new slot window');
  }
+ await client.query(fs.readFileSync(path.join(root,'supabase/migrations',files.find(file=>file.endsWith('_new_lead_reminder_5pm.sql'))),'utf8'));
+ const salesFixture=reminderLeads[0].id;
+ await client.query("update public.leads set status='new',queue_state='sales_assigned',created_at=$2::timestamptz-interval '1 day' where id=$1",[salesFixture,dailyNow]);
+ const evening=`${slotDay}T17:00:00+08:00`;
+ await client.query('select leadlaju_private.enqueue_sales_contact_reminders($1)',[evening]);
+ await client.query('select leadlaju_private.enqueue_sales_contact_reminders($1)',[evening]);
+ check((await client.query("select count(*)::int n from public.notification_outbox where user_id=(select assigned_agent_id from public.leads where id=$2) and notification_type='sales_new_daily' and (payload->>'slotAt')::timestamptz=$1",[evening,salesFixture])).rows[0].n===1,'Team Sales New reminder at 17:00 deduplicates');
+ check((await client.query("select count(*)::int n from public.notification_outbox n join public.profiles p on p.id=n.user_id where notification_type='sales_new_daily' and (payload->>'slotAt')::timestamptz=$1 and (p.role<>'agent' or p.brand_id=$2)",[evening,sa])).rows[0].n===0,'17:00 New reminders exclude Admin and Agent-mode brands');
  console.log(`PASS: ${checks} real PostgreSQL brand isolation and distribution assertions`);
 } finally { if(client) await client.end(); await pg.stop(); }
