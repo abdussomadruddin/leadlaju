@@ -823,6 +823,7 @@ function mapLead(row) {
     project: row.project || "Tidak dinyatakan",
     source: normalizeLeadSource(row.source || "Manual Lead"),
     createdAt: new Date(row.created_at).getTime(),
+    updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : null,
     receivedAt: new Date(row.received_at || row.created_at).getTime(),
     assignedAgentId: row.assigned_agent_id,
     expiresAt: row.expires_at ? new Date(row.expires_at).getTime() : null,
@@ -2753,7 +2754,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261007-individual-new-lead-push-v143")
+      .register("/sw.js?v=20261008-latest-lead-activity-v144")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -5384,6 +5385,14 @@ function compareLeadLogOrder(left, right) {
   return leftBottom - rightBottom || (right.receivedAt || 0) - (left.receivedAt || 0);
 }
 
+function compareLeadLatestActivity(left, right) {
+  const latest = lead => Math.max(...[lead.updatedAt, lead.statusUpdatedAt, lead.followUpActivityAt, lead.contactedAt, lead.receivedAt, lead.createdAt].map(value => {
+    const time = typeof value === "number" ? value : Date.parse(value);
+    return Number.isFinite(time) ? time : 0;
+  }));
+  return latest(right) - latest(left) || String(left.id || "").localeCompare(String(right.id || ""));
+}
+
 function leadDisplayNotes(lead, value = lead.notes) {
   let notes = String(value || "").trim();
   if (!canRevealLeadContact(lead)) {
@@ -5928,7 +5937,7 @@ function renderLeadsTable() {
         (followUpFilter === "all" || (followUpFilter === "follow_up" && Number(lead.followUpCount) > 0) || (followUpFilter.startsWith("follow_up_") && Number(lead.followUpCount) === Number(followUpFilter.slice(10)))) &&
         matchesMonthPeriodFilter(lead.createdAt || lead.receivedAt, elements.leadPeriodFilter);
     })
-    .sort(compareLeadLogOrder);
+    .sort(filter === "all" ? compareLeadLatestActivity : compareLeadLogOrder);
 
   if (elements.leadLogCount) {
     elements.leadLogCount.textContent = `${rows.length} lead`;
@@ -8183,6 +8192,7 @@ async function saveLeadNote(leadId, button = null) {
       const noteSynced = await updateLeadNotesInSheet(lead, nextNotes);
       if (!noteSynced) throw new Error("Nota tidak dapat disimpan ke server.");
     }
+    lead.updatedAt = Date.now();
     saveState();
     if (leadNoteDrafts.get(draftKey) === submittedDraft) leadNoteDrafts.delete(draftKey);
     showToast("Nota disimpan", `Nota untuk ${lead.name} telah dikemas kini.`);
@@ -8231,6 +8241,8 @@ async function recordLeadFollowUp(leadId, button) {
       if (lead.followUpCount === 3) applySheetStatusToLead(lead, "all_offer_presented");
       saveState();
     }
+    lead.updatedAt = Date.now();
+    saveState();
     renderAll();
     showToast("Follow Up direkod", `${lead.name}: Follow Up ${lead.followUpCount}.`);
     window.location.assign(whatsappUrl);
