@@ -1013,6 +1013,11 @@ async function subscribeToRemoteDatabase() {
 }
 
 function handleRemoteBroadcast(message) {
+  if (message?.event === "follow_up_limit_changed") {
+    loadFollowUpDueFeed().then(() => renderFollowUpDue()).catch(error => console.warn("Realtime due limit refresh failed", error));
+    queueRemoteReload();
+    return;
+  }
   if (message?.event === "brand_suspended" && !isMaster()) {
     logout();
     showToast("Brand dinyahaktifkan", "Hubungi Master untuk akses semula.", "error");
@@ -2756,7 +2761,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261008-agent-due-limit-v146")
+      .register("/sw.js?v=20261008-agent-due-limit-recalculate-v147")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });

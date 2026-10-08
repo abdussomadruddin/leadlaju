@@ -475,7 +475,9 @@ try {
  await asUser(adminA,sa,async()=>{
    const result=(await client.query('select public.admin_set_follow_up_due_limit(100) result')).rows[0].result;
    check(result.ok && result.follow_up_due_limit===100,'Admin can save per-brand threshold');
-   check((await client.query('select follow_up_due_blocked from public.profiles where id=$1',[permissionAgent])).rows[0].follow_up_due_blocked,'Raising threshold does not clear an existing block');
+   check(!(await client.query('select follow_up_due_blocked from public.profiles where id=$1',[permissionAgent])).rows[0].follow_up_due_blocked,'Raising threshold clears a block below the new limit');
+   await client.query('select public.admin_set_follow_up_due_limit(40)');
+   check((await client.query('select follow_up_due_blocked from public.profiles where id=$1',[permissionAgent])).rows[0].follow_up_due_blocked,'Lowering threshold blocks above the new limit immediately');
  });
  await rejects(()=>asUser(permissionAgent,sa,()=>client.query('select public.admin_set_follow_up_due_limit(1)')),'Agent cannot change limit');
  await rejects(()=>asUser(master,sales,()=>client.query('select public.admin_set_follow_up_due_limit(1)')),'Team Sales mode cannot use Agent due limit');

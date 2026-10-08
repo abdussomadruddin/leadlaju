@@ -35,6 +35,7 @@ try {
       const stamp=await options.global.fetch('/sales-stamp');const brand=(await stamp.json()).brand||a;window.__requests.push({name,args,brand});
       if(name==='master_manage_brand')return {data:{ok:true,brands}};
       if(name==='admin_set_agent_get_lead_permission')return {data:{ok:true,get_lead_allowed:args.p_allowed}};
+      if(name==='admin_set_follow_up_due_limit')return {data:{ok:true,follow_up_due_limit:args.p_limit}};
       if(name==='get_dashboard_state'){
         if(window.__dashboardTimeouts-->0)return {error:{code:'57014',message:'canceling statement due to statement timeout'}};
         return {data:{profiles:[profile],projects:[],leads:brand===b?leads:[],appointments:[],activities:[],events:[],server_now:new Date().toISOString()}};
@@ -267,6 +268,10 @@ try {
     await page.evaluate(()=>{switchView('follow-up-due');renderFollowUpDue();});
     assert.equal(await page.locator('#follow-up-limit-form').isVisible(),true);checks++;
     assert.equal(await page.locator('#follow-up-limit-input').inputValue(),'50');checks++;
+    await page.locator('#follow-up-limit-input').fill('100');
+    await page.locator('#follow-up-limit-form button[type="submit"]').click();
+    await page.waitForFunction(()=>activeBrand.follow_up_due_limit===100 && !document.querySelector('#follow-up-limit-form button').disabled);
+    assert.equal(await page.locator('#follow-up-limit-input').inputValue(),'100','Saved limit appears without manual reload');checks++;
     assert.equal(await page.locator('#projects-view h2').innerText(),'Projek','Safrich retains original terminology');checks++;
     await page.evaluate(()=>{
       window.__reloadOriginal=queueRemoteReload;queueRemoteReload=()=>{};
