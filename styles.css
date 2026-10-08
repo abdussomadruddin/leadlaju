@@ -5861,3 +5861,18 @@ button.performance-metric:focus-visible { outline: 3px solid #2563eb; outline-of
 #push-device-report-content section { min-width:0; padding:14px; border:1px solid #e2e8f0; border-radius:16px; }
 #push-device-report-content h3 { font-size:14px; margin:0; overflow-wrap:anywhere; }
 @media(max-width:600px) { .push-device-report { padding:16px; } #push-device-report-content { grid-template-columns:1fr; } }
+.loading-bounce, .action-feedback-spinner { display:inline-flex; align-items:center; justify-content:center; gap:6px; height:26px; }
+.action-feedback-spinner { width:30px; height:18px; gap:3px; border:0; border-radius:8px; animation:none; color:#2563eb; }
+.action-feedback-spinner i { width:4px; height:4px; }
+.loading-bounce i, .action-feedback-spinner i { display:block; width:8px; height:8px; border-radius:50%; background:currentColor; animation:leadlaju-bounce 1000ms cubic-bezier(.45,0,.25,1) infinite; }
+.loading-bounce i:nth-child(2), .action-feedback-spinner i:nth-child(2) { animation-delay:120ms; }
+.loading-bounce i:nth-child(3), .action-feedback-spinner i:nth-child(3) { animation-delay:240ms; }
+@keyframes leadlaju-bounce { 0%,60%,100% { transform:translateY(0); } 30% { transform:translateY(-7px); } }
+.lifecycle-sync-overlay .lifecycle-wait-indicator.loading-bounce { display:inline-flex; width:auto; height:26px; border:0; border-radius:0; animation:none; color:#67a0ff; }
+.lifecycle-sync-overlay.cinematic .lifecycle-brand { animation:none; opacity:1; transform:none; filter:none; clip-path:none; }
+.lifecycle-sync-overlay.cinematic .lifecycle-light { display:none; animation:none; }
+.lifecycle-sync-overlay { transition:opacity 280ms ease,visibility 0s linear 280ms; }
+.lifecycle-sync-overlay.visible { transition:opacity 160ms ease,visibility 0s; }
+.global-loading-overlay { transition:opacity 260ms ease,visibility 0s linear 260ms; }
+.global-loading-overlay.visible { transition:opacity 160ms ease,visibility 0s; }
+@media(prefers-reduced-motion:reduce) { .loading-bounce i,.action-feedback-spinner i { animation:none; } }

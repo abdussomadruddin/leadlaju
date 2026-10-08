@@ -91,12 +91,12 @@ test('faster sync commits readiness immediately but waits only for cinematic rev
   assert.equal(harness.overlay.classList.contains('visible'), false);
 });
 
-test('slower sync indicator disappears after three seconds while sync continues', () => {
+test('slower sync keeps loading visible until authoritative data renders', () => {
   const harness = createLifecycleHarness();
   harness.context.beginColdStartSync();
   harness.timers[0].callback();
   assert.equal(harness.context.lifecycleState().syncState, 'pending');
-  assert.equal(harness.overlay.classList.contains('visible'), false);
+  assert.equal(harness.overlay.classList.contains('visible'), true);
   harness.context.completeLifecycleAuthoritativeRender();
   assert.equal(harness.overlay.classList.contains('visible'), false);
   assert.equal(harness.body.classList.contains('business-mutations-locked'), false);
@@ -118,6 +118,8 @@ test('background resume skips cinematic and deduplicates related foreground requ
   const resumeTimer = harness.timers.find((timer) => timer.delay === 1000);
   assert.ok(resumeTimer);
   resumeTimer.callback();
+  assert.equal(harness.overlay.classList.contains('visible'), true);
+  harness.context.completeLifecycleAuthoritativeRender();
   assert.equal(harness.overlay.classList.contains('visible'), false);
 });
 

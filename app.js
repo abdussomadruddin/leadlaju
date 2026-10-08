@@ -2262,6 +2262,7 @@ function beginButtonFeedback(button) {
   button.classList.add("is-action-pending");
   const spinner = document.createElement("span");
   spinner.className = "action-feedback-spinner";
+  spinner.innerHTML = '<i></i><i></i><i></i>';
   spinner.setAttribute("aria-hidden", "true");
   button.append(spinner);
   const finish = () => {
@@ -2306,14 +2307,25 @@ document.addEventListener("click", event => {
   if (event.detail === 0) showImmediatePressFeedback(button);
 }, true);
 
+let globalLoadingHideTimer = null;
 function setGlobalLoading(active, message = "Sedang diproses...") {
+  window.clearTimeout(globalLoadingHideTimer);
   if (active && lastInteractionButton && Date.now() - lastInteractionAt < 750) globalButtonFeedback.add(beginButtonFeedback(lastInteractionButton));
   globalLoadingCount = Math.max(0, globalLoadingCount + (active ? 1 : -1));
   const visible = globalLoadingCount > 0;
   elements.globalLoadingMessage.textContent = message;
-  elements.globalLoadingOverlay.classList.toggle("visible", visible);
-  elements.globalLoadingOverlay.setAttribute("aria-hidden", String(!visible));
-  if (!visible) { globalButtonFeedback.forEach(finish => finish()); globalButtonFeedback.clear(); }
+  if (visible) {
+    elements.globalLoadingOverlay.classList.add("visible");
+    elements.globalLoadingOverlay.setAttribute("aria-hidden", "false");
+  } else {
+    // Join consecutive requests into one presentation, rather than flashing off/on.
+    globalLoadingHideTimer = window.setTimeout(() => {
+      if (globalLoadingCount > 0) return;
+      elements.globalLoadingOverlay.classList.remove("visible");
+      elements.globalLoadingOverlay.setAttribute("aria-hidden", "true");
+      globalButtonFeedback.forEach(finish => finish()); globalButtonFeedback.clear();
+    }, 180);
+  }
 }
 
 const LIFECYCLE_INTRO_DURATION_MS = 3000;
@@ -2347,7 +2359,13 @@ function hideLifecycleSyncOverlay() {
 
 function settleLifecyclePresentation() {
   updateLifecycleMutationGate();
-  if (!introRevealComplete) return;
+  if (!introRevealComplete || initialDashboardSyncState === "pending") return;
+  if ((typeof ownPerformanceLoading !== "undefined" && ownPerformanceLoading) ||
+      (typeof teamPerformancePending !== "undefined" && teamPerformancePending.size > 0)) {
+    window.clearTimeout(lifecycleHideTimer);
+    lifecycleHideTimer = window.setTimeout(settleLifecyclePresentation, 120);
+    return;
+  }
   hideLifecycleSyncOverlay();
 }
 

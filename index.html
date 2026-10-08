@@ -39,7 +39,7 @@
   </head>
   <body class="auth-pending">
     <div id="startup-recovery" style="position:fixed;inset:0;z-index:1000;background:#f7f9fc;display:grid;place-items:center;padding:24px;font-family:system-ui;color:#172238;text-align:center">
-      <div><strong style="font-size:24px">LeadLaju</strong><p id="startup-message">Memuatkan aplikasi…</p><button id="startup-retry" hidden style="padding:12px 20px;border:0;border-radius:12px;background:#2868dc;color:white">Cuba semula</button></div>
+      <div><strong style="font-size:24px">LeadLaju</strong><p><span class="loading-bounce" aria-hidden="true"><i></i><i></i><i></i></span></p><p id="startup-message">Memuatkan aplikasi…</p><button id="startup-retry" hidden style="padding:12px 20px;border:0;border-radius:12px;background:#2868dc;color:white">Cuba semula</button></div>
     </div>
     <script>
       (() => {
@@ -47,7 +47,13 @@
         const retry = document.getElementById('startup-retry');
         retry.onclick = () => location.reload();
         const observe = new MutationObserver(() => {
-          if (!document.body.classList.contains('auth-pending')) { panel.remove(); observe.disconnect(); clearTimeout(timer); }
+          if (!document.body.classList.contains('auth-pending')) {
+            observe.disconnect(); clearTimeout(timer);
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+              panel.style.transition = 'opacity 260ms ease'; panel.style.opacity = '0'; panel.style.pointerEvents = 'none';
+              setTimeout(() => panel.remove(), 280);
+            }));
+          }
         });
         observe.observe(document.body, {attributes:true,attributeFilter:['class']});
         const timer = setTimeout(() => {
@@ -1254,14 +1260,14 @@
           <span>LEAD</span><span>LAJU</span>
         </div>
         <span class="lifecycle-light" aria-hidden="true"></span>
-        <div class="lifecycle-wait-indicator" aria-hidden="true"></div>
+        <div class="lifecycle-wait-indicator loading-bounce" aria-hidden="true"><i></i><i></i><i></i></div>
         <strong>Sedang sync Lead Laju…</strong>
       </div>
     </div>
 
     <div class="global-loading-overlay" id="global-loading-overlay" aria-hidden="true" aria-live="assertive">
       <div class="global-loading-content">
-        <span class="netflix-loader" aria-hidden="true"></span>
+        <span class="loading-bounce" aria-hidden="true"><i></i><i></i><i></i></span>
         <strong id="global-loading-message">Sedang diproses...</strong>
       </div>
     </div>
