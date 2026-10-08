@@ -22,6 +22,11 @@ test('Follow Up sections preserve owner scope and count overlapping due leads on
   assert.equal(context.followUpNavigationCount(), 2);
   context.isAdmin = () => true;
   assert.equal(context.followUpNavigationCount(), 3);
+  const contactedCounts = context.followUpAgentCounts(context.followUpSectionRows('contacted'));
+  assert.equal(contactedCounts.get('owner'), 1);
+  const newCounts = context.followUpAgentCounts(context.followUpSectionRows('new'));
+  assert.equal(newCounts.get('other'), 1);
+  assert.equal(context.followUpAgentCounts(context.followUpSectionRows('due')).get('owner'), 1);
   context.state.leads = []; context.state.followUpDue = [];
   assert.equal(context.followUpNavigationCount(), 0);
 });

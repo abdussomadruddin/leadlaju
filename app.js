@@ -2761,7 +2761,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261008-agent-due-limit-recalculate-v147")
+      .register("/sw.js?v=20261008-follow-up-agent-count-v148")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -6935,6 +6935,12 @@ function followUpNavigationCount() {
   return new Set(["new", "contacted", "due"].flatMap(section => followUpSectionRows(section).map(lead => lead.id))).size;
 }
 
+function followUpAgentCounts(rows) {
+  const counts = new Map();
+  for (const item of rows) counts.set(item.assignedAgentId, (counts.get(item.assignedAgentId) || 0) + 1);
+  return counts;
+}
+
 function openFollowUpBlockPopup() {
   const modal = document.querySelector("#follow-up-block-modal");
   modal.classList.add("open");
@@ -7014,8 +7020,9 @@ function renderFollowUpDue() {
 
   if (isAdmin() && elements.followUpAgentFilter) {
     const agents = [...new Map(sectionRows.map((item) => [item.assignedAgentId, item.assignedAgentName])).entries()];
-    elements.followUpAgentFilter.innerHTML = '<option value="all">Semua ejen</option>' + agents
-      .map(([id, name]) => `<option value="${escapeHtml(id)}">${escapeHtml(name)}</option>`).join("");
+    const agentCounts = followUpAgentCounts(sectionRows);
+    elements.followUpAgentFilter.innerHTML = `<option value="all">Semua ejen (${sectionRows.length})</option>` + agents
+      .map(([id, name]) => `<option value="${escapeHtml(id)}">${escapeHtml(name)} (${agentCounts.get(id) || 0})</option>`).join("");
     elements.followUpAgentFilter.value = agents.some(([id]) => id === selectedAgent) ? selectedAgent : "all";
   }
   if (isAdmin() && elements.followUpProjectFilter) {
