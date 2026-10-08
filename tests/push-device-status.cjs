@@ -6,9 +6,10 @@ const app=fs.readFileSync('app.js','utf8');
 test('Device statuses separate account permission, stale receipts, tests and logout',()=>{
  const c=vm.createContext({Date});
  vm.runInContext(app.slice(app.indexOf('function pushDeviceLabel('),app.indexOf('function renderAgentPushDevices(')),c);
- assert.equal(c.pushDeviceLabel({active:true}),'Sedia terima notifikasi');
- assert.equal(c.pushDeviceLabel({active:true,receivedAt:new Date().toISOString()}),'Sedia terima notifikasi');
- assert.equal(c.pushDeviceLabel({active:true,receivedAt:new Date(Date.now()-2*86400000).toISOString()}),'Sedia terima notifikasi');
+ assert.equal(c.pushDeviceLabel({active:true}),'Belum disahkan');
+ assert.equal(c.pushDeviceLabel({active:true,receivedAt:new Date().toISOString()}),'Belum disahkan');
+ assert.equal(c.pushDeviceLabel({active:true,checkAt:new Date(Date.now()-1000).toISOString(),checkReceivedAt:new Date().toISOString()}),'Sedia terima notifikasi');
+ assert.equal(c.pushDeviceLabel({active:true,checkAt:new Date().toISOString(),checkReceivedAt:new Date(Date.now()-1000).toISOString()}),'Belum disahkan');
  assert.equal(c.pushDeviceLabel({active:true,checkConfirmedAt:new Date().toISOString(),checkReady:false}),'Terputus · permission tidak dibenarkan');
  assert.equal(c.pushDeviceLabel({active:false,loggedOutAt:new Date().toISOString()}),'Log keluar');
  assert.equal(c.pushDeviceLabel({active:false}),'Terputus');
@@ -29,5 +30,5 @@ test('Silent smoke check does not create notifications and app response does not
  assert.match(check,/push_device_probe/);
  assert.match(app,/#check-all-push-devices/);
  assert.doesNotMatch(app,/data-test-push-device/);
- assert.match(app,/ini tidak bermaksud push terputus/);
+ assert.match(app,/Menunggu pengesahan push reminder/);
 });
