@@ -5,14 +5,17 @@ const vm = require('node:vm');
 const app = fs.readFileSync('app.js', 'utf8');
 const source = app.slice(app.indexOf('async function syncPushSubscription('), app.indexOf('async function playNotificationSound('));
 const conflict = {code:'42501', message:'new row violates row-level security policy (USING expression) for table "push_subscriptions"'};
-function fixture({errors=[conflict,null], unsubscribe=true, replacement='new', delay=0}={}) {
+function fixture({errors=[conflict,null], unsubscribe=true, replacement='new', delay=0, touch=true, thenable=false}={}) {
   const calls=[], stored=new Map(); let removals=0, subscriptions=0;
   let user={id:'sales-owner',active:true,email:'test@invalid'};
   const sub=endpoint=>({endpoint,toJSON:()=>({endpoint,keys:{p256dh:'fixture-key',auth:'fixture-auth'}}),unsubscribe:async()=>{removals++;return unsubscribe;}});
   const context=vm.createContext({Notification:{permission:'granted'},navigator:{userAgent:'iPhone'},isPushSupported:()=>true,isInstalledApp:()=>true,isPhonePushDevice:()=>true,getCurrentUser:()=>user,
     registerServiceWorker:async()=>({pushManager:{getSubscription:async()=>sub('old'),subscribe:async()=>{subscriptions++;return sub(replacement);}}}),
     WEB_PUSH_PUBLIC_KEY:'fixture',urlBase64ToUint8Array:()=>[],remoteDatabaseMode:true,
-    remoteDatabaseClient:{rpc:async(name,args)=>{if(name==='touch_push_device')return {data:true};calls.push({name,args});if(delay)await new Promise(r=>setTimeout(r,delay));return {error:errors[calls.length-1],data:{ok:true}};}},
+    remoteDatabaseClient:{rpc:(name,args)=>{
+      const run=async()=>{if(name==='touch_push_device')return {data:touch};calls.push({name,args});if(delay)await new Promise(r=>setTimeout(r,delay));return {error:errors[calls.length-1],data:{ok:true}};};
+      return thenable ? {then:(resolve,reject)=>run().then(resolve,reject)} : run();
+    }},
     localStorage:{getItem:k=>stored.get(k),setItem:(k,v)=>stored.set(k,v),removeItem:k=>stored.delete(k)},
   });
   vm.runInContext('let pushSubscriptionSyncPromise=null;'+source,context);
@@ -30,6 +33,19 @@ test('background validation never rotates an endpoint without explicit reconnect
 });
 test('ordinary Safrich registration keeps existing subscription',async()=>{
   const f=fixture({errors:[null]});assert.equal(await f.sync(true),true);assert.deepEqual(f.counts(),{removals:0,subscriptions:0});
+});
+test('Supabase then-only RPC builder does not turn successful registration into failure',async()=>{
+ const f=fixture({errors:[null],thenable:true});assert.equal(await f.sync(true),true);assert.equal(f.calls.length,1);
+});
+test('deleted server record is recreated despite cached phone fingerprint',async()=>{
+ const f=fixture({errors:[null],touch:false,thenable:true});
+ f.stored.set('leadlaju-push-subscription-owner','sales-owner:old:fixture-key:test@invalid:true');
+ assert.equal(await f.sync(false),true);assert.equal(f.calls.length,1);
+});
+test('valid cached subscription remains ready without duplicate registration',async()=>{
+ const f=fixture({errors:[null],thenable:true});
+ f.stored.set('leadlaju-push-subscription-owner','sales-owner:old:fixture-key:test@invalid:true');
+ assert.equal(await f.sync(false),true);assert.equal(f.calls.length,0);
 });
 test('network and unrelated permission errors never rotate browser subscription',async()=>{
   for(const error of [{code:'FETCH',message:'Network unavailable'},{code:'42501',message:'permission denied for table brands'}]){

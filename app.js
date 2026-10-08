@@ -2820,7 +2820,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261008-device-report-v151")
+      .register("/sw.js?v=20261008-push-reconnect-v152")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -2878,6 +2878,10 @@ function pushConnectionErrorMessage(error) {
   if (error?.name === "NotAllowedError" || Notification.permission === "denied") {
     return "Benarkan notifikasi LeadLaju dalam tetapan telefon, kemudian cuba semula.";
   }
+  if (error?.name === "AbortError" || /timeout|timed out|network|fetch|load failed/i.test(error?.message || "")) {
+    return "Sambungan internet/server terganggu sementara. Tekan Sambung semula; tidak perlu padam atau pasang semula aplikasi.";
+  }
+  if (error?.name === "InvalidStateError") return "Sambungan notifikasi telefon belum bersedia. Tutup dan buka semula aplikasi LeadLaju, kemudian cuba lagi.";
   return "Notifikasi belum berjaya disambungkan. Semak internet, tutup dan buka semula aplikasi, kemudian tekan Sambung semula.";
 }
 
@@ -2904,8 +2908,11 @@ async function performPushSubscriptionSync(force = false) {
   const storageKey = "leadlaju-push-subscription-owner";
   let fingerprint = `${user.id}:${endpoint}:${subscriptionPayload.keys?.p256dh || ""}:${user.email}:${user.active}`;
   if (!force && localStorage.getItem(storageKey) === fingerprint) {
-    if (remoteDatabaseMode) await remoteDatabaseClient.rpc("touch_push_device", {p_endpoint: endpoint, p_installed: isInstalledApp() && isPhonePushDevice()}).catch(() => {});
-    return true;
+    if (!remoteDatabaseMode) return true;
+    const confirmation = await remoteDatabaseClient.rpc("touch_push_device", {p_endpoint: endpoint, p_installed: isInstalledApp() && isPhonePushDevice()});
+    if (!confirmation.error && confirmation.data === true) return true;
+    // The server row may have been cleaned up while this phone kept its cache.
+    localStorage.removeItem(storageKey);
   }
 
   let pushed;
@@ -2956,7 +2963,7 @@ async function performPushSubscriptionSync(force = false) {
   }
 
   if (getCurrentUser()?.id !== user.id) return false;
-  if (pushed && remoteDatabaseMode) await remoteDatabaseClient.rpc("touch_push_device", {p_endpoint: endpoint, p_installed: isInstalledApp() && isPhonePushDevice()}).catch(() => {});
+  if (pushed && remoteDatabaseMode) await Promise.resolve(remoteDatabaseClient.rpc("touch_push_device", {p_endpoint: endpoint, p_installed: isInstalledApp() && isPhonePushDevice()})).catch(() => {});
   if (pushed) localStorage.setItem(storageKey, fingerprint);
   return pushed;
 }
@@ -5049,7 +5056,9 @@ async function requestNotifications() {
       ? await syncPushSubscription(true)
       : await verifyAgentPushAccess(true);
     if (!subscribed && !notificationConnectionError) notificationConnectionError = pushConnectionErrorMessage();
-    if (subscribed) await updateAgentPresence(true, true);
+    // Presence is separate from push registration; a temporary heartbeat failure
+    // must not report that a successfully registered device failed to connect.
+    if (subscribed) void Promise.resolve(updateAgentPresence(true, true)).catch(() => {});
     showToast(
       subscribed ? "Notifikasi aktif" : "Notifikasi belum disambungkan",
       subscribed ? "Lead baru dan reminder follow up akan keluar notifikasi sistem." : notificationConnectionError,
