@@ -6,9 +6,10 @@ const app=fs.readFileSync('app.js','utf8');
 test('Device statuses separate account permission, stale receipts, tests and logout',()=>{
  const c=vm.createContext({Date});
  vm.runInContext(app.slice(app.indexOf('function pushDeviceLabel('),app.indexOf('function renderAgentPushDevices(')),c);
- assert.equal(c.pushDeviceLabel({active:true}),'Belum disahkan');
- assert.equal(c.pushDeviceLabel({active:true,receivedAt:new Date().toISOString()}),'Penerimaan disahkan');
- assert.equal(c.pushDeviceLabel({active:true,receivedAt:new Date(Date.now()-2*86400000).toISOString()}),'Belum disahkan terkini');
+ assert.equal(c.pushDeviceLabel({active:true}),'Sedia terima notifikasi');
+ assert.equal(c.pushDeviceLabel({active:true,receivedAt:new Date().toISOString()}),'Sedia terima notifikasi');
+ assert.equal(c.pushDeviceLabel({active:true,receivedAt:new Date(Date.now()-2*86400000).toISOString()}),'Sedia terima notifikasi');
+ assert.equal(c.pushDeviceLabel({active:true,checkConfirmedAt:new Date().toISOString(),checkReady:false}),'Terputus · permission tidak dibenarkan');
  assert.equal(c.pushDeviceLabel({active:false,loggedOutAt:new Date().toISOString()}),'Log keluar');
  assert.equal(c.pushDeviceLabel({active:false}),'Terputus');
 });
@@ -26,6 +27,7 @@ test('Silent smoke check does not create notifications and app response does not
  const check=sql.slice(sql.indexOf('create function public.admin_check_push_device'),sql.indexOf('create function public.answer_push_device_probe'));
  assert.doesNotMatch(check,/notification_outbox|device_test/);
  assert.match(check,/push_device_probe/);
- assert.match(app,/Semak sambungan/);
- assert.match(app,/belum dapat disahkan/);
+ assert.match(app,/#check-all-push-devices/);
+ assert.doesNotMatch(app,/data-test-push-device/);
+ assert.match(app,/ini tidak bermaksud push terputus/);
 });

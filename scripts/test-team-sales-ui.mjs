@@ -42,6 +42,7 @@ try {
       }
       if(name==='get_bulletin_feed')return {data:{bulletins:[],unread_count:0}};
       if(name==='get_follow_up_due')return {data:{leads:[]}};
+      if(name==='get_push_device_status')return {data:window.__pushDevices||[]};
       if(name==='get_agent_performance_report')return {data:report(args)};
       if(name==='team_sales_contact'){
         await new Promise(r=>setTimeout(r,150));
@@ -280,15 +281,23 @@ try {
     });
     const permissionSwitch=page.locator('[data-agent-get-lead-permission="permission-fixture"]');
     await page.evaluate(()=>{
-      pushDeviceStatus=[{id:'silent-device-fixture',userId:'permission-fixture',active:true,installed:true,device:'iPhone',seenAt:new Date().toISOString(),receivedAt:null}];
+      window.__pushDevices=[{id:'silent-device-fixture',userId:'permission-fixture',active:true,installed:true,device:'iPhone',seenAt:new Date().toISOString(),receivedAt:null},{id:'second-device-fixture',userId:'permission-fixture',active:true,installed:true,device:'Android',receivedAt:null},{id:'inactive-device-fixture',userId:'permission-fixture',active:false,device:'Browser',receivedAt:null}];
       renderAgents();
+      switchView('dashboard');
     });
-    const silentCheck=page.locator('[data-test-push-device="silent-device-fixture"]');
-    assert.equal(await silentCheck.innerText(),'Semak sambungan');checks++;
-    assert.match(await page.locator('.agent-push-devices').last().innerText(),/Belum disahkan/);checks++;
+    const silentCheck=page.locator('#check-all-push-devices');
+    assert.equal(await silentCheck.innerText(),'Semak semua peranti');checks++;
+    assert.equal(await page.locator('[data-test-push-device]').count(),0);checks++;
     await silentCheck.click();
     await page.waitForFunction(()=>window.__requests.some(r=>r.name==='admin_check_push_device'&&r.args.p_subscription_id==='silent-device-fixture'));
     checks++;
+    await page.waitForFunction(()=>window.__requests.some(r=>r.name==='admin_check_push_device'&&r.args.p_subscription_id==='second-device-fixture'));
+    assert.equal(await page.evaluate(()=>window.__requests.some(r=>r.name==='admin_check_push_device'&&r.args.p_subscription_id==='inactive-device-fixture')),false);checks++;
+    assert.match(await page.locator('#push-device-report').innerText(),/Permission Agent[\s\S]*iPhone[\s\S]*Android[\s\S]*Browser/);checks++;
+    assert.ok(await page.locator('#push-device-report').evaluate(el=>el.scrollWidth<=el.clientWidth));checks++;
+    await page.locator('#close-push-device-report').click();
+    assert.equal(await page.locator('#push-device-report').isVisible(),false);checks++;
+    await page.evaluate(()=>switchView('agents'));
     assert.equal(await permissionSwitch.getAttribute('aria-checked'),'true');checks++;
     await permissionSwitch.click();
     await page.waitForFunction(()=>document.querySelector('[data-agent-get-lead-permission="permission-fixture"]')?.getAttribute('aria-checked')==='false');

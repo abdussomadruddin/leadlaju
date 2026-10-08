@@ -158,21 +158,28 @@ async function loadPushDeviceStatus() {
   const version = brandContextVersion;
   const { data, error } = await remoteDatabaseClient.rpc("get_push_device_status");
   if (version !== brandContextVersion) return;
-  if (error) { console.warn("Push device status unavailable"); return; }
+  if (error) { console.warn("Push device status unavailable"); return false; }
   pushDeviceStatus = Array.isArray(data) ? data : [];
-  if (isAdmin()) renderAgents();
+  if (isAdmin()) renderPushDeviceReport();
+  return true;
+}
+
+function renderPushDeviceReport() {
+  const content = document.querySelector("#push-device-report-content");
+  if (!content || !isAdmin()) return;
+  document.querySelector("#push-device-report h2").textContent = `Laporan peranti ${isTeamSales() ? "Team Sales" : "ejen"} · ${activeBrand?.name || "Brand dipilih"}`;
+  content.innerHTML = state.agents.filter(agent => agent.role === "agent").map(agent => `<section><h3>${escapeHtml(agent.name)}</h3>${renderAgentPushDevices(agent)}</section>`).join("") || "<p>Tiada ejen dalam brand ini.</p>";
 }
 
 function pushDeviceLabel(device) {
   if (!device.active) return device.loggedOutAt ? "Log keluar" : "Terputus";
-  const receipt = device.receivedAt ? new Date(device.receivedAt).getTime() : 0;
-  if (receipt && Date.now() - receipt <= 86400000) return "Penerimaan disahkan";
-  return receipt ? "Belum disahkan terkini" : "Belum disahkan";
+  if (device.checkReady === false) return "Terputus · permission tidak dibenarkan";
+  return "Sedia terima notifikasi";
 }
 
 function renderAgentPushDevices(agent) {
   const devices = pushDeviceStatus.filter(device => device.userId === agent.id);
-  return `<div class="agent-push-devices"><small>Notifikasi peranti · bukan status akaun</small>${devices.length ? devices.map(device => `<div><strong>${escapeHtml(device.device)} · ${escapeHtml(pushDeviceLabel(device))}</strong><small>${device.installed ? "App dipasang ketika semakan terakhir" : "Pemasangan app belum disahkan"}${device.seenAt ? ` · ${formatDateTime(new Date(device.seenAt).getTime())}` : ""}</small><small>${device.receivedAt ? `Penerimaan terakhir: ${formatDateTime(new Date(device.receivedAt).getTime())}` : "Belum ada pengesahan daripada telefon."}</small><small>${escapeHtml(silentDeviceCheckLabel(device))}</small>${device.active ? `<button class="secondary-button" type="button" data-test-push-device="${escapeHtml(device.id)}">Semak sambungan</button>` : ""}</div>`).join("") : "<p>Tiada sambungan notifikasi direkod.</p>"}</div>`;
+  return `<div class="agent-push-devices"><small>Notifikasi peranti · bukan status akaun</small>${devices.length ? devices.map(device => `<div><strong>${escapeHtml(device.device)} · ${escapeHtml(pushDeviceLabel(device))}</strong><small>${device.installed ? "App dipasang ketika semakan terakhir" : "Pemasangan app belum disahkan"}${device.seenAt ? ` · ${formatDateTime(new Date(device.seenAt).getTime())}` : ""}</small><small>${device.receivedAt ? `Penerimaan terakhir: ${formatDateTime(new Date(device.receivedAt).getTime())}` : "Belum ada pengesahan daripada telefon."}</small><small>${escapeHtml(silentDeviceCheckLabel(device))}</small></div>`).join("") : "<p>Tiada sambungan notifikasi direkod.</p>"}</div>`;
 }
 
 async function answerSilentDeviceProbe(payload) {
@@ -189,8 +196,8 @@ async function answerSilentDeviceProbe(payload) {
 
 function silentDeviceCheckLabel(device) {
   if (!device.checkAt) return "";
-  if (device.checkConfirmedAt) return device.checkReady ? "Semakan senyap: app respon, permission dibenarkan" : "Semakan senyap: permission tidak dibenarkan";
-  return Date.now()-new Date(device.checkAt).getTime()<15000 ? "Semakan senyap: menunggu app" : "Semakan senyap: belum dapat disahkan (app mungkin tertutup/offline)";
+  if (device.checkConfirmedAt && new Date(device.checkConfirmedAt).getTime() >= new Date(device.checkAt).getTime()) return device.checkReady ? "Semakan senyap: app respon, permission dibenarkan" : "Semakan senyap: permission tidak dibenarkan";
+  return Date.now()-new Date(device.checkAt).getTime()<15000 ? "Semakan senyap: menunggu app" : "App tidak menjawab semakan; ini tidak bermaksud push terputus.";
 }
 let remoteDatabaseMode = false;
 let monitorLastCanonicalSyncAt = null;
@@ -1795,6 +1802,7 @@ async function cleanUpPushAfterLogout() {
 }
 
 function logout() {
+  document.querySelector("#push-device-report")?.close();
   pushDeviceStatus = [];
   const user = getCurrentUser();
   if (user?.role === "agent") {
@@ -2812,7 +2820,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261008-push-device-status-v150")
+      .register("/sw.js?v=20261008-device-report-v151")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -6412,7 +6420,6 @@ function renderAgents() {
           <div class="agent-card-actions">
             ${actionButtons}
           </div>
-          ${remoteDatabaseMode && !isPendingAgent ? renderAgentPushDevices(agent) : ""}
         </article>`;
       },
     )
@@ -7325,6 +7332,7 @@ async function loadMasterManagement() {
 }
 
 function clearBrandOperationalState() {
+  document.querySelector("#push-device-report")?.close();
   pushDeviceStatus = [];
   salesLeadDrilldown = null;
   salesPerformanceRange = null;
@@ -8891,22 +8899,47 @@ window.addEventListener("popstate", (event) => {
   switchView(event.state?.leadLajuView || getRequestedStartView(), { historyMode: "none" });
 });
 document.addEventListener("click", (event) => {
-  const pushTestButton = event.target.closest("[data-test-push-device]");
+  if (event.target.closest("#close-push-device-report")) { document.querySelector("#push-device-report").close(); return; }
+  const pushTestButton = event.target.closest("#check-all-push-devices");
   if (pushTestButton) {
     if (!isAdmin() || !remoteDatabaseMode || pushTestButton.disabled) return;
     const version = brandContextVersion;
     const finish = beginButtonFeedback(pushTestButton);
     pushTestButton.disabled = true;
+    const report = document.querySelector("#push-device-report");
+    const progress = document.querySelector("#push-device-report-progress");
+    report.showModal();
+    progress.textContent = "Memuatkan semua peranti…";
+    document.querySelector("#push-device-report-content").textContent = "";
     void (async () => {
       try {
-        const { data, error } = await remoteDatabaseClient.rpc("admin_check_push_device", {p_subscription_id: pushTestButton.dataset.testPushDevice});
-        if (error || !data?.ok) throw error || new Error("Semakan gagal");
+        if (!await loadPushDeviceStatus()) throw new Error("Laporan tidak dapat dimuatkan. Cuba semula.");
         if (version !== brandContextVersion) return;
-        showToast("Semakan senyap dimulakan", data.active && data.accountEligible ? "Menunggu app yang sedang bersambung. Tiada push, bunyi atau popup dihantar kepada ejen." : "Sambungan atau akses akaun tidak aktif; tiada notifikasi dihantar.");
+        const agentIds = new Set(state.agents.filter(agent => agent.role === "agent").map(agent => agent.id));
+        const devices = pushDeviceStatus.filter(device => agentIds.has(device.userId) && device.active);
+        let completed = 0, failed = 0;
+        for (let offset = 0; offset < devices.length; offset += 3) {
+          if (version !== brandContextVersion) return;
+          await Promise.all(devices.slice(offset, offset + 3).map(async device => {
+            try {
+              const { data, error } = await remoteDatabaseClient.rpc("admin_check_push_device", {p_subscription_id: device.id});
+              if (error || !data?.ok) failed++;
+            } catch { failed++; }
+            completed++;
+          }));
+          if (version !== brandContextVersion) return;
+          progress.textContent = `Disemak ${completed}/${devices.length} peranti aktif${failed ? ` · ${failed} semakan gagal dimulakan` : ""}. Menunggu respons app…`;
+        }
         await loadPushDeviceStatus();
-        window.setTimeout(() => { if (version === brandContextVersion) void loadPushDeviceStatus().catch(() => {}); }, 15000);
+        window.setTimeout(async () => {
+          if (version !== brandContextVersion || !isAdmin()) return;
+          try { await loadPushDeviceStatus(); } catch {}
+          if (version !== brandContextVersion) return;
+          progress.textContent = `Semakan selesai: ${devices.length} peranti aktif${failed ? ` · ${failed} semakan gagal dimulakan` : ""}. App tertutup tidak dianggap terputus; status sedia berdasarkan sambungan push direkod, bukan jaminan setiap penghantaran.`;
+        }, 15000);
+        if (!devices.length) progress.textContent = "Tiada peranti aktif untuk disemak. Semua rekod peranti dipaparkan di bawah.";
       } catch (error) {
-        if (version === brandContextVersion) showToast("Semakan gagal", error.message || "Cuba lagi", "error");
+        if (version === brandContextVersion) progress.textContent = error.message || "Semakan gagal. Cuba semula.";
       } finally { finish(); pushTestButton.disabled = false; }
     })();
     return;

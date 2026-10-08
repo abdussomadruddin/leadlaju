@@ -514,6 +514,11 @@ try {
  await asUser(agentB,sb,async()=>{check(!(await client.query('select public.answer_push_device_probe($1,$2,true,true) ok',[challenge,'receipt-phone-1'])).rows[0].ok,'Other owner cannot acknowledge probe');});
  await commitUser(permissionAgent,sa,'select public.answer_push_device_probe($1,$2,true,true)',[challenge,'receipt-phone-1']);
  check((await client.query('select device_check_ready from public.push_subscriptions where id=$1',[devices[0].id])).rows[0].device_check_ready,'Own app can silently confirm permission');
+ await client.query("update public.push_subscriptions set device_check_ready=false,device_check_at=now()-interval '1 minute' where id=$1",[devices[0].id]);
+ await commitUser(adminA,sa,'select public.admin_check_push_device($1)',[devices[0].id]);
+ check((await client.query('select device_check_ready from public.push_subscriptions where id=$1',[devices[0].id])).rows[0].device_check_ready===false,'Silent retry preserves known denied permission');
+ await commitUser(permissionAgent,sa,'select public.touch_push_device($1,true)',['receipt-phone-1']);
+ check((await client.query('select device_check_ready from public.push_subscriptions where id=$1',[devices[0].id])).rows[0].device_check_ready===true,'Revalidated push subscription restores readiness');
  const testOutbox=(await client.query("insert into public.notification_outbox(brand_id,user_id,notification_type,payload,sent_at) values($1,$2,'receipt-fixture','{}',now()) returning id",[sa,permissionAgent])).rows[0];
  await client.query("select set_config('request.jwt.claims','{\"role\":\"service_role\"}',false)");
  const receipt=(await client.query('select public.issue_push_receipt($1,$2) token',[devices[0].id,testOutbox.id])).rows[0].token;
