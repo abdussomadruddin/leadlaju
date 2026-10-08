@@ -449,5 +449,46 @@ try {
  check((await client.query("select pg_get_functiondef('leadlaju_private.dispatch_available_leads_agent_brand(timestamptz)'::regprocedure) body")).rows[0].body.includes('p.active and p.get_lead_allowed'),'Agent dispatcher requires GET LEAD permission');
  const salesOwner=(await client.query('select assigned_agent_id from public.leads where id=$1',[salesFixture])).rows[0].assigned_agent_id;
  await rejects(()=>asUser(master,sales,()=>client.query('select public.admin_set_agent_get_lead_permission($1,false)',[salesOwner])),'Sales account cannot use Agent permission RPC');
+ await client.query('update public.profiles set get_lead_allowed=true where id=$1',[permissionAgent]);
+ await client.query('select set_config(\'leadlaju.worker_brand\',$1,false)',[sa]);
+ const gateLeads=(await client.query(`insert into public.leads(brand_id,name,phone,project_id,source,source_lead_id,ingestion_fingerprint,created_at,status,queue_state,assigned_agent_id,follow_up_activity_at)
+ select $1,'Due gate fixture','60120000000',$2,'manual','due-gate-'||n,'due-gate-'||n,now(),'contacted','contacted',$3,now()-interval '25 hours' from generate_series(1,50) n returning id`,[sa,legacyId,permissionAgent])).rows;
+ await client.query('select leadlaju_private.refresh_agent_due_gate(now())');
+ check(!(await client.query('select follow_up_due_blocked from public.profiles where id=$1',[permissionAgent])).rows[0].follow_up_due_blocked,'Exactly 50 Due leads does not block');
+ const extra=(await client.query(`insert into public.leads(brand_id,name,phone,project_id,source,source_lead_id,ingestion_fingerprint,created_at,status,queue_state,assigned_agent_id,follow_up_activity_at)
+ values($1,'Due 51','60120000000',$2,'manual','due-gate-51','due-gate-51',now(),'contacted','contacted',$3,now()-interval '25 hours') returning id`,[sa,legacyId,permissionAgent])).rows[0].id;
+ await asUser(permissionAgent,sa,async()=>{
+   const result=(await client.query('select public.set_agent_availability(true,true) result')).rows[0].result;
+   check(!result.ok && result.blocked,'51 Due rejects GET LEAD with a popup-ready result');
+ });
+ await client.query('select leadlaju_private.refresh_agent_due_gate(now())');
+ check((await client.query('select follow_up_due_blocked from public.profiles where id=$1',[permissionAgent])).rows[0].follow_up_due_blocked,'More than 50 latches blocked state');
+ await asUser(permissionAgent,sa,async()=>{
+   await client.query('select public.record_lead_follow_up($1,0)',[extra]);
+   check((await client.query('select follow_up_activity_at>now()-interval \'1 minute\' fresh from public.leads where id=$1',[extra])).rows[0].fresh,'Agent Follow Up resets due activity');
+   await client.query('select public.get_follow_up_due()');
+   check((await client.query('select follow_up_due_blocked from public.profiles where id=$1',[permissionAgent])).rows[0].follow_up_due_blocked,'Dropping to 50 after Follow Up remains blocked');
+ });
+ await client.query('update public.leads set follow_up_activity_at=now() where id=$1',[extra]);
+ await client.query('select leadlaju_private.refresh_agent_due_gate(now())');
+ check((await client.query('select follow_up_due_blocked from public.profiles where id=$1',[permissionAgent])).rows[0].follow_up_due_blocked,'Blocked state stays below threshold until zero');
+ await asUser(adminA,sa,async()=>{
+   const result=(await client.query('select public.admin_set_follow_up_due_limit(100) result')).rows[0].result;
+   check(result.ok && result.follow_up_due_limit===100,'Admin can save per-brand threshold');
+   check((await client.query('select follow_up_due_blocked from public.profiles where id=$1',[permissionAgent])).rows[0].follow_up_due_blocked,'Raising threshold does not clear an existing block');
+ });
+ await rejects(()=>asUser(permissionAgent,sa,()=>client.query('select public.admin_set_follow_up_due_limit(1)')),'Agent cannot change limit');
+ await rejects(()=>asUser(master,sales,()=>client.query('select public.admin_set_follow_up_due_limit(1)')),'Team Sales mode cannot use Agent due limit');
+ await rejects(()=>asUser(adminA,sb,()=>client.query('select public.admin_set_follow_up_due_limit(1)')),'Wrong brand context is denied');
+ await rejects(()=>asUser(adminA,sa,()=>client.query('select public.admin_set_follow_up_due_limit(0)')),'Zero limit is invalid');
+ await client.query('update public.leads set follow_up_activity_at=now() where assigned_agent_id=$1',[permissionAgent]);
+ await client.query('update public.profiles set get_lead_allowed=false where id=$1',[permissionAgent]);
+ await asUser(permissionAgent,sa,async()=>{
+   const result=(await client.query('select public.get_follow_up_due() result')).rows[0].result;
+   check(!result.gate_profiles.find(p=>p.id===permissionAgent).blocked,'Empty Due clears block on feed refresh');
+   check(!(await client.query('select get_lead_allowed from public.profiles where id=$1',[permissionAgent])).rows[0].get_lead_allowed,'Automatic reopening never overrides manual OFF');
+ });
+ await client.query("select set_config('leadlaju.worker_brand','',false)");
+ check((await client.query("select count(*)::int n from cron.job where jobname='leadlaju-agent-due-gate'")).rows[0].n===1,'Background sweep covers time-based Due changes');
  console.log(`PASS: ${checks} real PostgreSQL brand isolation and distribution assertions`);
 } finally { if(client) await client.end(); await pg.stop(); }

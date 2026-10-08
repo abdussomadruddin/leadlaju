@@ -24,7 +24,7 @@
     <meta name="apple-mobile-web-app-title" content="LeadLaju" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>LeadLaju - Lead Management</title>
-    <link rel="manifest" href="manifest.webmanifest?v=20261008-agent-get-lead-permission-v145" />
+    <link rel="manifest" href="manifest.webmanifest?v=20261008-agent-due-limit-v146" />
     <link rel="icon" href="assets/icon.svg?v=20260625-pwa-notifications" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="assets/apple-touch-icon.png?v=20260625-pwa-notifications" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -33,9 +33,9 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20261008-agent-get-lead-permission-v145" />
+    <link rel="stylesheet" href="styles.css?v=20261008-agent-due-limit-v146" />
     <script src="vendor/exceljs.min.js?v=4.4.0" defer></script>
-    <script src="app.js?v=20261008-agent-get-lead-permission-v145" defer></script>
+    <script src="app.js?v=20261008-agent-due-limit-v146" defer></script>
   </head>
   <body class="auth-pending">
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">
@@ -645,6 +645,11 @@
             </div>
             <span class="queue-label" id="follow-up-count">0 case</span>
           </div>
+          <form id="follow-up-limit-form" class="panel follow-up-limit-form" hidden>
+            <div><strong>Had Follow Up Due untuk GET LEAD</strong><p>Lebih daripada had ini: lead baharu disekat sehingga Follow Up Due kosong.</p><small id="follow-up-limit-blocked" role="status"></small></div>
+            <label>Had lead<input id="follow-up-limit-input" type="number" min="1" max="100000" value="50" required /></label>
+            <button type="submit" class="primary-button">Simpan had</button>
+          </form>
           <div class="table-card follow-up-due-card">
             <div class="follow-up-sections" role="group" aria-label="Section Follow Up">
               <button type="button" data-follow-up-section="new" aria-pressed="false">New Lead <b></b></button>
@@ -1190,6 +1195,14 @@
       </div>
     </div>
 
+    <div class="modal-backdrop" id="follow-up-block-modal" aria-hidden="true">
+      <div class="modal availability-confirmation-card" role="dialog" aria-modal="true" aria-labelledby="follow-up-block-title">
+        <div class="modal-heading"><div><span class="section-kicker">Lead baharu disekat</span><h2 id="follow-up-block-title">Selesaikan Follow Up Due dahulu</h2></div></div>
+        <p>Tunggakan anda telah melebihi had yang ditetapkan. Sila follow up atau kemas kini semua lead tertunggak dalam Follow Up Due sehingga kosong sebelum mengambil lead baharu.</p>
+        <button class="primary-button full" id="open-blocked-follow-up" type="button">Buka Follow Up Due</button>
+        <button class="secondary-button full" type="button" data-close-modal="follow-up-block-modal">Tutup</button>
+      </div>
+    </div>
     <div class="modal-backdrop" id="lead-availability-modal" aria-hidden="true">
       <div class="modal availability-confirmation-card" role="dialog" aria-modal="true" aria-labelledby="lead-availability-title">
         <div class="modal-heading">

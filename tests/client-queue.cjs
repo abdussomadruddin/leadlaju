@@ -703,7 +703,7 @@ test('agents explicitly start and stop lead availability from the dashboard', ()
   assert.match(source, /syncPushSubscription\(true\)/);
   assert.match(source, /elements\.getLeadButton\?\.addEventListener/);
   assert.match(source, /elements\.stopLeadButton\?\.addEventListener/);
-  assert.match(source, /elements\.getLeadButton\.disabled = ready/);
+  assert.match(source, /elements\.getLeadButton\.disabled = \(ready && !user\.followUpDueBlocked\)/);
   assert.match(source, /elements\.stopLeadButton\.disabled = !ready/);
   assert.match(source, /openLeadAvailabilityConfirmation\(user\.leadReady\)/);
   const availabilityStart = source.indexOf('async function setAgentLeadAvailability(');

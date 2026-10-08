@@ -807,6 +807,7 @@ function mapProfile(row) {
     cooldownUntil: row.cooldown_until ? new Date(row.cooldown_until).getTime() : null,
     eligibleProjectIds: normalizeProjectIds(row.eligible_project_ids),
     getLeadAllowed: row.get_lead_allowed !== false,
+    followUpDueBlocked: row.follow_up_due_blocked === true,
     leadReady: Boolean(row.lead_ready),
     online: Boolean(row.presence_lease_until && new Date(row.presence_lease_until).getTime() > Date.now()),
     notificationEnabled: Boolean(row.notification_ready),
@@ -2755,7 +2756,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261008-agent-get-lead-permission-v145")
+      .register("/sw.js?v=20261008-agent-due-limit-v146")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -4097,10 +4098,6 @@ function agentSheetPayload(agent) {
 async function updateAgentPresence(online, force = false) {
   const user = getCurrentUser();
   if (!user?.id || user.role !== "agent") return false;
-  if (ready && user.getLeadAllowed === false) {
-    showToast("Akses GET LEAD ditutup", "Hubungi admin untuk mengaktifkan semula akses GET LEAD.", "error");
-    return false;
-  }
   const now = Date.now();
   if (online && !force && now - lastAgentPresenceHeartbeatAt < AGENT_PRESENCE_HEARTBEAT_MS) {
     return true;
@@ -4132,6 +4129,14 @@ async function setAgentLeadAvailability(ready) {
   if (!guardLifecycleMutation()) return false;
   const user = getCurrentUser();
   if (!user?.id || user.role !== "agent") return false;
+  if (ready && !isTeamSales() && user.getLeadAllowed === false) {
+    showToast("Akses GET LEAD ditutup", "Hubungi admin untuk mengaktifkan semula akses GET LEAD.", "error");
+    return false;
+  }
+  if (ready && !isTeamSales() && user.followUpDueBlocked) {
+    openFollowUpBlockPopup();
+    return false;
+  }
   if (ready && !isPhonePushDevice()) {
     showToast("GET LEAD hanya di telefon", "Aktifkan loceng LeadLaju pada iPhone atau Android untuk masuk giliran lead.", "error");
     return false;
@@ -4171,6 +4176,12 @@ async function setAgentLeadAvailability(ready) {
         p_ready: ready,
         p_notification_ready: Notification.permission === "granted",
       });
+      if (response.data?.blocked) {
+        user.followUpDueBlocked = true;
+        renderAgentLeadControls();
+        openFollowUpBlockPopup();
+        return false;
+      }
       if (response.error || !response.data?.ok) throw response.error || new Error(response.data?.error || "Status tidak dapat disimpan.");
       result = response.data;
     } else {
@@ -5588,7 +5599,7 @@ function renderAgentLeadControls() {
   const ready = Boolean(user.leadReady);
   elements.agentLeadControls.classList.toggle("is-ready", ready);
   elements.agentLeadControls.classList.toggle("is-stopped", !ready);
-  elements.getLeadButton.disabled = ready || user.getLeadAllowed === false;
+  elements.getLeadButton.disabled = (ready && !user.followUpDueBlocked) || user.getLeadAllowed === false;
   elements.stopLeadButton.disabled = !ready;
   elements.getLeadButton.setAttribute("aria-pressed", String(ready));
   elements.stopLeadButton.setAttribute("aria-pressed", String(!ready));
@@ -5599,6 +5610,10 @@ function renderAgentLeadControls() {
   if (user.getLeadAllowed === false) {
     elements.agentLeadStatus.textContent = "Akses GET LEAD ditutup";
     elements.agentLeadStatusMessage.textContent = "Admin telah menutup akses GET LEAD. Anda masih boleh mengurus lead sedia ada.";
+  }
+  if (user.followUpDueBlocked && user.getLeadAllowed !== false) {
+    elements.agentLeadStatus.textContent = "Lead baharu disekat: Follow Up Due";
+    elements.agentLeadStatusMessage.textContent = "Selesaikan semua Follow Up Due sehingga kosong untuk menerima lead baharu semula.";
   }
 }
 
@@ -6287,7 +6302,7 @@ function renderAgents() {
         const leadAvailabilityAction = !isTeamSales() && agent.getLeadAllowed !== false && agent.role === "agent" && agent.active && agent.approvalStatus === "approved"
           ? agent.leadReady
             ? `<button class="agent-lead-availability stop" type="button" data-agent-lead-availability="stop" data-agent-id="${agent.id}">STOP LEAD</button>`
-            : agent.online && agent.notificationEnabled
+            : !agent.followUpDueBlocked && agent.online && agent.notificationEnabled
               ? `<button class="agent-lead-availability get" type="button" data-agent-lead-availability="get" data-agent-id="${agent.id}">GET LEAD</button>`
               : ""
           : "";
@@ -6332,6 +6347,7 @@ function renderAgents() {
             <span>Lead dikendalikan <b>${agent.leadsHandled || 0}</b></span>
             <span>${projectLabel()} <b>${escapeHtml(projectNames.join(", ") || "Belum dipilih")}</b></span>
             ${!isTeamSales() && agent.role === "agent" ? `<span class="agent-get-lead-permission">Benarkan GET LEAD <button type="button" role="switch" aria-checked="${agent.getLeadAllowed !== false}" aria-label="Benarkan GET LEAD untuk ${escapeHtml(agent.name)}" class="switch ${agent.getLeadAllowed !== false ? "active" : ""}" data-agent-get-lead-permission="${escapeHtml(agent.id)}"></button></span>` : ""}
+            ${!isTeamSales() && agent.followUpDueBlocked ? '<span>Lead baharu disekat <b>Selesaikan Follow Up Due</b></span>' : ""}
           </div>
           <div class="agent-card-actions">
             ${actionButtons}
@@ -6876,6 +6892,12 @@ async function loadFollowUpDueFeed() {
   state.followUpDue = (data?.leads || []).map(normalizeFollowUpDue);
   state.followUpServerNow = data?.server_now ? new Date(data.server_now).getTime() : Date.now();
   state.followUpLoadedAt = Date.now();
+  if (Number.isInteger(data?.follow_up_due_limit) && activeBrand) activeBrand.follow_up_due_limit = data.follow_up_due_limit;
+  for (const gate of data?.gate_profiles || []) {
+    const agent = getAgent(gate.id);
+    if (agent) { agent.followUpDueBlocked = gate.blocked === true; agent.followUpDueCount = Number(gate.due_count) || 0; }
+  }
+  renderAgentLeadControls();
   return true;
 }
 
@@ -6908,8 +6930,60 @@ function followUpNavigationCount() {
   return new Set(["new", "contacted", "due"].flatMap(section => followUpSectionRows(section).map(lead => lead.id))).size;
 }
 
+function openFollowUpBlockPopup() {
+  const modal = document.querySelector("#follow-up-block-modal");
+  modal.classList.add("open");
+  modal.setAttribute("aria-hidden", "false");
+  document.querySelector("#open-blocked-follow-up").focus();
+}
+document.querySelector("#open-blocked-follow-up")?.addEventListener("click", () => {
+  closeModal(document.querySelector("#follow-up-block-modal"));
+  followUpSection = "due";
+  for (const select of [elements.followUpAgentFilter,elements.followUpProjectFilter,elements.followUpPeriodFilter]) if (select) select.value = "all";
+  switchView("follow-up-due");
+  renderFollowUpDue();
+});
+
+function renderFollowUpLimitSetting() {
+  const form = document.querySelector("#follow-up-limit-form");
+  if (!form) return;
+  form.hidden = !isAdmin() || isTeamSales();
+  if (form.hidden) return;
+  const input = document.querySelector("#follow-up-limit-input");
+  if (form.dataset.brand !== activeBrandId || document.activeElement !== input) input.value = String(activeBrand?.follow_up_due_limit || 50);
+  form.dataset.brand = activeBrandId;
+  const blocked = state.agents.filter(agent => agent.role === "agent" && agent.followUpDueBlocked);
+  document.querySelector("#follow-up-limit-blocked").textContent = blocked.length ? `${blocked.length} ejen disekat: ${blocked.map(agent => `${agent.name} (${agent.followUpDueCount || 0})`).join(", ")}` : "Tiada ejen disekat kerana tunggakan.";
+}
+
+document.querySelector("#follow-up-limit-form")?.addEventListener("submit", async event => {
+  event.preventDefault();
+  if (!isAdmin() || isTeamSales() || !guardLifecycleMutation()) return;
+  const input = document.querySelector("#follow-up-limit-input");
+  const limit = Number(input.value);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100000) { input.reportValidity(); return; }
+  if (!remoteDatabaseMode) { showToast("Sambungan server diperlukan", "Had belum disimpan.", "error"); return; }
+  const version = brandContextVersion;
+  const button = event.currentTarget.querySelector("button");
+  const finish = beginButtonFeedback(button);
+  button.disabled = true;
+  try {
+    const {data,error} = await remoteDatabaseClient.rpc("admin_set_follow_up_due_limit", {p_limit: limit});
+    if (error || !data?.ok) throw error || new Error(data?.error || "Had gagal disimpan.");
+    if (version !== brandContextVersion) return;
+    activeBrand.follow_up_due_limit = data.follow_up_due_limit;
+    await loadFollowUpDueFeed();
+    if (version !== brandContextVersion) return;
+    renderAll();
+    showToast("Had disimpan", `Lebih ${limit} Follow Up Due akan menyekat lead baharu sehingga kosong.`);
+  } catch (error) {
+    if (version === brandContextVersion) showToast("Had gagal disimpan", error.message || "Cuba lagi.", "error");
+  } finally { finish(); button.disabled = false; }
+});
+
 function renderFollowUpDue() {
   if (!elements.followUpDueList) return;
+  renderFollowUpLimitSetting();
   const rows = Array.isArray(state.followUpDue) ? state.followUpDue : [];
   const sectionRows = followUpSectionRows(followUpSection);
   elements.followUpDueList.dataset.section = followUpSection;

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync('app.js', 'utf8');
-const helpers = source.slice(source.indexOf('function followUpSectionRows('), source.indexOf('function renderFollowUpDue('));
+const helpers = source.slice(source.indexOf('function followUpSectionRows('), source.indexOf('function openFollowUpBlockPopup('));
 
 test('Follow Up sections preserve owner scope and count overlapping due leads only once', () => {
   const context = {

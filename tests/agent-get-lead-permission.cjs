@@ -16,7 +16,7 @@ test('Closed permission disables only GET LEAD with a clear explanation',()=>{
   user.getLeadAllowed=true;c.renderAgentLeadControls();assert.equal(elements.getLeadButton.disabled,false);
 });
 test('GET LEAD has an early client gate and admin permission uses a server RPC',()=>{
-  assert.match(source,/if \(ready && user.getLeadAllowed === false\)/);
+  assert.match(source,/if \(ready && !isTeamSales\(\) && user.getLeadAllowed === false\)/);
   assert.match(source,/data-agent-get-lead-permission/);
   assert.match(source,/rpc\("admin_set_agent_get_lead_permission"/);
   assert.match(source,/getLeadAllowed: row.get_lead_allowed !== false/);

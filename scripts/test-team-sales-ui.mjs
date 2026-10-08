@@ -59,6 +59,9 @@ try {
     await page.locator('#master-brand-switcher').selectOption('00000000-0000-4000-8000-000000000002');
    }
    await page.waitForFunction(()=>document.body.classList.contains('team-sales-brand'));
+   await page.evaluate(()=>{switchView('follow-up-due');renderFollowUpDue();});
+   assert.equal(await page.locator('#follow-up-limit-form').isVisible(),false,'Team Sales has no Agent due limit');checks++;
+   await page.evaluate(()=>switchView('dashboard'));
    if(role!=='agent'){
     await page.locator('#team-performance-metrics .performance-metric').first().waitFor();
     assert.equal(await page.locator('#team-performance').isVisible(),true);checks++;
@@ -80,6 +83,13 @@ try {
    // This fixture bypasses only the existing PWA access modal, never production auth.
    if(role==='agent')await page.evaluate(()=>{getAgentAppAccessState=()=> 'ready';ensureAgentPushAccess=async()=>true;agentPushAccessReady=true;renderAgentAccessGate('ready');renderAll();});
    if(role==='agent'){
+    await page.evaluate(()=>{activeBrand.distribution_mode='agent';getCurrentUser().followUpDueBlocked=true;getCurrentUser().getLeadAllowed=true;renderAll();switchView('dashboard');});
+    await page.locator('#get-lead-button').click();
+    assert.equal(await page.locator('#follow-up-block-modal').getAttribute('aria-hidden'),'false');checks++;
+    await page.locator('#open-blocked-follow-up').click();
+    assert.equal(await page.evaluate(()=>followUpSection),'due');checks++;
+    assert.equal(await page.locator('#follow-up-due-view').isVisible(),true);checks++;
+    await page.evaluate(()=>{activeBrand.distribution_mode='team_sales';getCurrentUser().followUpDueBlocked=false;renderAll();switchView('dashboard');});
     const order=()=>page.evaluate(()=>[...document.querySelector('#dashboard-view').children].filter(el=>el.matches('#own-performance,.new-lead-section,#dashboard-follow-up')).map(el=>el.id||'new-leads'));
     assert.deepEqual(await order(),['own-performance','new-leads','dashboard-follow-up']);checks++;
     assert.equal(await page.locator('#own-performance').isVisible(),true);checks++;
@@ -254,6 +264,9 @@ try {
     await page.waitForFunction(()=>!document.body.classList.contains('team-sales-brand'));
     assert.equal(await page.locator('#team-performance').isVisible(),false,'Safrich has no Team report panel');checks++;
     assert.equal(await page.locator('.sales-lead-card').count(),0,'Brand switching clears Sales cards');checks++;
+    await page.evaluate(()=>{switchView('follow-up-due');renderFollowUpDue();});
+    assert.equal(await page.locator('#follow-up-limit-form').isVisible(),true);checks++;
+    assert.equal(await page.locator('#follow-up-limit-input').inputValue(),'50');checks++;
     assert.equal(await page.locator('#projects-view h2').innerText(),'Projek','Safrich retains original terminology');checks++;
     await page.evaluate(()=>{
       window.__reloadOriginal=queueRemoteReload;queueRemoteReload=()=>{};

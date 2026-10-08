@@ -3208,6 +3208,24 @@ td small {
   inset: -13px -6px;
 }
 
+.follow-up-limit-form {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.follow-up-limit-form > div { flex: 1; min-width: 0; }
+.follow-up-limit-form p { margin: 6px 0; font-size: 12px; color: var(--ink-500); }
+.follow-up-limit-form small { font-size: 11px; overflow-wrap: anywhere; }
+.follow-up-limit-form label { display: grid; gap: 5px; font-size: 12px; width: 90px; }
+.follow-up-limit-form input { width: 100%; min-width: 0; }
+@media (max-width: 600px) {
+  .follow-up-limit-form { flex-wrap: wrap; gap: 12px; padding: 12px; }
+  .follow-up-limit-form > div { flex-basis: 100%; }
+  .follow-up-limit-form button { flex: 1; }
+}
+
 .project-create-form {
   display: flex;
   gap: 9px;
