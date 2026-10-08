@@ -152,16 +152,41 @@ let editingAppointmentId = null;
 let pendingAppointmentRequestId = null;
 let remoteDatabaseClient = null;
 let pushDeviceStatus = [];
+let pushDeviceStatusRequest = null;
+let pushDeviceRefreshTimer = null;
+
+function schedulePushDeviceReportRefresh() {
+  if (!isAdmin() || !document.querySelector("#push-device-report")?.open) return;
+  window.clearTimeout(pushDeviceRefreshTimer);
+  const version = brandContextVersion;
+  pushDeviceRefreshTimer = window.setTimeout(async () => {
+    pushDeviceRefreshTimer = null;
+    // A broadcast during an in-flight read needs one fresh read afterwards,
+    // otherwise its latest receipt could be missed by request coalescing.
+    if (pushDeviceStatusRequest?.version === version) {
+      try { await pushDeviceStatusRequest.promise; } catch {}
+    }
+    if (version !== brandContextVersion) return;
+    void loadPushDeviceStatus().catch(() => {});
+  }, 180);
+}
 
 async function loadPushDeviceStatus() {
-  if (!remoteDatabaseMode || !remoteDatabaseClient) return;
+  if (!remoteDatabaseMode || !remoteDatabaseClient || !isAdmin() || !document.querySelector("#push-device-report")?.open) return;
   const version = brandContextVersion;
-  const { data, error } = await remoteDatabaseClient.rpc("get_push_device_status");
-  if (version !== brandContextVersion) return;
-  if (error) { console.warn("Push device status unavailable"); return false; }
-  pushDeviceStatus = Array.isArray(data) ? data : [];
-  if (isAdmin()) renderPushDeviceReport();
-  return true;
+  if (pushDeviceStatusRequest?.version === version) return pushDeviceStatusRequest.promise;
+  const request = {version};
+  request.promise = (async () => {
+    const { data, error } = await remoteDatabaseClient.rpc("get_push_device_status");
+    if (version !== brandContextVersion) return;
+    if (error) { console.warn("Push device status unavailable"); return false; }
+    pushDeviceStatus = Array.isArray(data) ? data : [];
+    if (isAdmin() && document.querySelector("#push-device-report")?.open) renderPushDeviceReport();
+    return true;
+  })();
+  pushDeviceStatusRequest = request;
+  try { return await request.promise; }
+  finally { if (pushDeviceStatusRequest === request) pushDeviceStatusRequest = null; }
 }
 
 function renderPushDeviceReport() {
@@ -1068,7 +1093,7 @@ function handleRemoteBroadcast(message) {
     return;
   }
   if (message?.event === "push_device_changed") {
-    void loadPushDeviceStatus().catch(() => {});
+    schedulePushDeviceReportRefresh();
     return;
   }
   if (message?.event === "follow_up_limit_changed") {

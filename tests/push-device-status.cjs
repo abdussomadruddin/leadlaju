@@ -3,6 +3,18 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
 const app=fs.readFileSync('app.js','utf8');
+test('Device report requests are admin-only, on-demand and coalesced',async()=>{
+ let admin=false,open=false,calls=0,release;
+ const gate=new Promise(resolve=>release=resolve);
+ const c=vm.createContext({console,document:{querySelector:()=>({open})},isAdmin:()=>admin,renderPushDeviceReport:()=>{},window:{clearTimeout,setTimeout}});
+ vm.runInContext('let remoteDatabaseMode=true,brandContextVersion=1,remoteDatabaseClient={rpc:()=>rpc()};',c);
+ c.rpc=async()=>{calls++;await gate;return {data:[]};};
+ vm.runInContext(app.slice(app.indexOf('let pushDeviceStatus ='),app.indexOf('function renderPushDeviceReport(')),c);
+ await c.loadPushDeviceStatus();assert.equal(calls,0);
+ admin=true;await c.loadPushDeviceStatus();assert.equal(calls,0);
+ open=true;const first=c.loadPushDeviceStatus(),second=c.loadPushDeviceStatus();
+ assert.equal(calls,1);release();await Promise.all([first,second]);
+});
 test('Device statuses separate account permission, stale receipts, tests and logout',()=>{
  const c=vm.createContext({Date});
  vm.runInContext(app.slice(app.indexOf('function pushDeviceLabel('),app.indexOf('function renderAgentPushDevices(')),c);
