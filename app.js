@@ -172,9 +172,11 @@ function renderPushDeviceReport() {
 }
 
 function pushDeviceLabel(device) {
-  if (!device.active) return device.loggedOutAt ? "Log keluar" : "Terputus";
-  if (device.checkReady === false) return "Terputus · permission tidak dibenarkan";
-  return "Sedia terima notifikasi";
+  if (!device.active || device.loggedOutAt || device.checkReady === false) return "Terputus";
+  const started = new Date(device.checkAt || 0).getTime();
+  const received = new Date(device.checkReceivedAt || 0).getTime();
+  if (started && received >= started && received-started <= 60000 && Date.now()-received < 86400000) return "Sedia terima notifikasi";
+  return started && Date.now()-started < 60000 ? "Menunggu pengesahan" : "Terputus";
 }
 
 function renderAgentPushDevices(agent) {
@@ -196,8 +198,7 @@ async function answerSilentDeviceProbe(payload) {
 
 function silentDeviceCheckLabel(device) {
   if (!device.checkAt) return "";
-  if (device.checkConfirmedAt && new Date(device.checkConfirmedAt).getTime() >= new Date(device.checkAt).getTime()) return device.checkReady ? "Semakan senyap: app respon, permission dibenarkan" : "Semakan senyap: permission tidak dibenarkan";
-  return Date.now()-new Date(device.checkAt).getTime()<15000 ? "Semakan senyap: menunggu app" : "App tidak menjawab semakan; ini tidak bermaksud push terputus.";
+  return device.checkReceivedAt && new Date(device.checkReceivedAt).getTime()>=new Date(device.checkAt).getTime() ? `Push reminder disahkan: ${formatDateTime(new Date(device.checkReceivedAt).getTime())}` : "Menunggu pengesahan push reminder daripada peranti; ejen tidak perlu tekan notifikasi.";
 }
 let remoteDatabaseMode = false;
 let monitorLastCanonicalSyncAt = null;
@@ -8926,27 +8927,17 @@ document.addEventListener("click", (event) => {
         if (version !== brandContextVersion) return;
         const agentIds = new Set(state.agents.filter(agent => agent.role === "agent").map(agent => agent.id));
         const devices = pushDeviceStatus.filter(device => agentIds.has(device.userId) && device.active);
-        let completed = 0, failed = 0;
-        for (let offset = 0; offset < devices.length; offset += 3) {
-          if (version !== brandContextVersion) return;
-          await Promise.all(devices.slice(offset, offset + 3).map(async device => {
-            try {
-              const { data, error } = await remoteDatabaseClient.rpc("admin_check_push_device", {p_subscription_id: device.id});
-              if (error || !data?.ok) failed++;
-            } catch { failed++; }
-            completed++;
-          }));
-          if (version !== brandContextVersion) return;
-          progress.textContent = `Disemak ${completed}/${devices.length} peranti aktif${failed ? ` · ${failed} semakan gagal dimulakan` : ""}. Menunggu respons app…`;
-        }
+        const { data, error } = await remoteDatabaseClient.rpc("broadcast_follow_up_reminder", {p_message: "Sila follow up lead tertunggak dan kemas kini status."});
+        if (error || !data?.ok) throw error || new Error("Reminder gagal dihantar.");
+        if (version !== brandContextVersion) return;
         await loadPushDeviceStatus();
+        progress.textContent = `Reminder dihantar untuk semakan ${devices.length} peranti aktif. Menunggu pengesahan push; ejen tidak perlu tekan notifikasi.`;
         window.setTimeout(async () => {
           if (version !== brandContextVersion || !isAdmin()) return;
           try { await loadPushDeviceStatus(); } catch {}
           if (version !== brandContextVersion) return;
-          progress.textContent = `Semakan selesai: ${devices.length} peranti aktif${failed ? ` · ${failed} semakan gagal dimulakan` : ""}. App tertutup tidak dianggap terputus; status sedia berdasarkan sambungan push direkod, bukan jaminan setiap penghantaran.`;
-        }, 15000);
-        if (!devices.length) progress.textContent = "Tiada peranti aktif untuk disemak. Semua rekod peranti dipaparkan di bawah.";
+          progress.textContent = "Semakan 60 saat selesai. Pengesahan dalam tempoh ini sahaja dikira Sedia; tiada respons dikira Terputus untuk semakan ini.";
+        }, 60000);
       } catch (error) {
         if (version === brandContextVersion) progress.textContent = error.message || "Semakan gagal. Cuba semula.";
       } finally { finish(); pushTestButton.disabled = false; }

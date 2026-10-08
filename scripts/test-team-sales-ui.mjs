@@ -286,12 +286,11 @@ try {
       switchView('dashboard');
     });
     const silentCheck=page.locator('#check-all-push-devices');
-    assert.equal(await silentCheck.innerText(),'Semak semua peranti');checks++;
+    assert.equal(await silentCheck.innerText(),'Remind Follow Up & Semak Peranti');checks++;
     assert.equal(await page.locator('[data-test-push-device]').count(),0);checks++;
     await silentCheck.click();
-    await page.waitForFunction(()=>window.__requests.some(r=>r.name==='admin_check_push_device'&&r.args.p_subscription_id==='silent-device-fixture'));
+    await page.waitForFunction(()=>window.__requests.some(r=>r.name==='broadcast_follow_up_reminder'));
     checks++;
-    await page.waitForFunction(()=>window.__requests.some(r=>r.name==='admin_check_push_device'&&r.args.p_subscription_id==='second-device-fixture'));
     assert.equal(await page.evaluate(()=>window.__requests.some(r=>r.name==='admin_check_push_device'&&r.args.p_subscription_id==='inactive-device-fixture')),false);checks++;
     assert.match(await page.locator('#push-device-report').innerText(),/Permission Agent[\s\S]*iPhone[\s\S]*Android[\s\S]*Browser/);checks++;
     assert.ok(await page.locator('#push-device-report').evaluate(el=>el.scrollWidth<=el.clientWidth));checks++;

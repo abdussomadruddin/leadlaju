@@ -383,10 +383,10 @@
         </header>
 
         <section class="view active" id="dashboard-view">
-          <div class="admin-only device-report-action"><button class="secondary-button" id="check-all-push-devices" type="button">Semak semua peranti</button></div>
+          <div class="admin-only device-report-action"><button class="secondary-button" id="check-all-push-devices" type="button">Remind Follow Up &amp; Semak Peranti</button></div>
           <dialog id="push-device-report" class="push-device-report">
             <div class="device-report-heading"><h2>Laporan peranti ejen</h2><button class="secondary-button" type="button" id="close-push-device-report">Tutup</button></div>
-            <p>Semakan senyap sahaja—tiada push ujian, bunyi atau popup kepada ejen. App tertutup masih dianggap sedia jika sambungan push aktif. Status sedia berdasarkan rekod sambungan, bukan jaminan setiap notifikasi diterima.</p>
+            <p>Reminder follow up sebenar dihantar kepada ejen brand ini. Peranti ada 60 saat untuk mengesahkan push; ejen tidak perlu tekan notifikasi. Tiada respons, logout atau endpoint ditolak dikira Terputus. Ini keputusan semakan, bukan bukti app dipadam.</p>
             <p id="push-device-report-progress" role="status"></p>
             <div id="push-device-report-content"></div>
           </dialog>
@@ -396,13 +396,6 @@
               <h2>Respon pantas, peluang lebih tinggi.</h2>
             </div>
             <div class="dashboard-actions admin-only">
-              <button class="secondary-button reminder-button" id="remind-agents-button" type="button">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
-                  <path d="M10 21h4" />
-                </svg>
-                Remind follow up
-              </button>
               <button class="secondary-button" id="manual-lead-button" type="button">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M12 5v14M5 12h14" />

@@ -533,6 +533,15 @@ try {
  check(!!received,'Phone acknowledgement records received timestamp');
  check((await client.query('select public.acknowledge_push_receipt($1) ok',[receipt])).rows[0].ok,'Receipt retry idempotent');
  check((await client.query('select device_received_at from public.push_subscriptions where id=$1',[devices[0].id])).rows[0].device_received_at.getTime()===received.getTime(),'Retry does not falsely refresh reception time');
+ await commitUser(adminA,sa,"select public.broadcast_follow_up_reminder('Follow up fixture')");
+ const checkRow=(await client.query("select id,brand_id from public.notification_outbox where user_id=$1 and payload ? 'checkStartedAt' order by id desc limit 1",[permissionAgent])).rows[0];
+ check(checkRow.brand_id===sa,'Combined reminder scoped to selected brand');
+ check((await client.query('select device_check_received_at from public.push_subscriptions where id=$1',[devices[0].id])).rows[0].device_check_received_at===null,'New check invalidates previous proof');
+ await client.query("select set_config('request.jwt.claims','{\"role\":\"service_role\"}',false)");
+ const checkToken=(await client.query('select public.issue_push_receipt($1,$2) token',[devices[0].id,checkRow.id])).rows[0].token;
+ await client.query("select set_config('request.jwt.claims','{}',false)");
+ await client.query('select public.acknowledge_push_receipt($1)',[checkToken]);
+ check(!!(await client.query('select device_check_received_at from public.push_subscriptions where id=$1',[devices[0].id])).rows[0].device_check_received_at,'Exact reminder receipt confirms latest check');
  await commitUser(permissionAgent,sa,"select public.unregister_push_subscription('receipt-phone-1')");
  check(!(await client.query('select public.acknowledge_push_receipt($1) ok',[receipt])).rows[0].ok,'Logged-out device cannot revive readiness');
  check((await client.query('select active from public.push_subscriptions where id=$1',[devices[1].id])).rows[0].active,'Logout preserves other device');
