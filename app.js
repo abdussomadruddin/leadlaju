@@ -2820,7 +2820,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261008-push-reconnect-v152")
+      .register("/sw.js?v=20261008-startup-recovery-v154")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -9568,4 +9568,8 @@ document.addEventListener("click", event => {
   runButtonActionFeedback(link, () => handleSalesContact(link.dataset.salesLead, link.dataset.salesContact, link.href))
     .catch(error => { console.error("Contact action failed", error); showToast("Tindakan belum selesai", "Semak sambungan dan cuba lagi.", "error"); });
 });
-bootstrap();
+bootstrap().catch((error) => {
+  console.error("Startup recovery", error);
+  showLogin();
+  elements.loginError.textContent = "Aplikasi tidak dapat dimuatkan sementara. Cuba log masuk semula; sesi dan data tidak dipadam.";
+});
