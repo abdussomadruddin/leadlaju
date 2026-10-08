@@ -421,5 +421,33 @@ try {
  check((await client.query('select count(*)::int n from net.test_requests')).rows[0].n===wakesBefore+1,'New lead immediately queues trusted worker HTTP without a timer');
  await client.query("insert into public.notification_outbox(brand_id,user_id,notification_type,dedupe_key,payload) values($1,$2,'sales_due_daily','due-no-wake-fixture','{}')",[sa,agentA]);
  check((await client.query('select count(*)::int n from net.test_requests')).rows[0].n===wakesBefore+1,'Scheduled reminder does not trigger New lead wake');
+ const permissionAgent='10000000-0000-4000-8000-000000000099';
+ await client.query("insert into auth.users(id,email) values($1,'permission@example.test')",[permissionAgent]);
+ await client.query("insert into public.profiles(id,name,email,role,approval_status,active,brand_id) values($1,'Permission Agent','permission@example.test','agent','approved',true,$2)",[permissionAgent,sa]);
+ await client.query("insert into public.agent_availability(agent_id,brand_id,lead_ready) values($1,$2,true)",[permissionAgent,sa]);
+ await asUser(adminA,sa,async()=>{
+   const result=(await client.query('select public.admin_set_agent_get_lead_permission($1,false) result',[permissionAgent])).rows[0].result;
+   check(result.ok && !result.get_lead_allowed,'Admin can close GET LEAD permission');
+   const p=(await client.query('select active,get_lead_allowed from public.profiles where id=$1',[permissionAgent])).rows[0];
+   check(p.active && !p.get_lead_allowed,'Closing GET LEAD preserves account access');
+   check(!(await client.query('select lead_ready from public.agent_availability where agent_id=$1',[permissionAgent])).rows[0].lead_ready,'Closing GET LEAD stops queue readiness');
+   await client.query('select public.admin_set_agent_get_lead_permission($1,true)',[permissionAgent]);
+   check(!(await client.query('select lead_ready from public.agent_availability where agent_id=$1',[permissionAgent])).rows[0].lead_ready,'Reopening permission does not auto-enable GET LEAD');
+ });
+ await rejects(()=>asUser(permissionAgent,sa,()=>client.query('select public.admin_set_agent_get_lead_permission($1,true)',[permissionAgent])),'Agent cannot grant own GET LEAD permission');
+ await rejects(()=>asUser(adminB,sb,()=>client.query('select public.admin_set_agent_get_lead_permission($1,false)',[permissionAgent])),'Other brand admin cannot close GET LEAD');
+ await client.query('update public.profiles set get_lead_allowed=false where id=$1',[permissionAgent]);
+ await rejects(()=>asUser(permissionAgent,sa,()=>client.query('select public.set_agent_availability(true,true)')),'Closed GET LEAD rejects direct self RPC');
+ await client.query('update public.agent_availability set lead_ready=true where agent_id=$1',[permissionAgent]);
+ check(!(await client.query('select lead_ready from public.agent_availability where agent_id=$1',[permissionAgent])).rows[0].lead_ready,'Readiness trigger cannot be bypassed by a direct write');
+ await asUser(adminA,sa,async()=>{
+   const dashboard=(await client.query('select public.get_dashboard_state() result')).rows[0].result;
+   check(dashboard.profiles.find(p=>p.id===permissionAgent).get_lead_allowed===false,'Dashboard publishes authoritative permission');
+   await client.query('select public.admin_set_all_agent_lead_readiness(true)');
+   check(!(await client.query('select lead_ready from public.agent_availability where agent_id=$1',[permissionAgent])).rows[0].lead_ready,'Bulk GET LEAD skips closed permission');
+ });
+ check((await client.query("select pg_get_functiondef('leadlaju_private.dispatch_available_leads_agent_brand(timestamptz)'::regprocedure) body")).rows[0].body.includes('p.active and p.get_lead_allowed'),'Agent dispatcher requires GET LEAD permission');
+ const salesOwner=(await client.query('select assigned_agent_id from public.leads where id=$1',[salesFixture])).rows[0].assigned_agent_id;
+ await rejects(()=>asUser(master,sales,()=>client.query('select public.admin_set_agent_get_lead_permission($1,false)',[salesOwner])),'Sales account cannot use Agent permission RPC');
  console.log(`PASS: ${checks} real PostgreSQL brand isolation and distribution assertions`);
 } finally { if(client) await client.end(); await pg.stop(); }

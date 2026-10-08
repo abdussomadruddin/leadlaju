@@ -34,6 +34,7 @@ try {
     },rpc:async(name,args={})=>{
       const stamp=await options.global.fetch('/sales-stamp');const brand=(await stamp.json()).brand||a;window.__requests.push({name,args,brand});
       if(name==='master_manage_brand')return {data:{ok:true,brands}};
+      if(name==='admin_set_agent_get_lead_permission')return {data:{ok:true,get_lead_allowed:args.p_allowed}};
       if(name==='get_dashboard_state'){
         if(window.__dashboardTimeouts-->0)return {error:{code:'57014',message:'canceling statement due to statement timeout'}};
         return {data:{profiles:[profile],projects:[],leads:brand===b?leads:[],appointments:[],activities:[],events:[],server_now:new Date().toISOString()}};
@@ -254,6 +255,21 @@ try {
     assert.equal(await page.locator('#team-performance').isVisible(),false,'Safrich has no Team report panel');checks++;
     assert.equal(await page.locator('.sales-lead-card').count(),0,'Brand switching clears Sales cards');checks++;
     assert.equal(await page.locator('#projects-view h2').innerText(),'Projek','Safrich retains original terminology');checks++;
+    await page.evaluate(()=>{
+      window.__reloadOriginal=queueRemoteReload;queueRemoteReload=()=>{};
+      state.agents.push({id:'permission-fixture',name:'Permission Agent',role:'agent',active:true,approvalStatus:'approved',getLeadAllowed:true,leadReady:true,phone:'',email:'',eligibleProjectIds:[]});
+      switchView('agents');renderAgents();
+    });
+    const permissionSwitch=page.locator('[data-agent-get-lead-permission="permission-fixture"]');
+    assert.equal(await permissionSwitch.getAttribute('aria-checked'),'true');checks++;
+    await permissionSwitch.click();
+    await page.waitForFunction(()=>document.querySelector('[data-agent-get-lead-permission="permission-fixture"]')?.getAttribute('aria-checked')==='false');
+    assert.equal(await page.evaluate(()=>getAgent('permission-fixture').active),true);checks++;
+    assert.equal(await page.evaluate(()=>getAgent('permission-fixture').leadReady),false);checks++;
+    await permissionSwitch.click();
+    await page.waitForFunction(()=>document.querySelector('[data-agent-get-lead-permission="permission-fixture"]')?.getAttribute('aria-checked')==='true');
+    assert.equal(await page.evaluate(()=>getAgent('permission-fixture').leadReady),false);checks++;
+    await page.evaluate(()=>{queueRemoteReload=window.__reloadOriginal;});
     assert.equal(await page.locator('#project-name').getAttribute('placeholder'),'Nama projek');checks++;
     await page.evaluate(()=>switchView('performance'));await page.waitForFunction(()=>document.querySelector('#performance-cards').children.length>0);
     await page.locator('#performance-cards summary').first().click();

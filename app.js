@@ -806,6 +806,7 @@ function mapProfile(row) {
     createdAt: row.created_at ? new Date(row.created_at).getTime() : null,
     cooldownUntil: row.cooldown_until ? new Date(row.cooldown_until).getTime() : null,
     eligibleProjectIds: normalizeProjectIds(row.eligible_project_ids),
+    getLeadAllowed: row.get_lead_allowed !== false,
     leadReady: Boolean(row.lead_ready),
     online: Boolean(row.presence_lease_until && new Date(row.presence_lease_until).getTime() > Date.now()),
     notificationEnabled: Boolean(row.notification_ready),
@@ -2754,7 +2755,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261008-latest-lead-activity-v144")
+      .register("/sw.js?v=20261008-agent-get-lead-permission-v145")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -4096,6 +4097,10 @@ function agentSheetPayload(agent) {
 async function updateAgentPresence(online, force = false) {
   const user = getCurrentUser();
   if (!user?.id || user.role !== "agent") return false;
+  if (ready && user.getLeadAllowed === false) {
+    showToast("Akses GET LEAD ditutup", "Hubungi admin untuk mengaktifkan semula akses GET LEAD.", "error");
+    return false;
+  }
   const now = Date.now();
   if (online && !force && now - lastAgentPresenceHeartbeatAt < AGENT_PRESENCE_HEARTBEAT_MS) {
     return true;
@@ -5583,7 +5588,7 @@ function renderAgentLeadControls() {
   const ready = Boolean(user.leadReady);
   elements.agentLeadControls.classList.toggle("is-ready", ready);
   elements.agentLeadControls.classList.toggle("is-stopped", !ready);
-  elements.getLeadButton.disabled = ready;
+  elements.getLeadButton.disabled = ready || user.getLeadAllowed === false;
   elements.stopLeadButton.disabled = !ready;
   elements.getLeadButton.setAttribute("aria-pressed", String(ready));
   elements.stopLeadButton.setAttribute("aria-pressed", String(!ready));
@@ -5591,6 +5596,10 @@ function renderAgentLeadControls() {
   elements.agentLeadStatusMessage.textContent = ready
     ? "Anda berada dalam giliran agihan. STOP LEAD hanya menghentikan lead baharu."
     : "Tekan GET LEAD untuk masuk giliran agihan lead baharu.";
+  if (user.getLeadAllowed === false) {
+    elements.agentLeadStatus.textContent = "Akses GET LEAD ditutup";
+    elements.agentLeadStatusMessage.textContent = "Admin telah menutup akses GET LEAD. Anda masih boleh mengurus lead sedia ada.";
+  }
 }
 
 function updateCountdown() {
@@ -6275,7 +6284,7 @@ function renderAgents() {
         const projectNames = normalizeProjectIds(agent.eligibleProjectIds)
           .map((projectId) => state.projects.find((project) => project.id === projectId)?.name)
           .filter(Boolean);
-        const leadAvailabilityAction = !isTeamSales() && agent.role === "agent" && agent.active && agent.approvalStatus === "approved"
+        const leadAvailabilityAction = !isTeamSales() && agent.getLeadAllowed !== false && agent.role === "agent" && agent.active && agent.approvalStatus === "approved"
           ? agent.leadReady
             ? `<button class="agent-lead-availability stop" type="button" data-agent-lead-availability="stop" data-agent-id="${agent.id}">STOP LEAD</button>`
             : agent.online && agent.notificationEnabled
@@ -6322,6 +6331,7 @@ function renderAgents() {
             <span>Emel <b>${escapeHtml(agent.email)}</b></span>
             <span>Lead dikendalikan <b>${agent.leadsHandled || 0}</b></span>
             <span>${projectLabel()} <b>${escapeHtml(projectNames.join(", ") || "Belum dipilih")}</b></span>
+            ${!isTeamSales() && agent.role === "agent" ? `<span class="agent-get-lead-permission">Benarkan GET LEAD <button type="button" role="switch" aria-checked="${agent.getLeadAllowed !== false}" aria-label="Benarkan GET LEAD untuk ${escapeHtml(agent.name)}" class="switch ${agent.getLeadAllowed !== false ? "active" : ""}" data-agent-get-lead-permission="${escapeHtml(agent.id)}"></button></span>` : ""}
           </div>
           <div class="agent-card-actions">
             ${actionButtons}
@@ -7888,6 +7898,38 @@ async function deleteAgentWithLoading(agent, options = {}) {
   }
 }
 
+async function toggleAgentGetLeadPermission(agentId, button) {
+  if (!isAdmin() || isTeamSales()) return false;
+  const agent = getAgent(agentId);
+  if (!agent || agent.role !== "agent") return false;
+  if (!remoteDatabaseMode) {
+    showToast("Belum dapat disimpan", "Sambungan server diperlukan untuk menukar akses GET LEAD.", "error");
+    return false;
+  }
+  const version = brandContextVersion;
+  const allowed = agent.getLeadAllowed === false;
+  const finish = beginButtonFeedback(button);
+  button.disabled = true;
+  try {
+    const {data, error} = await remoteDatabaseClient.rpc("admin_set_agent_get_lead_permission", {p_agent_id: agentId, p_allowed: allowed});
+    if (error || !data?.ok) throw error || new Error(data?.error || "Akses tidak dapat disimpan.");
+    if (version !== brandContextVersion) return false;
+    agent.getLeadAllowed = data.get_lead_allowed;
+    if (!allowed) agent.leadReady = false;
+    saveState();
+    renderAll();
+    showToast(allowed ? "Akses GET LEAD dibuka" : "Akses GET LEAD ditutup", agent.name);
+    queueRemoteReload();
+    return true;
+  } catch (error) {
+    if (version === brandContextVersion) showToast("Akses gagal disimpan", error.message || "Cuba lagi.", "error");
+    return false;
+  } finally {
+    finish();
+    button.disabled = false;
+  }
+}
+
 async function toggleAgent(agentId) {
   if (!guardLifecycleMutation()) return false;
   const agent = getAgent(agentId);
@@ -9100,6 +9142,8 @@ elements.resetPasswordModal.addEventListener("click", (event) => {
 
 elements.agentsGrid.addEventListener("click", (event) => {
   const toggle = event.target.closest("[data-agent-toggle]");
+  const getLeadPermission = event.target.closest("[data-agent-get-lead-permission]");
+  if (getLeadPermission) toggleAgentGetLeadPermission(getLeadPermission.dataset.agentGetLeadPermission, getLeadPermission);
   const approve = event.target.closest("[data-agent-approve]");
   const reject = event.target.closest("[data-agent-reject]");
   const remove = event.target.closest("[data-agent-remove]");

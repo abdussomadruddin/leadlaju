@@ -3195,6 +3195,19 @@ td small {
   max-width: 62%;
 }
 
+.agent-card-details .agent-get-lead-permission {
+  align-items: center;
+  gap: 12px;
+  font-weight: 600;
+  min-height: 44px;
+}
+.agent-get-lead-permission .switch { flex-shrink: 0; }
+.agent-get-lead-permission .switch::before {
+  content: "";
+  position: absolute;
+  inset: -13px -6px;
+}
+
 .project-create-form {
   display: flex;
   gap: 9px;
