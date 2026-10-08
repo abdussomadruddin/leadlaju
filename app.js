@@ -2761,7 +2761,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261008-follow-up-agent-count-v148")
+      .register("/sw.js?v=20261008-performance-due-percent-v149")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -7172,6 +7172,15 @@ function performanceRateLabel(row) {
   return rate === null ? "—" : `${(rate * 100).toFixed(1)}%`;
 }
 
+function performanceDueSummary(row) {
+  const projectId = elements.performanceProject?.value || "all";
+  const projectName = state.projects.find(project => project.id === projectId)?.name;
+  const total = state.leads.filter(lead => lead.assignedAgentId === row.agent_id &&
+    (projectId === "all" || (projectName && lead.project === projectName))).length;
+  const due = Number(row.due_now) || 0;
+  return { total, due, percent: total ? `${(due / total * 100).toFixed(1)}%` : "—" };
+}
+
 function performanceMetric(label, value, detail = "", icon = "lead") {
   const action = isTeamSales() ? ({ New: "new", Contacted: "contacted", "Total Contacted": "contacted", "Follow Up": "group_follow_up", Potential: "potential", "Cancelled / Rejected": "group_cancelled_rejected", Client: "client", "Follow Up Due": "due" })[label] : null;
   const icons = {
@@ -7392,13 +7401,14 @@ function renderPerformanceReport() {
     <td>${Number(row.total_contacted) || 0}</td><td>${Number(row.total_follow_up) || 0}</td>
     <td>${Number(row.total_potential) || 0}</td><td>${Number(row.total_cancelled_rejected) || 0}</td><td>${Number(row.total_client) || 0}</td>
     ${isTeamSales() ? "" : `<td>${performanceRateLabel(row)} <small>(${Number(row.within_five) || 0}/${Number(row.assignments) || 0})</small></td>`}
-    <td>${Number(row.appointments) || 0}</td><td>${Number(row.show_ups) || 0}</td><td>${Number(row.due_now) || 0}</td>
+    <td>${Number(row.appointments) || 0}</td><td>${Number(row.show_ups) || 0}</td><td>${Number(row.due_now) || 0} <small>(${performanceDueSummary(row).percent} daripada ${performanceDueSummary(row).total} total lead semasa)</small></td>
   </tr>`).join("") : `<tr><td colspan="11">${systemWorkerText("Tiada ejen untuk penapis ini.")}</td></tr>`;
   const cardMetric = (label, value) => `<div><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></div>`;
   const cardSummary = (name, meta) => `<summary><span class="performance-card-name">${escapeHtml(name)}</span><span class="performance-card-summary">${escapeHtml(meta)}</span><span class="performance-card-toggle"><span class="when-closed">Butiran</span><span class="when-open">Tutup</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></span></summary>`;
   elements.performanceCards.innerHTML = rows.length ? rows.map((row) => `<details class="performance-card">
-    ${cardSummary(row.agent_name, `${Number(row.assignments) || 0} lead · ${Number(row.due_now) || 0} due`)}
+    ${cardSummary(row.agent_name, `${Number(row.assignments) || 0} lead · ${Number(row.due_now) || 0} due (${performanceDueSummary(row).percent})`)}
     <div class="performance-card-content">
+    <div class="performance-card-grid">${cardMetric("Total Leads semasa", performanceDueSummary(row).total)}${cardMetric("Follow Up Due", performanceDueSummary(row).due)}${cardMetric("Belum follow up (%)", performanceDueSummary(row).percent)}</div>
     <div class="performance-card-grid">${cardMetric("Total Contacted", Number(row.total_contacted) || 0)}${cardMetric("Total Follow Up", Number(row.total_follow_up) || 0)}${cardMetric("Total Potential", Number(row.total_potential) || 0)}${cardMetric("Total Cancelled & Rejected", Number(row.total_cancelled_rejected) || 0)}${cardMetric("Total Client", Number(row.total_client) || 0)}${isTeamSales() ? "" : cardMetric("CALL NOW ≤5 min", performanceRateLabel(row))}${cardMetric("Appointment", Number(row.appointments) || 0)}${cardMetric("Show Up", Number(row.show_ups) || 0)}</div>
     <button type="button" class="performance-agent-link" data-performance-agent="${escapeHtml(row.agent_id)}">Lihat trend mingguan</button>
     </div>
