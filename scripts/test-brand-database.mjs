@@ -492,5 +492,44 @@ try {
  });
  await client.query("select set_config('leadlaju.worker_brand','',false)");
  check((await client.query("select count(*)::int n from cron.job where jobname='leadlaju-agent-due-gate'")).rows[0].n===1,'Background sweep covers time-based Due changes');
+ // Per-device receipts: providers accepting a push are not phone acknowledgements.
+ const devices=(await client.query("insert into public.push_subscriptions(brand_id,user_id,endpoint,p256dh,auth,user_agent) values($1,$2,'receipt-phone-1','secret-key','secret-auth','iPhone'),($1,$2,'receipt-phone-2','secret-key','secret-auth','Android Mobile') returning id",[sa,permissionAgent])).rows;
+ await commitUser(permissionAgent,sa,'select public.touch_push_device($1,true)',['receipt-phone-1']);
+ await asUser(adminA,sa,async()=>{
+  const status=(await client.query('select public.get_push_device_status() data')).rows[0].data;
+  check(status.some(d=>d.id===devices[0].id && d.installed && !d.receivedAt),'Installed observation does not claim delivery');
+  check(!JSON.stringify(status).includes('secret-key') && !JSON.stringify(status).includes('receipt-phone-1'),'Status never exposes endpoint or push keys');
+ });
+ await asUser(agentB,sb,async()=>{
+  const status=(await client.query('select public.get_push_device_status() data')).rows[0].data;
+  check(!status.some(d=>d.id===devices[0].id),'Other brand cannot read device status');
+  check(!(await client.query("select public.touch_push_device('receipt-phone-1',true) touched")).rows[0].touched,'Other owner cannot update device');
+ });
+ await rejects(()=>asUser(permissionAgent,sa,()=>client.query('select public.admin_check_push_device($1)',[devices[0].id])),'Agent cannot initiate admin device check');
+ await rejects(()=>asUser(adminB,sb,()=>client.query('select public.admin_check_push_device($1)',[devices[0].id])),'Cross-brand check denied');
+ const beforeProbe=(await client.query('select count(*)::int n from public.notification_outbox')).rows[0].n;
+ await commitUser(adminA,sa,'select public.admin_check_push_device($1)',[devices[0].id]);
+ check((await client.query('select count(*)::int n from public.notification_outbox')).rows[0].n===beforeProbe,'Silent check never enqueues any push');
+ const challenge=(await client.query('select challenge from leadlaju_private.push_device_checks where subscription_id=$1',[devices[0].id])).rows[0].challenge;
+ await asUser(agentB,sb,async()=>{check(!(await client.query('select public.answer_push_device_probe($1,$2,true,true) ok',[challenge,'receipt-phone-1'])).rows[0].ok,'Other owner cannot acknowledge probe');});
+ await commitUser(permissionAgent,sa,'select public.answer_push_device_probe($1,$2,true,true)',[challenge,'receipt-phone-1']);
+ check((await client.query('select device_check_ready from public.push_subscriptions where id=$1',[devices[0].id])).rows[0].device_check_ready,'Own app can silently confirm permission');
+ const testOutbox=(await client.query("insert into public.notification_outbox(brand_id,user_id,notification_type,payload,sent_at) values($1,$2,'receipt-fixture','{}',now()) returning id",[sa,permissionAgent])).rows[0];
+ await client.query("select set_config('request.jwt.claims','{\"role\":\"service_role\"}',false)");
+ const receipt=(await client.query('select public.issue_push_receipt($1,$2) token',[devices[0].id,testOutbox.id])).rows[0].token;
+ check(receipt.length===64,'Receipt capability is 256-bit');
+ await client.query("select set_config('request.jwt.claims','{}',false)");
+ await client.query('begin');
+ await client.query('set local role anon');
+ check(!(await client.query("select public.acknowledge_push_receipt(repeat('0',64)) ok")).rows[0].ok,'Unknown receipt denied');
+ check((await client.query('select public.acknowledge_push_receipt($1) ok',[receipt])).rows[0].ok,'Anonymous phone can acknowledge exact delivery capability');
+ await client.query('commit');
+ const received=(await client.query('select device_received_at from public.push_subscriptions where id=$1',[devices[0].id])).rows[0].device_received_at;
+ check(!!received,'Phone acknowledgement records received timestamp');
+ check((await client.query('select public.acknowledge_push_receipt($1) ok',[receipt])).rows[0].ok,'Receipt retry idempotent');
+ check((await client.query('select device_received_at from public.push_subscriptions where id=$1',[devices[0].id])).rows[0].device_received_at.getTime()===received.getTime(),'Retry does not falsely refresh reception time');
+ await commitUser(permissionAgent,sa,"select public.unregister_push_subscription('receipt-phone-1')");
+ check(!(await client.query('select public.acknowledge_push_receipt($1) ok',[receipt])).rows[0].ok,'Logged-out device cannot revive readiness');
+ check((await client.query('select active from public.push_subscriptions where id=$1',[devices[1].id])).rows[0].active,'Logout preserves other device');
  console.log(`PASS: ${checks} real PostgreSQL brand isolation and distribution assertions`);
 } finally { if(client) await client.end(); await pg.stop(); }

@@ -151,6 +151,47 @@ let reschedulingAppointmentId = null;
 let editingAppointmentId = null;
 let pendingAppointmentRequestId = null;
 let remoteDatabaseClient = null;
+let pushDeviceStatus = [];
+
+async function loadPushDeviceStatus() {
+  if (!remoteDatabaseMode || !remoteDatabaseClient) return;
+  const version = brandContextVersion;
+  const { data, error } = await remoteDatabaseClient.rpc("get_push_device_status");
+  if (version !== brandContextVersion) return;
+  if (error) { console.warn("Push device status unavailable"); return; }
+  pushDeviceStatus = Array.isArray(data) ? data : [];
+  if (isAdmin()) renderAgents();
+}
+
+function pushDeviceLabel(device) {
+  if (!device.active) return device.loggedOutAt ? "Log keluar" : "Terputus";
+  const receipt = device.receivedAt ? new Date(device.receivedAt).getTime() : 0;
+  if (receipt && Date.now() - receipt <= 86400000) return "Penerimaan disahkan";
+  return receipt ? "Belum disahkan terkini" : "Belum disahkan";
+}
+
+function renderAgentPushDevices(agent) {
+  const devices = pushDeviceStatus.filter(device => device.userId === agent.id);
+  return `<div class="agent-push-devices"><small>Notifikasi peranti · bukan status akaun</small>${devices.length ? devices.map(device => `<div><strong>${escapeHtml(device.device)} · ${escapeHtml(pushDeviceLabel(device))}</strong><small>${device.installed ? "App dipasang ketika semakan terakhir" : "Pemasangan app belum disahkan"}${device.seenAt ? ` · ${formatDateTime(new Date(device.seenAt).getTime())}` : ""}</small><small>${device.receivedAt ? `Penerimaan terakhir: ${formatDateTime(new Date(device.receivedAt).getTime())}` : "Belum ada pengesahan daripada telefon."}</small><small>${escapeHtml(silentDeviceCheckLabel(device))}</small>${device.active ? `<button class="secondary-button" type="button" data-test-push-device="${escapeHtml(device.id)}">Semak sambungan</button>` : ""}</div>`).join("") : "<p>Tiada sambungan notifikasi direkod.</p>"}</div>`;
+}
+
+async function answerSilentDeviceProbe(payload) {
+  if (!remoteDatabaseMode || !payload?.challenge || !("serviceWorker" in navigator)) return;
+  const registration = await navigator.serviceWorker.getRegistration();
+  const subscription = await registration?.pushManager?.getSubscription();
+  if (!subscription?.endpoint) return;
+  await remoteDatabaseClient.rpc("answer_push_device_probe", {
+    p_challenge: payload.challenge, p_endpoint: subscription.endpoint,
+    p_installed: isInstalledApp() && isPhonePushDevice(),
+    p_permission: "Notification" in window && Notification.permission === "granted",
+  });
+}
+
+function silentDeviceCheckLabel(device) {
+  if (!device.checkAt) return "";
+  if (device.checkConfirmedAt) return device.checkReady ? "Semakan senyap: app respon, permission dibenarkan" : "Semakan senyap: permission tidak dibenarkan";
+  return Date.now()-new Date(device.checkAt).getTime()<15000 ? "Semakan senyap: menunggu app" : "Semakan senyap: belum dapat disahkan (app mungkin tertutup/offline)";
+}
 let remoteDatabaseMode = false;
 let monitorLastCanonicalSyncAt = null;
 let monitorSyncFailed = false;
@@ -962,6 +1003,7 @@ async function loadRemoteState(userId, attempt = 0) {
     await loadFollowUpDueFeed();
     if (requestBrandVersion !== brandContextVersion) return false;
     monitorLastCanonicalSyncAt = Date.now();
+    void loadPushDeviceStatus().catch(() => {});
     monitorSyncFailed = false;
     saveState();
     if (shouldDetectNewLeads) {
@@ -1013,6 +1055,14 @@ async function subscribeToRemoteDatabase() {
 }
 
 function handleRemoteBroadcast(message) {
+  if (message?.event === "push_device_probe") {
+    void answerSilentDeviceProbe(message.payload).catch(() => {});
+    return;
+  }
+  if (message?.event === "push_device_changed") {
+    void loadPushDeviceStatus().catch(() => {});
+    return;
+  }
   if (message?.event === "follow_up_limit_changed") {
     loadFollowUpDueFeed().then(() => renderFollowUpDue()).catch(error => console.warn("Realtime due limit refresh failed", error));
     queueRemoteReload();
@@ -1745,6 +1795,7 @@ async function cleanUpPushAfterLogout() {
 }
 
 function logout() {
+  pushDeviceStatus = [];
   const user = getCurrentUser();
   if (user?.role === "agent") {
     user.leadReady = false;
@@ -2761,7 +2812,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261008-performance-due-percent-v149")
+      .register("/sw.js?v=20261008-push-device-status-v150")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -2844,7 +2895,10 @@ async function performPushSubscriptionSync(force = false) {
 
   const storageKey = "leadlaju-push-subscription-owner";
   let fingerprint = `${user.id}:${endpoint}:${subscriptionPayload.keys?.p256dh || ""}:${user.email}:${user.active}`;
-  if (!force && localStorage.getItem(storageKey) === fingerprint) return true;
+  if (!force && localStorage.getItem(storageKey) === fingerprint) {
+    if (remoteDatabaseMode) await remoteDatabaseClient.rpc("touch_push_device", {p_endpoint: endpoint, p_installed: isInstalledApp() && isPhonePushDevice()}).catch(() => {});
+    return true;
+  }
 
   let pushed;
   if (remoteDatabaseMode) {
@@ -2894,6 +2948,7 @@ async function performPushSubscriptionSync(force = false) {
   }
 
   if (getCurrentUser()?.id !== user.id) return false;
+  if (pushed && remoteDatabaseMode) await remoteDatabaseClient.rpc("touch_push_device", {p_endpoint: endpoint, p_installed: isInstalledApp() && isPhonePushDevice()}).catch(() => {});
   if (pushed) localStorage.setItem(storageKey, fingerprint);
   return pushed;
 }
@@ -6357,6 +6412,7 @@ function renderAgents() {
           <div class="agent-card-actions">
             ${actionButtons}
           </div>
+          ${remoteDatabaseMode && !isPendingAgent ? renderAgentPushDevices(agent) : ""}
         </article>`;
       },
     )
@@ -7269,6 +7325,7 @@ async function loadMasterManagement() {
 }
 
 function clearBrandOperationalState() {
+  pushDeviceStatus = [];
   salesLeadDrilldown = null;
   salesPerformanceRange = null;
   const current = getCurrentUser();
@@ -8834,6 +8891,26 @@ window.addEventListener("popstate", (event) => {
   switchView(event.state?.leadLajuView || getRequestedStartView(), { historyMode: "none" });
 });
 document.addEventListener("click", (event) => {
+  const pushTestButton = event.target.closest("[data-test-push-device]");
+  if (pushTestButton) {
+    if (!isAdmin() || !remoteDatabaseMode || pushTestButton.disabled) return;
+    const version = brandContextVersion;
+    const finish = beginButtonFeedback(pushTestButton);
+    pushTestButton.disabled = true;
+    void (async () => {
+      try {
+        const { data, error } = await remoteDatabaseClient.rpc("admin_check_push_device", {p_subscription_id: pushTestButton.dataset.testPushDevice});
+        if (error || !data?.ok) throw error || new Error("Semakan gagal");
+        if (version !== brandContextVersion) return;
+        showToast("Semakan senyap dimulakan", data.active && data.accountEligible ? "Menunggu app yang sedang bersambung. Tiada push, bunyi atau popup dihantar kepada ejen." : "Sambungan atau akses akaun tidak aktif; tiada notifikasi dihantar.");
+        await loadPushDeviceStatus();
+        window.setTimeout(() => { if (version === brandContextVersion) void loadPushDeviceStatus().catch(() => {}); }, 15000);
+      } catch (error) {
+        if (version === brandContextVersion) showToast("Semakan gagal", error.message || "Cuba lagi", "error");
+      } finally { finish(); pushTestButton.disabled = false; }
+    })();
+    return;
+  }
   if (!isMobileSidebarViewport() || !elements.sidebar.classList.contains("open")) return;
   if (Date.now() - mobileSidebarLastGestureAt < 500) return;
   if (elements.sidebar.contains(event.target) || elements.mobileMenu.contains(event.target) || elements.mobileMoreTab.contains(event.target)) return;

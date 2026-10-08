@@ -38,6 +38,14 @@ Deno.serve(async (request) => {
   if (error) return json({ ok: false, error: error.message }, 500);
 
   const groups = new Map<number, ClaimedRow[]>();
+  const withReceipt = async (notification: string, row: ClaimedRow, outboxId: number) => {
+    try {
+    const { data: token, error } = await admin.rpc("issue_push_receipt", { p_subscription_id: row.subscription_id, p_outbox_id: outboxId });
+    // Receipt infrastructure must never prevent an operational push being sent.
+    if (error || !token) return notification;
+    return JSON.stringify({ ...JSON.parse(notification), receiptToken: token });
+    } catch { return notification; }
+  };
   for (const row of (data || []) as ClaimedRow[]) {
     groups.set(row.outbox_id, [...(groups.get(row.outbox_id) || []), row]);
   }
@@ -116,7 +124,7 @@ Deno.serve(async (request) => {
         if (!row.endpoint || !row.p256dh || !row.auth_secret) continue;
         try {
           if (!await canDeliver()) { cancelled = true; break; }
-          await webpush.sendNotification({ endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth_secret } }, notification(), { TTL: first.notification_type === "bulletin" ? 86400 : 300, urgency: first.notification_type === "bulletin" ? "normal" : "high" });
+          await webpush.sendNotification({ endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth_secret } }, await withReceipt(notification(), row, outboxId), { TTL: first.notification_type === "bulletin" ? 86400 : 300, urgency: first.notification_type === "bulletin" ? "normal" : "high" });
           delivered += 1;
           await admin.from("push_subscriptions").update({ last_success_at: new Date().toISOString(), failure_count: 0, updated_at: new Date().toISOString() }).eq("id", row.subscription_id);
         } catch (cause) {
@@ -183,7 +191,7 @@ Deno.serve(async (request) => {
         await webpush.sendNotification({
           endpoint: row.endpoint,
           keys: { p256dh: row.p256dh, auth: row.auth_secret },
-        }, notification, { TTL: salesLead ? 86400 : 300, urgency: "high" });
+        }, await withReceipt(notification, row, outboxId), { TTL: salesLead ? 86400 : 300, urgency: "high" });
         delivered += 1;
         await admin.from("push_subscriptions").update({
           last_success_at: new Date().toISOString(), failure_count: 0, updated_at: new Date().toISOString(),

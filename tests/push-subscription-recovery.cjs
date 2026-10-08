@@ -9,10 +9,10 @@ function fixture({errors=[conflict,null], unsubscribe=true, replacement='new', d
   const calls=[], stored=new Map(); let removals=0, subscriptions=0;
   let user={id:'sales-owner',active:true,email:'test@invalid'};
   const sub=endpoint=>({endpoint,toJSON:()=>({endpoint,keys:{p256dh:'fixture-key',auth:'fixture-auth'}}),unsubscribe:async()=>{removals++;return unsubscribe;}});
-  const context=vm.createContext({Notification:{permission:'granted'},navigator:{userAgent:'iPhone'},isPushSupported:()=>true,getCurrentUser:()=>user,
+  const context=vm.createContext({Notification:{permission:'granted'},navigator:{userAgent:'iPhone'},isPushSupported:()=>true,isInstalledApp:()=>true,isPhonePushDevice:()=>true,getCurrentUser:()=>user,
     registerServiceWorker:async()=>({pushManager:{getSubscription:async()=>sub('old'),subscribe:async()=>{subscriptions++;return sub(replacement);}}}),
     WEB_PUSH_PUBLIC_KEY:'fixture',urlBase64ToUint8Array:()=>[],remoteDatabaseMode:true,
-    remoteDatabaseClient:{rpc:async(name,args)=>{calls.push({name,args});if(delay)await new Promise(r=>setTimeout(r,delay));return {error:errors[calls.length-1],data:{ok:true}};}},
+    remoteDatabaseClient:{rpc:async(name,args)=>{if(name==='touch_push_device')return {data:true};calls.push({name,args});if(delay)await new Promise(r=>setTimeout(r,delay));return {error:errors[calls.length-1],data:{ok:true}};}},
     localStorage:{getItem:k=>stored.get(k),setItem:(k,v)=>stored.set(k,v),removeItem:k=>stored.delete(k)},
   });
   vm.runInContext('let pushSubscriptionSyncPromise=null;'+source,context);

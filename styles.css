@@ -5845,3 +5845,9 @@ button.performance-metric:focus-visible { outline: 3px solid #2563eb; outline-of
   .team-sales-brand .lead-log-summary .lead-log-toggle { min-height: 42px; height: 42px; border-radius: 12px; white-space: nowrap; }
   .team-sales-brand .lead-log-summary td:last-child { align-items: flex-end; padding-bottom: 10px; }
 }
+.agent-push-devices { margin-top:12px; padding-top:12px; border-top:1px solid var(--border, #e2e8f0); min-width:0; }
+.agent-push-devices > small { color:#64748b; font-size:11px; }
+.agent-push-devices > div { display:grid; gap:4px; padding:10px 0; }
+.agent-push-devices strong { font-size:12px; overflow-wrap:anywhere; }
+.agent-push-devices small, .agent-push-devices p { font-size:11px; color:#64748b; line-height:1.4; }
+.agent-push-devices button { justify-self:start; min-height:40px; padding:8px 12px; font-size:12px; }

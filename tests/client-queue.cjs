@@ -1066,7 +1066,7 @@ test('cold-start notification handoff waits for authenticated app readiness and 
   assert.match(worker, /acknowledgeLeadHandoff\(event\.data\)/);
   const leadClickBranch = click.slice(click.indexOf('await cacheLeadSnapshot(notificationData)'));
   assert.ok(leadClickBranch.indexOf('await cacheLeadSnapshot(notificationData)') < leadClickBranch.indexOf('await self.clients.openWindow(targetUrl)'));
-  assert.match(worker, /\[CACHE_NAME, LEAD_HANDOFF_CACHE\]\.includes\(key\)/);
+  assert.match(worker, /\[CACHE_NAME, LEAD_HANDOFF_CACHE, PUSH_RECEIPT_CACHE\]\.includes\(key\)/);
 });
 
 test('snapshot acceptance rejects wrong owner expiry old revision and unrelated stale notification', () => {

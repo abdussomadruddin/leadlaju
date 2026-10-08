@@ -1,13 +1,13 @@
-const CACHE_NAME = "leadlaju-pwa-v20261008-performance-due-percent-v149";
+const CACHE_NAME = "leadlaju-pwa-v20261008-push-device-status-v150";
 const LEAD_HANDOFF_CACHE = "leadlaju-notification-snapshots";
 const LEAD_HANDOFF_SCHEMA_VERSION = 1;
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20261008-performance-due-percent-v149",
+  "/styles.css?v=20261008-push-device-status-v150",
   "/vendor/exceljs.min.js?v=4.4.0",
-  "/app.js?v=20261008-performance-due-percent-v149",
-  "/manifest.webmanifest?v=20261008-performance-due-percent-v149",
+  "/app.js?v=20261008-push-device-status-v150",
+  "/manifest.webmanifest?v=20261008-push-device-status-v150",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",
   "/assets/icon-512.png",
@@ -50,7 +50,7 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((key) => ![CACHE_NAME, LEAD_HANDOFF_CACHE].includes(key)).map((key) => caches.delete(key))))
+      .then((keys) => Promise.all(keys.filter((key) => ![CACHE_NAME, LEAD_HANDOFF_CACHE, PUSH_RECEIPT_CACHE].includes(key)).map((key) => caches.delete(key))))
       .then(() => self.clients.claim()),
   );
 });
@@ -285,6 +285,38 @@ async function deliverLeadNotification(payload = {}, timing = createLeadTiming(p
   await cacheLeadSnapshot(payload);
   await broadcastLeadSnapshot(payload, timing);
   await showLeadNotification(payload, timing, { snapshotCached: true });
+  if (payload.receiptToken) await queuePushReceipt(payload.receiptToken);
+}
+
+const PUSH_RECEIPT_CACHE = "leadlaju-push-receipts-v1";
+async function queuePushReceipt(token) {
+  if (!/^[a-f0-9]{64}$/.test(String(token))) return;
+  try {
+    const cache = await caches.open(PUSH_RECEIPT_CACHE);
+    await cache.put(new Request(new URL(`/__push_receipt/${token}`, self.location.origin)), new Response(String(Date.now())));
+    await flushPushReceipts();
+  } catch { /* A missing receipt means unverified, never a delivery guarantee. */ }
+}
+async function flushPushReceipts() {
+  try {
+    const cache = await caches.open(PUSH_RECEIPT_CACHE);
+    const keys = await cache.keys();
+    if (!keys.length) return;
+    const response = await fetch("/api/runtime-config", { cache: "no-store" });
+    if (!response.ok) return;
+    const config = await response.json();
+    if (!config.supabaseUrl || !config.supabasePublishableKey) return;
+    for (const request of keys.slice(-100)) {
+      const stored = await cache.match(request);
+      if (Date.now() - Number(await stored.text()) > 2 * 86400000) { await cache.delete(request); continue; }
+      const token = new URL(request.url).pathname.split("/").pop();
+      const result = await fetch(`${config.supabaseUrl}/rest/v1/rpc/acknowledge_push_receipt`, {
+        method: "POST", headers: { apikey: config.supabasePublishableKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ p_token: token }),
+      });
+      if (result.ok) await cache.delete(request);
+    }
+  } catch { /* Retry on the next push or app-ready event. */ }
 }
 
 self.addEventListener("message", (event) => {
@@ -293,6 +325,7 @@ self.addEventListener("message", (event) => {
     return;
   }
   if (event.data?.type === "APP_READY_FOR_LEAD_ASSIGNMENT") {
+    event.waitUntil(flushPushReceipts());
     event.waitUntil(replayLeadHandoffs(event.source, String(event.data.agentId || "").trim()));
     return;
   }

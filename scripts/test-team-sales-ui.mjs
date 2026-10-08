@@ -279,6 +279,16 @@ try {
       switchView('agents');renderAgents();
     });
     const permissionSwitch=page.locator('[data-agent-get-lead-permission="permission-fixture"]');
+    await page.evaluate(()=>{
+      pushDeviceStatus=[{id:'silent-device-fixture',userId:'permission-fixture',active:true,installed:true,device:'iPhone',seenAt:new Date().toISOString(),receivedAt:null}];
+      renderAgents();
+    });
+    const silentCheck=page.locator('[data-test-push-device="silent-device-fixture"]');
+    assert.equal(await silentCheck.innerText(),'Semak sambungan');checks++;
+    assert.match(await page.locator('.agent-push-devices').last().innerText(),/Belum disahkan/);checks++;
+    await silentCheck.click();
+    await page.waitForFunction(()=>window.__requests.some(r=>r.name==='admin_check_push_device'&&r.args.p_subscription_id==='silent-device-fixture'));
+    checks++;
     assert.equal(await permissionSwitch.getAttribute('aria-checked'),'true');checks++;
     await permissionSwitch.click();
     await page.waitForFunction(()=>document.querySelector('[data-agent-get-lead-permission="permission-fixture"]')?.getAttribute('aria-checked')==='false');
