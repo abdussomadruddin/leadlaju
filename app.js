@@ -197,11 +197,12 @@ function renderPushDeviceReport() {
 }
 
 function pushDeviceLabel(device) {
-  if (!device.active || device.loggedOutAt || device.checkReady === false) return "Terputus";
+  if (!device.active || device.loggedOutAt) return "Terputus";
+  if (device.checkReady === false) return "Belum disahkan";
   const started = new Date(device.checkAt || 0).getTime();
   const received = new Date(device.checkReceivedAt || 0).getTime();
   if (started && received >= started && received-started <= 60000 && Date.now()-received < 86400000) return "Sedia terima notifikasi";
-  return started && Date.now()-started < 60000 ? "Menunggu pengesahan" : "Terputus";
+  return "Belum disahkan";
 }
 
 function renderAgentPushDevices(agent) {
@@ -8961,7 +8962,7 @@ document.addEventListener("click", (event) => {
           if (version !== brandContextVersion || !isAdmin()) return;
           try { await loadPushDeviceStatus(); } catch {}
           if (version !== brandContextVersion) return;
-          progress.textContent = "Semakan 60 saat selesai. Pengesahan dalam tempoh ini sahaja dikira Sedia; tiada respons dikira Terputus untuk semakan ini.";
+          progress.textContent = "Semakan 60 saat selesai. Pengesahan terkini sahaja dikira Sedia; tiada respons kekal Belum disahkan. Logout atau endpoint ditolak dikira Terputus.";
         }, 60000);
       } catch (error) {
         if (version === brandContextVersion) progress.textContent = error.message || "Semakan gagal. Cuba semula.";

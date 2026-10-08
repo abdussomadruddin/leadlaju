@@ -18,13 +18,13 @@ test('Device report requests are admin-only, on-demand and coalesced',async()=>{
 test('Device statuses separate account permission, stale receipts, tests and logout',()=>{
  const c=vm.createContext({Date});
  vm.runInContext(app.slice(app.indexOf('function pushDeviceLabel('),app.indexOf('function renderAgentPushDevices(')),c);
- assert.equal(c.pushDeviceLabel({active:true}),'Terputus');
- assert.equal(c.pushDeviceLabel({active:true,receivedAt:new Date().toISOString()}),'Terputus');
+ assert.equal(c.pushDeviceLabel({active:true}),'Belum disahkan');
+ assert.equal(c.pushDeviceLabel({active:true,receivedAt:new Date().toISOString()}),'Belum disahkan');
  assert.equal(c.pushDeviceLabel({active:true,checkAt:new Date(Date.now()-1000).toISOString(),checkReceivedAt:new Date().toISOString()}),'Sedia terima notifikasi');
- assert.equal(c.pushDeviceLabel({active:true,checkAt:new Date().toISOString(),checkReceivedAt:new Date(Date.now()-1000).toISOString()}),'Menunggu pengesahan');
- assert.equal(c.pushDeviceLabel({active:true,checkAt:new Date(Date.now()-61000).toISOString()}),'Terputus');
- assert.equal(c.pushDeviceLabel({active:true,checkAt:new Date(Date.now()-90000).toISOString(),checkReceivedAt:new Date().toISOString()}),'Terputus');
- assert.equal(c.pushDeviceLabel({active:true,checkConfirmedAt:new Date().toISOString(),checkReady:false}),'Terputus');
+ assert.equal(c.pushDeviceLabel({active:true,checkAt:new Date().toISOString(),checkReceivedAt:new Date(Date.now()-1000).toISOString()}),'Belum disahkan');
+ assert.equal(c.pushDeviceLabel({active:true,checkAt:new Date(Date.now()-61000).toISOString()}),'Belum disahkan');
+ assert.equal(c.pushDeviceLabel({active:true,checkAt:new Date(Date.now()-90000).toISOString(),checkReceivedAt:new Date().toISOString()}),'Belum disahkan');
+ assert.equal(c.pushDeviceLabel({active:true,checkConfirmedAt:new Date().toISOString(),checkReady:false}),'Belum disahkan');
  assert.equal(c.pushDeviceLabel({active:false,loggedOutAt:new Date().toISOString()}),'Terputus');
  assert.equal(c.pushDeviceLabel({active:false}),'Terputus');
 });
