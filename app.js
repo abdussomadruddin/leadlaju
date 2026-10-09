@@ -2425,6 +2425,11 @@ async function runButtonActionFeedback(button, action) {
 
 function showImmediatePressFeedback(button) {
   if (!button || button.disabled || button.getAttribute("aria-disabled") === "true") return;
+  if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches && button.animate) {
+    button.getAnimations().filter(animation => animation.id === "leadlaju-press").forEach(animation => animation.cancel());
+    const press = button.animate([{scale:"1"},{scale:".965",offset:.35},{scale:"1"}], {duration:240,easing:"cubic-bezier(.22,1,.36,1)"});
+    press.id = "leadlaju-press";
+  }
   lastInteractionButton = button;
   lastInteractionAt = Date.now();
   const box = button.getBoundingClientRect();
@@ -2494,6 +2499,7 @@ function hideLifecycleSyncOverlay() {
   window.clearTimeout(lifecycleHideTimer);
   const reveal = () => {
     if (presentationVersion !== lifecyclePresentationVersion) return;
+    if (elements.lifecycleSyncOverlay.classList.contains("visible")) animateViewEntrance(document.getElementById(`${activeView}-view`));
     elements.lifecycleSyncOverlay.classList.remove("visible");
     elements.lifecycleSyncOverlay.setAttribute("aria-hidden", "true");
     lifecycleHideTimer = window.setTimeout(() => {
@@ -3034,7 +3040,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261009-cache-first-v155")
+      .register("/sw.js?v=20261009-smooth-motion-v156")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -7840,6 +7846,20 @@ const viewTitles = {
 
 const primaryMobileViews = new Set(["dashboard", "leads", "follow-up-due", "appointments"]);
 
+function animateViewEntrance(view) {
+  if (!view || !view.animate || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const targets = [view,...view.querySelectorAll(".panel-heading, .section-heading, .stat-card, .performance-metric, .sales-lead-card, .agent-card, .new-lead-section, tbody > tr")];
+  targets.slice(0,13).forEach((target,index) => {
+    if (!target.getClientRects().length) return;
+    target.getAnimations().filter(animation => animation.id === "leadlaju-entrance").forEach(animation => animation.cancel());
+    const entrance = target.animate(
+      [{opacity:index ? .88 : .97,translate:`0 ${index ? 9 : 3}px`},{opacity:1,translate:"0 0"}],
+      {duration:index ? 360 : 240,delay:Math.min(index*12,96),easing:"cubic-bezier(.22,1,.36,1)"},
+    );
+    entrance.id = "leadlaju-entrance";
+  });
+}
+
 function syncMobileNavigation() {
   const counts = {
     leads: elements.navLeadCount,
@@ -7887,6 +7907,7 @@ function switchView(viewName, { historyMode = "push" } = {}) {
   if (viewName === "follow-up-due") { followUpSection = pendingFollowUpSection === "new" ? "new" : "due"; pendingFollowUpSection = null; renderFollowUpDue(); }
   document.querySelectorAll(".view").forEach((view) => view.classList.remove("active"));
   targetView.classList.add("active");
+  if (changed && !elements.lifecycleSyncOverlay.classList.contains("visible")) animateViewEntrance(targetView);
   document.querySelectorAll(".nav-item").forEach((item) => {
     item.classList.toggle("active", item.dataset.view === viewName);
   });

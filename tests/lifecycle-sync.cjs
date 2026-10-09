@@ -38,7 +38,9 @@ function createLifecycleHarness() {
     Promise,
     console: { error() {} },
     elements: { lifecycleSyncOverlay: overlay },
-    document: { body, querySelectorAll: () => controls, querySelector:()=>null },
+    document: { body, querySelectorAll: () => controls, querySelector:()=>null, getElementById:()=>null },
+    activeView: "dashboard",
+    animateViewEntrance(){},
     showDashboardSyncWarning(){},
     window: {
       clearTimeout() {},

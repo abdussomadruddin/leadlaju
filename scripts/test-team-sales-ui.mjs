@@ -86,6 +86,13 @@ try {
    }
    // This fixture bypasses only the existing PWA access modal, never production auth.
    if(role==='agent')await page.evaluate(()=>{getAgentAppAccessState=()=> 'ready';ensureAgentPushAccess=async()=>true;agentPushAccessReady=true;renderAgentAccessGate('ready');renderAll();});
+   await page.waitForFunction(()=>!document.querySelector('#lifecycle-sync-overlay').classList.contains('visible'));
+   assert.equal(await page.evaluate(()=>{switchView('leads');return document.querySelector('#leads-view').getAnimations().some(a=>a.id==='leadlaju-entrance');}),true);checks++;
+   assert.equal(await page.evaluate(()=>{const b=document.querySelector('#refresh-button');showImmediatePressFeedback(b);return b.getAnimations().some(a=>a.id==='leadlaju-press');}),true);checks++;
+   await page.emulateMedia({reducedMotion:'reduce'});
+   assert.equal(await page.evaluate(()=>{switchView('appointments');return document.querySelector('#appointments-view').getAnimations().some(a=>a.id==='leadlaju-entrance');}),false);checks++;
+   await page.emulateMedia({reducedMotion:'no-preference'});
+   await page.evaluate(()=>switchView('dashboard'));
    if(role==='agent'){
     await page.evaluate(()=>{activeBrand.distribution_mode='agent';getCurrentUser().followUpDueBlocked=true;getCurrentUser().getLeadAllowed=true;renderAll();switchView('dashboard');});
     await page.locator('#get-lead-button').click();

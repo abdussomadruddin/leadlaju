@@ -5495,7 +5495,7 @@ button.performance-metric:focus-visible { outline: 3px solid #2563eb; outline-of
 /* Phone shell: only navigation is translucent; operational content stays opaque. */
 .mobile-bottom-nav, .mobile-sidebar-close, .mobile-more-heading { display: none; }
 .mobile-dashboard-brand { display: none; }
-.view.active { animation: view-enter 180ms ease-out both; }
+.view.active { animation: none; }
 @keyframes view-enter { from { opacity: .78; transform: translateY(5px); } to { opacity: 1; transform: none; } }
 
 @media (max-width: 850px) {
@@ -5879,3 +5879,20 @@ button.performance-metric:focus-visible { outline: 3px solid #2563eb; outline-of
 #dashboard-sync-warning { padding:10px 14px; border-radius:12px; background:#fff7e8; color:#94621c; font-size:12px; margin:0 0 12px; }
 #dashboard-sync-warning[hidden] { display:none; }
 #team-performance.is-background-sync .performance-metric { opacity:1; }
+
+/* Motion runs on navigation/interaction, never on background reconciliation. */
+#startup-recovery strong { display:inline-block; color:var(--primary, #2868dc); animation:brand-unfold 240ms cubic-bezier(.22,1,.36,1) both; }
+button, [role="button"] { transition: background-color 180ms ease, border-color 180ms ease, box-shadow 220ms ease, color 180ms ease; }
+.lifecycle-sync-overlay.cinematic .lifecycle-brand { animation: brand-unfold 240ms cubic-bezier(.22,1,.36,1) both; }
+.lifecycle-brand span { display:inline-block; }
+.lifecycle-sync-overlay.cinematic .lifecycle-brand span:first-child { animation: brand-word-left 240ms cubic-bezier(.22,1,.36,1) both; }
+.lifecycle-sync-overlay.cinematic .lifecycle-brand span:last-child { animation: brand-word-right 240ms cubic-bezier(.22,1,.36,1) both; }
+@keyframes brand-unfold { from { opacity:.6; transform:scale(.94); } to { opacity:1; transform:scale(1); } }
+@keyframes brand-word-left { from { transform:translateX(7px); } to { transform:translateX(0); } }
+@keyframes brand-word-right { from { transform:translateX(-7px); } to { transform:translateX(0); } }
+@media (prefers-reduced-motion:reduce) {
+  .lifecycle-sync-overlay.cinematic .lifecycle-brand,
+  .lifecycle-sync-overlay.cinematic .lifecycle-brand span,
+  #startup-recovery strong { animation:none; }
+  button, [role="button"] { transition:none; }
+}
