@@ -3040,7 +3040,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261009-smooth-motion-v156")
+      .register("/sw.js?v=20261009-tab-slide-v157")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -7860,6 +7860,19 @@ function animateViewEntrance(view) {
   });
 }
 
+let tabTransitionAnimation = null;
+function animateTabTransition(view) {
+  tabTransitionAnimation?.cancel();
+  tabTransitionAnimation = null;
+  if (!view?.animate || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  view.getAnimations({subtree:true}).filter(animation => animation.id === "leadlaju-entrance").forEach(animation => animation.cancel());
+  tabTransitionAnimation = view.animate(
+    [{translate:"-24px 18px"},{translate:"0 0"}],
+    {duration:320,easing:"cubic-bezier(.22,1,.36,1)"},
+  );
+  tabTransitionAnimation.id = "leadlaju-tab-slide";
+}
+
 function syncMobileNavigation() {
   const counts = {
     leads: elements.navLeadCount,
@@ -7907,7 +7920,6 @@ function switchView(viewName, { historyMode = "push" } = {}) {
   if (viewName === "follow-up-due") { followUpSection = pendingFollowUpSection === "new" ? "new" : "due"; pendingFollowUpSection = null; renderFollowUpDue(); }
   document.querySelectorAll(".view").forEach((view) => view.classList.remove("active"));
   targetView.classList.add("active");
-  if (changed && !elements.lifecycleSyncOverlay.classList.contains("visible")) animateViewEntrance(targetView);
   document.querySelectorAll(".nav-item").forEach((item) => {
     item.classList.toggle("active", item.dataset.view === viewName);
   });
@@ -7939,7 +7951,11 @@ function switchView(viewName, { historyMode = "push" } = {}) {
     loadFollowUpDueFeed().then(renderFollowUpDue).catch((error) => console.warn("Follow-up feed failed", error));
   }
   setMobileSidebarOpen(false);
-  window.scrollTo({ top: 0, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+  if (changed) {
+    if (!elements.lifecycleSyncOverlay.classList.contains("visible")) animateTabTransition(targetView);
+    else { tabTransitionAnimation?.cancel(); tabTransitionAnimation = null; }
+  }
 }
 
 function openAgentModal(agentId = null) {

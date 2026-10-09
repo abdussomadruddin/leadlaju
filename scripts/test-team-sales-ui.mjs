@@ -87,10 +87,11 @@ try {
    // This fixture bypasses only the existing PWA access modal, never production auth.
    if(role==='agent')await page.evaluate(()=>{getAgentAppAccessState=()=> 'ready';ensureAgentPushAccess=async()=>true;agentPushAccessReady=true;renderAgentAccessGate('ready');renderAll();});
    await page.waitForFunction(()=>!document.querySelector('#lifecycle-sync-overlay').classList.contains('visible'));
-   assert.equal(await page.evaluate(()=>{switchView('leads');return document.querySelector('#leads-view').getAnimations().some(a=>a.id==='leadlaju-entrance');}),true);checks++;
+   assert.equal(await page.evaluate(()=>{window.scrollTo({top:400,behavior:'instant'});switchView('leads');return document.querySelector('#leads-view').getAnimations().some(a=>a.id==='leadlaju-tab-slide')&&window.scrollY===0;}),true);checks++;
+   assert.equal(await page.evaluate(()=>{const old=tabTransitionAnimation;switchView('appointments');switchView('follow-up-due');return old.playState==='idle'&&document.querySelectorAll('.view.active').length===1&&activeView==='follow-up-due'&&window.scrollY===0;}),true);checks++;
    assert.equal(await page.evaluate(()=>{const b=document.querySelector('#refresh-button');showImmediatePressFeedback(b);return b.getAnimations().some(a=>a.id==='leadlaju-press');}),true);checks++;
    await page.emulateMedia({reducedMotion:'reduce'});
-   assert.equal(await page.evaluate(()=>{switchView('appointments');return document.querySelector('#appointments-view').getAnimations().some(a=>a.id==='leadlaju-entrance');}),false);checks++;
+   assert.equal(await page.evaluate(()=>{switchView('appointments');return document.querySelector('#appointments-view').getAnimations().some(a=>a.id==='leadlaju-tab-slide');}),false);checks++;
    await page.emulateMedia({reducedMotion:'no-preference'});
    await page.evaluate(()=>switchView('dashboard'));
    if(role==='agent'){
