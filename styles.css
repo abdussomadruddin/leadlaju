@@ -5871,8 +5871,11 @@ button.performance-metric:focus-visible { outline: 3px solid #2563eb; outline-of
 .lifecycle-sync-overlay .lifecycle-wait-indicator.loading-bounce { display:inline-flex; width:auto; height:26px; border:0; border-radius:0; animation:none; color:#67a0ff; }
 .lifecycle-sync-overlay.cinematic .lifecycle-brand { animation:none; opacity:1; transform:none; filter:none; clip-path:none; }
 .lifecycle-sync-overlay.cinematic .lifecycle-light { display:none; animation:none; }
-.lifecycle-sync-overlay { transition:opacity 280ms ease,visibility 0s linear 280ms; }
+.lifecycle-sync-overlay { transition:opacity 260ms ease,visibility 0s linear 260ms; }
 .lifecycle-sync-overlay.visible { transition:opacity 160ms ease,visibility 0s; }
 .global-loading-overlay { transition:opacity 260ms ease,visibility 0s linear 260ms; }
 .global-loading-overlay.visible { transition:opacity 160ms ease,visibility 0s; }
 @media(prefers-reduced-motion:reduce) { .loading-bounce i,.action-feedback-spinner i { animation:none; } }
+#dashboard-sync-warning { padding:10px 14px; border-radius:12px; background:#fff7e8; color:#94621c; font-size:12px; margin:0 0 12px; }
+#dashboard-sync-warning[hidden] { display:none; }
+#team-performance.is-background-sync .performance-metric { opacity:1; }

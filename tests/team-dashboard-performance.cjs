@@ -8,12 +8,12 @@ const css = fs.readFileSync('styles.css', 'utf8');
 function fixture() {
   const nodes = new Map();
   const node = id => {
-    if (!nodes.has(id)) nodes.set(id, {textContent:'',innerHTML:'',setAttribute(){},replaceChildren(){this.innerHTML='';},querySelectorAll(){return [];}});
+    if (!nodes.has(id)) nodes.set(id, {textContent:'',innerHTML:'',setAttribute(){},replaceChildren(){this.innerHTML='';},querySelectorAll(){return [];},querySelector(){return null;},classList:{toggle(){},remove(){}}});
     return nodes.get(id);
   };
   const requests = [];
   const c = vm.createContext({ document:{querySelector:node}, performanceMetric:(label,value,detail)=>JSON.stringify({label,value,detail}),
-    isAdmin:()=>true,isTeamSales:()=>true, remoteDatabaseMode:true,
+    isAdmin:()=>true,isTeamSales:()=>true, remoteDatabaseMode:true,dashboardCacheMetrics:{},saveDashboardCache(){},
     remoteDatabaseClient:{rpc:async(name,args)=>new Promise(resolve=>requests.push({name,args,resolve}))},
     state:{currentUserId:'admin'},brandContextVersion:1,teamPerformanceDays:7,
     teamPerformanceCache:new Map(),teamPerformancePending:new Set(),performanceDateOffset:n=>n===0?'2026-10-02':'2026-09-26',todayKey:()=> '2026-10-02',Date,console });

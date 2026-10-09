@@ -274,6 +274,10 @@ let selectedPerformanceAgentId = "";
 let performanceLoadedAt = 0;
 let ownPerformanceLoadedAt = 0;
 let ownPerformanceLoading = false;
+let startupFromCache = false;
+let dashboardCacheMetrics = {};
+let startupRetryTimer = null;
+const dashboardReadRequests = new Map();
 let teamPerformanceDays = 7;
 const teamPerformanceCache = new Map();
 const teamPerformancePending = new Set();
@@ -719,6 +723,112 @@ function loadState() {
 
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  saveDashboardCache();
+}
+
+function dashboardCacheKey(userId, brandId) {
+  return `leadlaju-dashboard-v1:${userId}:${brandId}`;
+}
+
+function saveDashboardCache() {
+  if (!remoteDatabaseMode || !activeBrand?.active || !state.currentUserId) return;
+  const user = getCurrentUser();
+  if (!user?.active || (user.role !== "master" && user.brandId !== activeBrandId)) return;
+  try {
+    const snapshot = structuredClone(state);
+    snapshot.agents.forEach(agent => delete agent.password);
+    snapshot.leads = snapshot.leads.map(lead => lead.status === "new" ? {
+      ...lead, phone: "", email: "",
+      notes: String(lead.notes || "").replace(/[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[Emel disembunyikan]").replace(/(?:\+?60|0)[ \t]*1[\d \t().-]{7,20}\d/g, "[Telefon disembunyikan]"),
+    } : lead);
+    snapshot.leads.forEach((lead,index)=>{
+      if (lead.status!=="new") return;
+      const phone=String(state.leads[index].phone||"").replace(/\D/g,"");
+      if (phone.length>=7) lead.notes=lead.notes.replace(new RegExp("\\+?"+phone.split("").join("[ \\t().-]*"),"g"),"[Telefon disembunyikan]");
+    });
+    localStorage.setItem(dashboardCacheKey(user.id, activeBrandId), JSON.stringify({version:1,userId:user.id,brandId:activeBrandId,brand:activeBrand,role:user.role,savedAt:monitorLastCanonicalSyncAt || Date.now(),state:snapshot,metrics:dashboardCacheMetrics}));
+    localStorage.setItem(`leadlaju-last-brand:${user.id}`,activeBrandId);
+  } catch (error) { console.warn("Dashboard cache unavailable", error?.name); }
+}
+
+async function restoreTrustedDashboardCache(userId) {
+  // Session identity alone does not prove the current role/brand. Recheck the
+  // trusted profile and brand before any cached operations are displayed.
+  try {
+    const {data:profile,error} = await remoteDatabaseClient.from("profiles").select("id,role,brand_id,active,approval_status").eq("id",userId).single();
+    if (error) throw error;
+    if (!profile?.active || profile.approval_status !== "approved") return false;
+    const brandId = profile.role === "master" ? sessionStorage.getItem(`leadlaju-master-brand:${userId}`) : profile.brand_id;
+    if (!brandId) return false;
+    const {data:brand,error:brandError} = await remoteDatabaseClient.from("brands").select("id,name,slug,active,distribution_mode").eq("id",brandId).single();
+    if (brandError) throw brandError;
+    if (!brand?.active) return false;
+    const cached = JSON.parse(localStorage.getItem(dashboardCacheKey(userId,brandId)) || "null");
+    if (!cached || cached.version !== 1 || cached.userId !== userId || cached.brandId !== brandId || cached.role !== profile.role || Date.now()-cached.savedAt > 86400000) return false;
+    const own = cached.state?.agents?.find(agent => agent.id === userId);
+    if (!own?.active || own.role !== profile.role || (profile.role !== "master" && own.brandId !== brandId)) return false;
+    if ((cached.state.leads || []).some(lead => lead.brandId && lead.brandId !== brandId)) return false;
+    if (profile.role === "agent" && !cached.metrics?.own) return false;
+    if (profile.role !== "agent" && brand.distribution_mode === "team_sales" && !cached.metrics?.team) return false;
+    state = {...structuredClone(defaultState),...cached.state,currentUserId:userId};
+    activeBrandId = brandId; activeBrand = brand; remoteDatabaseMode = true;
+    dashboardCacheMetrics = cached.metrics || {};
+    monitorLastCanonicalSyncAt = cached.savedAt;
+    startupFromCache = true;
+    return true;
+  } catch (error) {
+    // Offline fallback is display-only, for this session's own previously verified
+    // cache. Explicit permission/account/brand denials never use this path.
+    if (!isTransientRemoteLoadError(error)) return false;
+    try {
+      const brandId=sessionStorage.getItem(`leadlaju-master-brand:${userId}`) || localStorage.getItem(`leadlaju-last-brand:${userId}`);
+      const cached=JSON.parse(localStorage.getItem(dashboardCacheKey(userId,brandId)) || "null");
+      const own=cached?.state?.agents?.find(agent=>agent.id===userId);
+      if (!cached || cached.version!==1 || cached.userId!==userId || cached.brandId!==brandId || !cached.brand?.active || cached.brand.id!==brandId || !own?.active || own.role!==cached.role || (own.role!=="master" && own.brandId!==brandId) || Date.now()-cached.savedAt>86400000) return false;
+      if ((cached.state.leads||[]).some(lead=>lead.brandId && lead.brandId!==brandId)) return false;
+      if (own.role === "agent" && !cached.metrics?.own) return false;
+      if (own.role !== "agent" && cached.brand.distribution_mode === "team_sales" && !cached.metrics?.team) return false;
+      state={...structuredClone(defaultState),...cached.state,currentUserId:userId};
+      activeBrandId=brandId;activeBrand=cached.brand;remoteDatabaseMode=true;
+      dashboardCacheMetrics=cached.metrics||{};startupFromCache=true;
+      monitorLastCanonicalSyncAt=cached.savedAt;
+      showDashboardSyncWarning(true);
+      return true;
+    } catch { return false; }
+  }
+}
+
+function showDashboardSyncWarning(failed) {
+  const notice = document.querySelector("#dashboard-sync-warning");
+  if (notice) notice.hidden = !failed;
+}
+
+const dashboardRenderedData = new Map();
+function renderDashboardUpdates() {
+  const jobs = [
+    ["user", [getCurrentUser(), activeBrand], renderUser],
+    ["active-lead", [state.leads.filter(lead=>lead.status==="new"), state.currentUserId], renderActiveLead],
+    ["stats", [state.leads,state.appointments], renderStats],
+    ["activities", state.activities, renderActivities],
+    ["bulletins", [state.bulletins,state.bulletinUnreadCount], renderBulletins],
+    ["due", [state.followUpDue,state.leads], renderFollowUpDue],
+  ];
+  if (activeView === "leads") jobs.push(["leads",state.leads,renderLeadsTable]);
+  if (activeView === "appointments") jobs.push(["appointments",state.appointments,renderAppointments]);
+  if (activeView === "agents") jobs.push(["agents",state.agents,renderAgents]);
+  if (activeView === "projects") jobs.push(["projects",state.projects,renderProjects]);
+  if (activeView === "lead-monitor") jobs.push(["monitor",[state.leads,state.agents],renderLeadMonitor]);
+  const x=window.scrollX,y=window.scrollY;
+  jobs.forEach(([key,value,render])=>{
+    const fingerprint=JSON.stringify(value);
+    if (dashboardRenderedData.get(key)===fingerprint) return;
+    dashboardRenderedData.set(key,fingerprint);
+    render();
+  });
+  refreshSalesNewMetric();
+  syncExpiryAssignmentTimer();
+  syncMobileNavigation();
+  window.scrollTo(x,y);
 }
 
 function openContactOutbox() {
@@ -952,6 +1062,16 @@ async function readDashboardSnapshot() {
 }
 
 async function loadRemoteState(userId, attempt = 0) {
+  if (state.currentUserId !== userId) { dashboardCacheMetrics={};startupFromCache=false; }
+  const key = `${userId}:${brandContextVersion}`;
+  if (dashboardReadRequests.has(key)) return dashboardReadRequests.get(key);
+  const pending = performLoadRemoteState(userId, attempt);
+  dashboardReadRequests.set(key,pending);
+  try { return await pending; }
+  finally { if (dashboardReadRequests.get(key)===pending) dashboardReadRequests.delete(key); }
+}
+
+async function performLoadRemoteState(userId, attempt = 0) {
   if (!remoteDatabaseClient || !userId) return false;
   const requestBrandVersion = brandContextVersion;
   const wasRemoteDatabaseMode = remoteDatabaseMode;
@@ -986,6 +1106,12 @@ async function loadRemoteState(userId, attempt = 0) {
     }
     const brandResult = await remoteDatabaseClient.from("brands").select("id,name,slug,active,distribution_mode").eq("id", activeBrandId).single();
     if (brandResult.error) throw brandResult.error;
+    if (getCurrentUser()?.role === "master" && !masterBrands.length) {
+      const result = await remoteDatabaseClient.rpc("master_manage_brand", { p_action: "list" });
+      if (result.error) throw result.error;
+      if (requestBrandVersion !== brandContextVersion) return false;
+      masterBrands = result.data?.brands || [];
+    }
     if (!brandResult.data?.active) throw new Error("Brand tidak aktif. Hubungi Master.");
     if (requestBrandVersion !== brandContextVersion) return false;
     activeBrand = brandResult.data;
@@ -1055,7 +1181,7 @@ async function loadRemoteState(userId, attempt = 0) {
       if (loginPending) setLoginError('Sambungan sementara perlahan. Mencuba semula…');
       await new Promise(resolve => window.setTimeout(resolve, attempt ? 1000 : 400));
       if (requestBrandVersion !== brandContextVersion) return false;
-      return loadRemoteState(userId, attempt + 1);
+      return performLoadRemoteState(userId, attempt + 1);
     }
     monitorSyncFailed = true;
     if (activeView === "lead-monitor") renderLeadMonitor();
@@ -1127,22 +1253,36 @@ function handleRemoteBroadcast(message) {
 
 let realtimeReloadRunning = false;
 let realtimeReloadRequested = false;
+let realtimeReloadPromise = null;
 function queueRemoteReload() {
   realtimeReloadRequested = true;
-  if (realtimeReloadRunning || !remoteDatabaseMode || !state.currentUserId) return;
+  if (realtimeReloadRunning) return realtimeReloadPromise;
+  if (!remoteDatabaseMode || !state.currentUserId) return Promise.resolve(false);
   realtimeReloadRunning = true;
-  return (async () => {
+  realtimeReloadPromise = (async () => {
     try {
       while (realtimeReloadRequested && remoteDatabaseMode && state.currentUserId) {
         realtimeReloadRequested = false;
         const version = brandContextVersion;
         if (await loadRemoteState(state.currentUserId) && version === brandContextVersion) {
           teamPerformanceCache.clear();
-          renderAll();
+          await loadBulletinFeed();
+          if (version !== brandContextVersion) continue;
+          if (isAdmin() && isTeamSales()) await loadTeamPerformance();
+          else if (!isAdmin()) await loadOwnPerformance();
+          if (version !== brandContextVersion) continue;
+          renderDashboardUpdates();
+          showDashboardSyncWarning(false);
+        } else if (version === brandContextVersion) {
+          showDashboardSyncWarning(true);
         }
       }
-    } finally { realtimeReloadRunning = false; }
+    } catch (error) {
+      showDashboardSyncWarning(true);
+      console.warn("Background dashboard sync failed", error);
+    } finally { realtimeReloadRunning = false; realtimeReloadPromise = null; }
   })();
+  return realtimeReloadPromise;
 }
 
 async function persistProfile(agent) {
@@ -1283,9 +1423,7 @@ function startAuthenticatedApp(user, options = {}) {
   elements.loginPassword.type = "password";
   elements.passwordToggle.setAttribute("aria-label", "Tunjukkan kata laluan");
   if (options.restoredSession) leadLajuIntroShown = true;
-  const startupSync = options.freshLogin
-    ? beginColdStartSync()
-    : leadLajuIntroShown ? beginResumeSync() : beginColdStartSync();
+  const startupSync = beginColdStartSync({snapshotReady:remoteDatabaseMode && !startupFromCache});
 
   window.clearInterval(tickTimer);
   tickTimer = window.setInterval(() => {
@@ -1304,10 +1442,10 @@ function startAuthenticatedApp(user, options = {}) {
   markCurrentLeadNotificationsSeen();
   scheduleSync();
   scheduleFollowUpReminders();
-  loadBulletinFeed().then(() => { renderBulletins(); openRequestedBulletin(); }).catch((error) => console.warn("Bulletin feed failed", error));
-  loadFollowUpDueFeed().then(renderFollowUpDue).catch((error) => console.warn("Follow-up feed failed", error));
   switchView(getRequestedStartView(), { historyMode: "replace" });
   renderAll();
+  if (dashboardCacheMetrics.own && !isAdmin()) renderOwnPerformance(dashboardCacheMetrics.own.current,dashboardCacheMetrics.own.previous);
+  if (dashboardCacheMetrics.team && isAdmin() && isTeamSales()) renderTeamPerformance(dashboardCacheMetrics.team);
   enforceAgentNotificationAccess();
   if (pendingNotificationLeadId) openNotificationLead(pendingNotificationLeadId);
   if (new URLSearchParams(window.location.search).get("reminder") === "sales-overdue") openSalesOverdueReminder();
@@ -1625,7 +1763,8 @@ async function performLogin(event) {
       setLoginError("Emel atau kata laluan tidak betul.");
       return;
     }
-    const loaded = await loadRemoteState(data.user.id);
+    const cached = await restoreTrustedDashboardCache(data.user.id);
+    const loaded = cached || await loadRemoteState(data.user.id);
     if (!loaded) {
       if (!isTransientRemoteLoadError(lastRemoteLoadError)) await remoteDatabaseClient.auth.signOut();
       setLoginError(isTransientRemoteLoadError(lastRemoteLoadError)
@@ -1829,6 +1968,8 @@ async function cleanUpPushAfterLogout() {
 }
 
 function logout() {
+  startupFromCache = false;
+  dashboardCacheMetrics = {};
   document.querySelector("#push-device-report")?.close();
   pushDeviceStatus = [];
   const user = getCurrentUser();
@@ -2328,9 +2469,10 @@ function setGlobalLoading(active, message = "Sedang diproses...") {
   }
 }
 
-const LIFECYCLE_INTRO_DURATION_MS = 3000;
+const LIFECYCLE_INTRO_DURATION_MS = 250;
 const LIFECYCLE_RESUME_INDICATOR_DURATION_MS = 1000;
 const LEAD_HANDOFF_SCHEMA_VERSION = 1;
+let lifecyclePresentationVersion = 0;
 function updateLifecycleMutationGate() {
   document.body.classList.remove("business-mutations-locked");
 }
@@ -2340,6 +2482,7 @@ function guardLifecycleMutation() {
 }
 
 function showLifecycleSyncOverlay(mode) {
+  lifecyclePresentationVersion++;
   window.clearTimeout(lifecycleHideTimer);
   elements.lifecycleSyncOverlay.classList.remove("cinematic", "waiting", "resume");
   elements.lifecycleSyncOverlay.classList.add("visible", mode);
@@ -2347,23 +2490,34 @@ function showLifecycleSyncOverlay(mode) {
 }
 
 function hideLifecycleSyncOverlay() {
+  const presentationVersion = lifecyclePresentationVersion;
   window.clearTimeout(lifecycleHideTimer);
-  elements.lifecycleSyncOverlay.classList.remove("visible");
-  elements.lifecycleSyncOverlay.setAttribute("aria-hidden", "true");
-  lifecycleHideTimer = window.setTimeout(() => {
-    if (!elements.lifecycleSyncOverlay.classList.contains("visible")) {
-      elements.lifecycleSyncOverlay.classList.remove("cinematic", "waiting", "resume");
-    }
-  }, 180);
+  const reveal = () => {
+    if (presentationVersion !== lifecyclePresentationVersion) return;
+    elements.lifecycleSyncOverlay.classList.remove("visible");
+    elements.lifecycleSyncOverlay.setAttribute("aria-hidden", "true");
+    lifecycleHideTimer = window.setTimeout(() => {
+      if (!elements.lifecycleSyncOverlay.classList.contains("visible")) elements.lifecycleSyncOverlay.classList.remove("cinematic", "waiting", "resume");
+    }, 280);
+  };
+  if (window.requestAnimationFrame) window.requestAnimationFrame(() => window.requestAnimationFrame(reveal));
+  else reveal();
 }
 
 function settleLifecyclePresentation() {
   updateLifecycleMutationGate();
-  if (!introRevealComplete || initialDashboardSyncState === "pending") return;
+  if (!introRevealComplete || (initialDashboardSyncState !== "ready" && !startupFromCache)) return;
+  if (startupFromCache) { hideLifecycleSyncOverlay(); return; }
   if ((typeof ownPerformanceLoading !== "undefined" && ownPerformanceLoading) ||
       (typeof teamPerformancePending !== "undefined" && teamPerformancePending.size > 0)) {
     window.clearTimeout(lifecycleHideTimer);
     lifecycleHideTimer = window.setTimeout(settleLifecyclePresentation, 120);
+    return;
+  }
+  if (typeof remoteDatabaseMode !== "undefined" && remoteDatabaseMode && activeView === "dashboard" &&
+      ((!isAdmin() && !dashboardCacheMetrics.own) || (isAdmin() && isTeamSales() && !dashboardCacheMetrics.team))) {
+    elements.lifecycleSyncOverlay.querySelector("strong").textContent="Prestasi belum dimuatkan. Cuba semula.";
+    document.querySelector("#retry-dashboard-startup")?.removeAttribute("hidden");
     return;
   }
   hideLifecycleSyncOverlay();
@@ -2382,21 +2536,36 @@ function failLifecycleSync() {
   initialDashboardSyncState = "failed";
   resumeSyncPending = false;
   updateLifecycleMutationGate();
-  if (introRevealComplete) hideLifecycleSyncOverlay();
+  showDashboardSyncWarning(true);
+  if (startupFromCache && introRevealComplete) hideLifecycleSyncOverlay();
+  else {
+    const status = elements.lifecycleSyncOverlay.querySelector("strong");
+    if (status) status.textContent="Data belum dapat dimuatkan. Cuba semula.";
+    document.querySelector("#retry-dashboard-startup")?.removeAttribute("hidden");
+  }
 }
 
-function runLifecycleAuthoritativeSync() {
+function runLifecycleAuthoritativeSync(options = {}) {
+  const syncVersion = brandContextVersion;
   if (typeof remoteDatabaseMode !== "undefined" && remoteDatabaseMode) {
-    return loadRemoteState(state.currentUserId)
+    return (options.snapshotReady ? Promise.resolve(true) : loadRemoteState(state.currentUserId))
       .then(async (success) => {
+        if (syncVersion !== brandContextVersion) return false;
         if (success) {
           await loadBulletinFeed();
-          renderAll();
+          if (syncVersion !== brandContextVersion) return false;
+          renderDashboardUpdates();
+          const performanceReady = !isAdmin() ? await loadOwnPerformance() : isTeamSales() ? await loadTeamPerformance() : true;
+          if (performanceReady === false) throw new Error("Prestasi belum dapat dimuatkan");
+          if (syncVersion !== brandContextVersion) return false;
+          saveDashboardCache();
+          showDashboardSyncWarning(false);
           completeLifecycleAuthoritativeRender();
         } else failLifecycleSync();
         return success;
       })
       .catch((error) => {
+        if (syncVersion !== brandContextVersion) return false;
         failLifecycleSync();
         console.error("Supabase lifecycle sync failed", error);
         return false;
@@ -2414,7 +2583,8 @@ function runLifecycleAuthoritativeSync() {
     });
 }
 
-function beginColdStartSync() {
+function beginColdStartSync(options = {}) {
+  document.querySelector("#retry-dashboard-startup")?.setAttribute("hidden", "");
   leadLajuIntroShown = true;
   introRevealComplete = false;
   initialDashboardSyncState = "pending";
@@ -2425,7 +2595,15 @@ function beginColdStartSync() {
     introRevealComplete = true;
     settleLifecyclePresentation();
   }, LIFECYCLE_INTRO_DURATION_MS);
-  lifecycleSyncPromise = runLifecycleAuthoritativeSync();
+  lifecycleSyncPromise = runLifecycleAuthoritativeSync(options);
+  window.clearTimeout(startupRetryTimer);
+  startupRetryTimer=window.setTimeout(() => {
+    if (!startupFromCache && initialDashboardSyncState !== "ready") {
+      const status=elements.lifecycleSyncOverlay.querySelector("strong");
+      if (status) status.textContent="Sambungan mengambil masa. Cuba semula.";
+      document.querySelector("#retry-dashboard-startup")?.removeAttribute("hidden");
+    }
+  },15000);
   return lifecycleSyncPromise;
 }
 
@@ -2434,17 +2612,8 @@ function beginResumeSync() {
   if (!leadLajuIntroShown || initialDashboardSyncState === "pending" || resumeSyncPending) {
     return lifecycleSyncPromise || Promise.resolve(false);
   }
-  introRevealComplete = false;
-  initialDashboardSyncState = "pending";
   resumeSyncPending = true;
-  showLifecycleSyncOverlay("resume");
-  updateLifecycleMutationGate();
-  window.clearTimeout(lifecycleIntroTimer);
-  lifecycleIntroTimer = window.setTimeout(() => {
-    introRevealComplete = true;
-    settleLifecyclePresentation();
-  }, LIFECYCLE_RESUME_INDICATOR_DURATION_MS);
-  lifecycleSyncPromise = runLifecycleAuthoritativeSync()
+  lifecycleSyncPromise = Promise.resolve(typeof remoteDatabaseMode !== "undefined" && remoteDatabaseMode ? queueRemoteReload() : syncGoogleSheetFresh({silent:true}))
     .finally(() => {
       resumeSyncPending = false;
     });
@@ -2865,7 +3034,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261008-startup-recovery-v154")
+      .register("/sw.js?v=20261009-cache-first-v155")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -7210,6 +7379,8 @@ function refreshSalesNewMetric() {
 }
 
 function renderTeamPerformance(report) {
+  dashboardCacheMetrics.team=report;
+  saveDashboardCache();
   salesPerformanceRange = { from: report.from, to: report.to, agentIds: (report.rows || []).map(row => row.agent_id) };
   const rows = report?.rows || [];
   const total = (key) => rows.reduce((sum, row) => sum + (Number(row[key]) || 0), 0);
@@ -7246,11 +7417,13 @@ async function loadTeamPerformance() {
   if (cached && Date.now() - cached.loadedAt < 300000) {
     renderTeamPerformance(cached.report);
     panel.setAttribute("aria-busy", "false");
-    return;
+    return true;
   }
   if (teamPerformancePending.has(key)) return;
   teamPerformancePending.add(key);
-  status.textContent = "Memuatkan prestasi...";
+  const retainedCards=panel.querySelector(".performance-metric");
+  panel.classList.toggle("is-background-sync",Boolean(retainedCards));
+  if (!retainedCards) status.textContent = "Memuatkan prestasi...";
   panel.setAttribute("aria-busy", "true");
   // Keep the previous cards readable while the new range loads; no blank flash.
   const stillCurrent = () => brandVersion === brandContextVersion && userId === state.currentUserId && days === teamPerformanceDays && isAdmin() && isTeamSales();
@@ -7260,12 +7433,15 @@ async function loadTeamPerformance() {
     if (brandVersion !== brandContextVersion || userId !== state.currentUserId) return;
     teamPerformanceCache.set(key, { report: data, loadedAt: Date.now() });
     if (stillCurrent()) renderTeamPerformance(data);
+    return true;
   } catch (error) {
     if (stillCurrent()) status.textContent = "Prestasi gagal dimuatkan. Tekan tempoh sekali lagi untuk cuba semula.";
     console.error("Team performance load failed", error);
+    if (stillCurrent()) showDashboardSyncWarning(true);
+    return false;
   } finally {
     teamPerformancePending.delete(key);
-    if (stillCurrent()) panel.setAttribute("aria-busy", "false");
+    if (stillCurrent()) { panel.setAttribute("aria-busy", "false");panel.classList.remove("is-background-sync"); }
   }
 }
 
@@ -7311,6 +7487,8 @@ function performanceMetric(label, value, detail = "", icon = "lead") {
 }
 
 function renderOwnPerformance(current, previous) {
+  dashboardCacheMetrics.own={current,previous};
+  saveDashboardCache();
   if (isTeamSales()) salesPerformanceRange = { from: current.from, to: current.to, agentIds: [state.currentUserId] };
   const row = current?.rows?.find((item) => item.agent_id === state.currentUserId);
   const prior = previous?.rows?.find((item) => item.agent_id === state.currentUserId);
@@ -7340,6 +7518,7 @@ async function loadOwnPerformance() {
   ownPerformanceLoading = true;
   ownPerformanceLoadedAt = Date.now();
   const currentUserId = state.currentUserId;
+  const brandVersion = brandContextVersion;
   const currentFrom = performanceDateOffset(-6);
   const previousFrom = performanceDateOffset(-13);
   try {
@@ -7348,12 +7527,17 @@ async function loadOwnPerformance() {
       remoteDatabaseClient.rpc("get_agent_performance_report", { p_from: previousFrom, p_to: performanceDateOffset(-7), p_agent_id: currentUserId }),
     ]);
     if (currentResult.error || previousResult.error) throw currentResult.error || previousResult.error;
-    if (state.currentUserId === currentUserId && !isAdmin()) renderOwnPerformance(currentResult.data, previousResult.data);
+    if (brandVersion===brandContextVersion && state.currentUserId === currentUserId && !isAdmin()) renderOwnPerformance(currentResult.data, previousResult.data);
+    return true;
   } catch (error) {
     console.error("Agent performance load failed", error);
-    elements.ownPerformanceStatus.textContent = "Prestasi belum dapat dimuatkan. Cuba refresh.";
+    if (brandVersion === brandContextVersion && state.currentUserId === currentUserId) {
+      elements.ownPerformanceStatus.textContent = "Prestasi belum dapat dimuatkan. Cuba refresh.";
+      showDashboardSyncWarning(true);
+    }
+    return false;
   } finally {
-    ownPerformanceLoading = false;
+    if (brandVersion === brandContextVersion && state.currentUserId === currentUserId) ownPerformanceLoading = false;
   }
 }
 
@@ -7386,6 +7570,9 @@ async function loadMasterManagement() {
 }
 
 function clearBrandOperationalState() {
+  dashboardRenderedData.clear();
+  startupFromCache = false;
+  dashboardCacheMetrics = {};
   document.querySelector("#push-device-report")?.close();
   pushDeviceStatus = [];
   salesLeadDrilldown = null;
@@ -7404,6 +7591,7 @@ function clearBrandOperationalState() {
   performanceRequestVersion++;
   performanceReport = null;
   performanceLoadedAt = ownPerformanceLoadedAt = 0;
+  ownPerformanceLoading = false;
   integrationStatus = [];
   integrationRawKeys.clear();
   integrationSecretTimers.forEach(timer => clearTimeout(timer));
@@ -8663,8 +8851,9 @@ async function syncGoogleSheet(options = {}) {
     syncInProgress = true;
     try {
       const loaded = await loadRemoteState(state.currentUserId);
-      if (!loaded) return false;
-      renderAll();
+      if (!loaded) { showDashboardSyncWarning(true); return false; }
+      renderDashboardUpdates();
+      showDashboardSyncWarning(false);
       if (
         options.lifecycleSync ||
         (typeof initialDashboardSyncState !== "undefined" && initialDashboardSyncState === "failed")
@@ -9333,6 +9522,19 @@ window.addEventListener("focus", () => {
   if (latestAdminReminder) sendAdminFollowUpNotification(latestAdminReminder);
   beginResumeSync();
 });
+window.addEventListener("online", () => {
+  if (document.body.classList.contains("authenticated")) {
+    if (!startupFromCache && initialDashboardSyncState === "failed") void beginColdStartSync();
+    else void beginResumeSync();
+  }
+});
+document.querySelector("#retry-dashboard-startup")?.addEventListener("click", () => {
+  brandContextVersion++;
+  dashboardReadRequests.clear();
+  ownPerformanceLoading = false;
+  teamPerformancePending.clear();
+  void beginColdStartSync();
+});
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) updateSalesLeadWaitingTimes();
   if (document.hidden) {
@@ -9475,6 +9677,12 @@ async function bootstrap() {
       return;
     }
     if (data.session?.user) {
+      if (await restoreTrustedDashboardCache(data.session.user.id)) {
+        startAuthenticatedApp(getCurrentUser(), {restoredSession:true});
+        subscribeToRemoteDatabase();
+        flushContactOutbox();
+        return;
+      }
       const loaded = await loadRemoteState(data.session.user.id);
       if (loaded) {
         const sessionUser = getCurrentUser();

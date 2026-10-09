@@ -30,7 +30,7 @@ function createClassList(initial = []) {
 function createLifecycleHarness() {
   const timers = [];
   const controls = [];
-  const overlay = { classList: createClassList(), setAttribute() {} };
+  const overlay = { classList: createClassList(), setAttribute() {}, querySelector:()=>null };
   const body = { classList: createClassList(['authenticated']) };
   const syncResolvers = [];
   let syncCalls = 0;
@@ -38,7 +38,8 @@ function createLifecycleHarness() {
     Promise,
     console: { error() {} },
     elements: { lifecycleSyncOverlay: overlay },
-    document: { body, querySelectorAll: () => controls },
+    document: { body, querySelectorAll: () => controls, querySelector:()=>null },
+    showDashboardSyncWarning(){},
     window: {
       clearTimeout() {},
       setTimeout(callback, delay) { timers.push({ callback, delay }); return timers.length; },
@@ -59,6 +60,9 @@ function createLifecycleHarness() {
     let lifecycleIntroTimer = null;
     let lifecycleHideTimer = null;
     let lifecycleSyncPromise = null;
+    let startupFromCache = false;
+    let brandContextVersion = 0;
+    let startupRetryTimer = null;
   `, context);
   vm.runInContext(source.slice(start, end), context);
   vm.runInContext(`globalThis.lifecycleState = () => ({
@@ -74,7 +78,7 @@ test('true cold start begins cinematic and authoritative sync in parallel with l
   const harness = createLifecycleHarness();
   harness.context.beginColdStartSync();
   assert.equal(harness.syncCalls(), 1);
-  assert.equal(harness.timers[0].delay, 3000);
+  assert.equal(harness.timers[0].delay, 250);
   assert.equal(harness.overlay.classList.contains('cinematic'), true);
   assert.equal(harness.body.classList.contains('business-mutations-locked'), false);
   assert.match(html, />Sedang sync Lead Laju…</);
@@ -113,17 +117,11 @@ test('background resume skips cinematic and deduplicates related foreground requ
   const second = harness.context.beginResumeSync();
   assert.equal(first, second);
   assert.equal(harness.syncCalls(), 2);
-  assert.equal(harness.overlay.classList.contains('resume'), true);
-  assert.equal(harness.overlay.classList.contains('cinematic'), false);
-  const resumeTimer = harness.timers.find((timer) => timer.delay === 1000);
-  assert.ok(resumeTimer);
-  resumeTimer.callback();
-  assert.equal(harness.overlay.classList.contains('visible'), true);
-  harness.context.completeLifecycleAuthoritativeRender();
+  assert.equal(harness.overlay.classList.contains('resume'), false);
   assert.equal(harness.overlay.classList.contains('visible'), false);
 });
 
-test('completed resume sync keeps its indicator visible until the one-second presentation ends', () => {
+test('resume never exposes an overlay or forced presentation timer', () => {
   const harness = createLifecycleHarness();
   harness.context.beginColdStartSync();
   harness.context.completeLifecycleAuthoritativeRender();
@@ -131,15 +129,8 @@ test('completed resume sync keeps its indicator visible until the one-second pre
   harness.syncResolvers.shift()(true);
   harness.context.beginResumeSync();
   harness.context.completeLifecycleAuthoritativeRender();
-  assert.equal(harness.overlay.classList.contains('visible'), true);
-  const resumeTimer = harness.timers.find((timer) => timer.delay === 1000);
-  assert.ok(resumeTimer);
-  resumeTimer.callback();
   assert.equal(harness.overlay.classList.contains('visible'), false);
-  assert.equal(harness.overlay.classList.contains('resume'), true);
-  const fadeTimer = harness.timers.at(-1);
-  assert.equal(fadeTimer.delay, 180);
-  fadeTimer.callback();
+  assert.equal(harness.timers.some(timer=>timer.delay===1000),false);
   assert.equal(harness.overlay.classList.contains('resume'), false);
 });
 
@@ -165,7 +156,7 @@ test('restored authenticated sessions skip the fullscreen cinematic on PWA reope
 });
 
 test('multiple resumes keep the cinematic execution count at one', () => {
-  const start = source.indexOf('function beginColdStartSync()');
+  const start = source.indexOf('function beginColdStartSync(');
   const end = source.indexOf('\nfunction openLeadAvailabilityConfirmation', start);
   const lifecycle = source.slice(start, end);
   assert.match(lifecycle, /leadLajuIntroShown = true/);
@@ -205,13 +196,13 @@ test('push around resume does not replay cinematic or change CALL NOW and Log Le
   assert.match(source.slice(snapshotStart, snapshotEnd), /APP_LOG_LEAD_VISIBLE/);
 });
 
-test('initial failure ends presentation without disabling available buttons', () => {
+test('initial failure without cache retains cover for retry', () => {
   const harness = createLifecycleHarness();
   harness.context.beginColdStartSync();
   harness.context.failLifecycleSync();
   harness.timers[0].callback();
   assert.equal(harness.context.lifecycleState().syncState, 'failed');
-  assert.equal(harness.overlay.classList.contains('visible'), false);
+  assert.equal(harness.overlay.classList.contains('visible'), true);
   assert.equal(harness.body.classList.contains('business-mutations-locked'), false);
   harness.context.completeLifecycleAuthoritativeRender();
   assert.equal(harness.context.lifecycleState().syncState, 'ready');
@@ -258,7 +249,7 @@ test('reduced motion preserves brand and copy while suppressing heavy animation'
   assert.match(css, /animation: none !important/);
   assert.match(html, /<span>LEAD<\/span><span>LAJU<\/span>/);
   assert.match(html, />Sedang sync Lead Laju…</);
-  assert.match(source, /beginColdStartSync\(\)[\s\S]*runLifecycleAuthoritativeSync\(\)/);
+  assert.match(source, /beginColdStartSync\(options = \{\}\)[\s\S]*runLifecycleAuthoritativeSync\(options\)/);
 });
 
 test('authoritative readiness is marked only after reconciliation cleanup commit and render', () => {

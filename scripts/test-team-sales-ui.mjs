@@ -37,6 +37,8 @@ try {
       if(name==='admin_set_agent_get_lead_permission')return {data:{ok:true,get_lead_allowed:args.p_allowed}};
       if(name==='admin_set_follow_up_due_limit')return {data:{ok:true,follow_up_due_limit:args.p_limit}};
       if(name==='get_dashboard_state'){
+        const delay=Number(localStorage.getItem('fixture-dashboard-delay')||0);
+        if(delay)await new Promise(resolve=>setTimeout(resolve,delay));
         if(window.__dashboardTimeouts-->0)return {error:{code:'57014',message:'canceling statement due to statement timeout'}};
         return {data:{profiles:[profile],projects:[],leads:brand===b?leads:[],appointments:[],activities:[],events:[],server_now:new Date().toISOString()}};
       }
@@ -310,6 +312,16 @@ try {
     await page.evaluate(()=>switchView('performance'));await page.waitForFunction(()=>document.querySelector('#performance-cards').children.length>0);
     await page.locator('#performance-cards summary').first().click();
     assert.match(await page.locator('#performance-view').innerText(),/CALL NOW ≤5 min/);checks++;
+   }
+   if(role==='agent'){
+    await page.evaluate(()=>{renderOwnPerformance({rows:[]},{rows:[]});saveDashboardCache();localStorage.setItem('fixture-dashboard-delay','4000');});
+    await page.reload();
+    await page.waitForFunction(()=>typeof startupFromCache!=='undefined'&&startupFromCache);
+    await page.waitForFunction(()=>!document.querySelector('#lifecycle-sync-overlay').classList.contains('visible'),{timeout:3000});
+    assert.equal(await page.evaluate(()=>document.body.classList.contains('authenticated')),true);checks++;
+    assert.equal(await page.evaluate(()=>initialDashboardSyncState),'pending');checks++;
+    assert.ok(await page.locator('#own-performance .performance-metric').count()>0);checks++;
+    await page.evaluate(()=>localStorage.removeItem('fixture-dashboard-delay'));
    }
    assert.deepEqual(errors,[]);checks++;await context.close();
   }
