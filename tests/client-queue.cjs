@@ -704,7 +704,7 @@ test('agents explicitly start and stop lead availability from the dashboard', ()
   assert.match(source, /elements\.getLeadButton\?\.addEventListener/);
   assert.match(source, /elements\.stopLeadButton\?\.addEventListener/);
   assert.match(source, /elements\.getLeadButton\.disabled = \(ready && !user\.followUpDueBlocked\)/);
-  assert.match(source, /elements\.stopLeadButton\.disabled = !ready/);
+  assert.match(source, /elements\.stopLeadButton\.disabled = !user\.leadReady/);
   assert.match(source, /openLeadAvailabilityConfirmation\(user\.leadReady\)/);
   const availabilityStart = source.indexOf('async function setAgentLeadAvailability(');
   const availabilityBody = source.slice(availabilityStart, source.indexOf('\nfunction enforceAgentNotificationAccess', availabilityStart));
@@ -732,8 +732,8 @@ test('dashboard separates active presence from the lead distribution queue', () 
   assert.match(html, /<h3>Pasukan Giliran Dapat Lead<\/h3>/);
   assert.match(html, /id="lead-ready-list"/);
   assert.match(html, /id="lead-ready-count"/);
-  assert.match(renderTeamBody, /agents\.filter\(\(agent\) => agent\.online\)/);
-  assert.match(renderTeamBody, /agents\.filter\(\(agent\) => agent\.leadReady && agent\.online\)/);
+  assert.match(renderTeamBody, /agents\.filter\(\(agent\) => agentPresenceIsCurrent\(agent\)\)/);
+  assert.match(renderTeamBody, /agents\.filter\(\(agent\) => agentLeadDisplayState\(agent\) === "ready"\)/);
   assert.match(renderTeamBody, /member-notification\$\{enabled \? " enabled" : ""\}/);
   assert.match(renderTeamBody, /Notifikasi aktif/);
   assert.match(renderTeamBody, /Notifikasi belum aktif/);

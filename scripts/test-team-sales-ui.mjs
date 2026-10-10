@@ -290,6 +290,13 @@ try {
       switchView('agents');renderAgents();
     });
     const permissionSwitch=page.locator('[data-agent-get-lead-permission="permission-fixture"]');
+    await page.evaluate(()=>{const a=getAgent('permission-fixture');a.presenceLeaseUntil=Date.now()-1000;a.online=true;a.notificationEnabled=true;renderAgents();});
+    assert.match(await page.locator('[data-agent-availability-status="permission-fixture"]').innerText(),/Sesi GET LEAD tamat/);checks++;
+    assert.equal(await page.locator('[data-agent-lead-availability="stop"][data-agent-id="permission-fixture"]').innerText(),'Batalkan GET LEAD');checks++;
+    await page.evaluate(()=>{getAgent('permission-fixture').presenceLeaseUntil=Date.now()+1500;renderAgents();});
+    assert.match(await page.locator('[data-agent-availability-status="permission-fixture"]').innerText(),/Dalam giliran GET LEAD/);checks++;
+    await page.waitForFunction(()=>document.querySelector('[data-agent-availability-status="permission-fixture"]')?.textContent.includes('Sesi GET LEAD tamat'));
+    assert.equal(await page.evaluate(()=>getAgent('permission-fixture').leadReady),true,'Display expiry does not mutate server opt-in');checks++;
     await page.evaluate(()=>{
       window.__pushDevices=[{id:'silent-device-fixture',userId:'permission-fixture',active:true,installed:true,device:'iPhone',seenAt:new Date().toISOString(),receivedAt:null},{id:'second-device-fixture',userId:'permission-fixture',active:true,installed:true,device:'Android',receivedAt:null},{id:'inactive-device-fixture',userId:'permission-fixture',active:false,device:'Browser',receivedAt:null}];
       renderAgents();

@@ -994,6 +994,7 @@ function mapProfile(row) {
     getLeadAllowed: row.get_lead_allowed !== false,
     followUpDueBlocked: row.follow_up_due_blocked === true,
     leadReady: Boolean(row.lead_ready),
+    presenceLeaseUntil: row.presence_lease_until ? new Date(row.presence_lease_until).getTime() : null,
     online: Boolean(row.presence_lease_until && new Date(row.presence_lease_until).getTime() > Date.now()),
     notificationEnabled: Boolean(row.notification_ready),
   };
@@ -1430,6 +1431,7 @@ function startAuthenticatedApp(user, options = {}) {
     clearExpiredLocalCooldowns();
     updateCountdown();
     updateSalesLeadWaitingTimes();
+    updateAgentAvailabilityDisplay();
     if (activeView === "lead-monitor" && monitorLastCanonicalSyncAt &&
       Date.now() - monitorLastCanonicalSyncAt >= 90000 &&
       elements.monitorHealth.textContent !== "Tidak disahkan") renderLeadMonitor();
@@ -3040,7 +3042,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261009-tab-slide-v157")
+      .register("/sw.js?v=20261010-agent-session-v158")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -4487,6 +4489,11 @@ async function setAgentLeadAvailability(ready) {
     }
 
     user.leadReady = Boolean(result?.lead_ready ?? ready);
+    if (typeof remoteDatabaseMode !== "undefined" && remoteDatabaseMode) {
+      user.presenceLeaseUntil = undefined;
+      if (typeof result?.notification_ready === "boolean") user.notificationEnabled = result.notification_ready;
+      if (!await loadRemoteState(user.id)) showDashboardSyncWarning(true);
+    }
     if (!(typeof remoteDatabaseMode !== "undefined" && remoteDatabaseMode)) {
       user.online = user.leadReady && Notification.permission === "granted";
     }
@@ -5888,22 +5895,68 @@ function updateAdminActiveLeadCountdowns(leads = getAdminActiveLeads()) {
   });
 }
 
+function agentAvailabilityNow() {
+  return remoteDatabaseMode && Number.isFinite(state.followUpServerNow) && Number.isFinite(state.followUpLoadedAt)
+    ? state.followUpServerNow + Date.now() - state.followUpLoadedAt : Date.now();
+}
+
+function agentPresenceIsCurrent(agent, now = agentAvailabilityNow()) {
+  if (!remoteDatabaseMode) return Boolean(agent?.online);
+  return Number.isFinite(agent?.presenceLeaseUntil) && agent.presenceLeaseUntil > now;
+}
+
+function agentLeadDisplayState(agent, now = agentAvailabilityNow()) {
+  if (!agent?.active || (agent.approvalStatus && agent.approvalStatus !== "approved")) return "inactive";
+  if (agent.getLeadAllowed === false) return "denied";
+  if (agent.followUpDueBlocked) return "blocked";
+  if (!agent.leadReady) return "stopped";
+  if (remoteDatabaseMode && agent.presenceLeaseUntil === undefined) return "unverified";
+  if (!agentPresenceIsCurrent(agent, now)) return "expired";
+  if (!agent.notificationEnabled) return "notifications";
+  if (agent.cooldownUntil > now) return "cooldown";
+  return "ready";
+}
+
+function agentLeadDisplayLabel(status) {
+  return ({ready:"Dalam giliran GET LEAD",expired:"Sesi GET LEAD tamat",unverified:"Sesi GET LEAD belum disahkan",notifications:"Notifikasi belum sedia",cooldown:"Menunggu cooldown",blocked:"Disekat: Follow Up Due",denied:"Akses GET LEAD ditutup",inactive:"Akaun tidak aktif",stopped:"GET LEAD belum diaktifkan"})[status];
+}
+
+let agentAvailabilityDisplayKey = "";
+function updateAgentAvailabilityDisplay() {
+  if (isTeamSales()) return;
+  const key = JSON.stringify(state.agents.map(agent => [agent.id,agentLeadDisplayState(agent),agentPresenceIsCurrent(agent)]));
+  if (key === agentAvailabilityDisplayKey) return;
+  agentAvailabilityDisplayKey = key;
+  renderAgentLeadControls();
+  if (isAdmin()) {
+    renderTeam();
+    if (activeView === "agents") renderAgents();
+  }
+}
+
 function renderAgentLeadControls() {
   const user = getCurrentUser();
   const isAgent = user?.role === "agent" && !isTeamSales();
   elements.agentLeadControls.hidden = !isAgent;
   if (!isAgent) return;
-  const ready = Boolean(user.leadReady);
+  const availability = agentLeadDisplayState(user);
+  const ready = availability === "ready";
   elements.agentLeadControls.classList.toggle("is-ready", ready);
   elements.agentLeadControls.classList.toggle("is-stopped", !ready);
   elements.getLeadButton.disabled = (ready && !user.followUpDueBlocked) || user.getLeadAllowed === false;
-  elements.stopLeadButton.disabled = !ready;
+  elements.stopLeadButton.disabled = !user.leadReady;
   elements.getLeadButton.setAttribute("aria-pressed", String(ready));
   elements.stopLeadButton.setAttribute("aria-pressed", String(!ready));
-  elements.agentLeadStatus.textContent = ready ? "Sedang menerima lead" : "Agihan lead dihentikan";
+  elements.agentLeadStatus.textContent = ready ? "Dalam giliran GET LEAD" : "Agihan lead dihentikan";
   elements.agentLeadStatusMessage.textContent = ready
     ? "Anda berada dalam giliran agihan. STOP LEAD hanya menghentikan lead baharu."
     : "Tekan GET LEAD untuk masuk giliran agihan lead baharu.";
+  if (["expired","unverified","notifications","cooldown","inactive"].includes(availability)) {
+    elements.agentLeadStatus.textContent = agentLeadDisplayLabel(availability);
+    elements.agentLeadStatusMessage.textContent = availability === "expired"
+      ? "Tempoh sesi penerimaan lead sudah tamat. Aktifkan GET LEAD semula untuk menyambung giliran."
+      : "Sesi belum sedia menerima lead baharu. Semak sambungan, notifikasi dan status akaun anda.";
+  }
   if (user.getLeadAllowed === false) {
     elements.agentLeadStatus.textContent = "Akses GET LEAD ditutup";
     elements.agentLeadStatusMessage.textContent = "Admin telah menutup akses GET LEAD. Anda masih boleh mengurus lead sedia ada.";
@@ -6007,8 +6060,8 @@ function renderActivities() {
 
 function renderTeam() {
   const agents = state.agents.filter((agent) => agent.role === "agent" && agent.active !== false);
-  const activeAgents = agents.filter((agent) => agent.online);
-  const leadReadyAgents = agents.filter((agent) => agent.leadReady && agent.online);
+  const activeAgents = agents.filter((agent) => agentPresenceIsCurrent(agent));
+  const leadReadyAgents = agents.filter((agent) => agentLeadDisplayState(agent) === "ready");
   const notificationBell = (agent) => {
     const enabled = Boolean(agent.notificationEnabled);
     const label = enabled ? "Notifikasi aktif" : "Notifikasi belum aktif";
@@ -6598,8 +6651,8 @@ function renderAgents() {
           .filter(Boolean);
         const leadAvailabilityAction = !isTeamSales() && agent.getLeadAllowed !== false && agent.role === "agent" && agent.active && agent.approvalStatus === "approved"
           ? agent.leadReady
-            ? `<button class="agent-lead-availability stop" type="button" data-agent-lead-availability="stop" data-agent-id="${agent.id}">STOP LEAD</button>`
-            : !agent.followUpDueBlocked && agent.online && agent.notificationEnabled
+            ? `<button class="agent-lead-availability stop" type="button" data-agent-lead-availability="stop" data-agent-id="${agent.id}">${agentLeadDisplayState(agent) === "ready" ? "STOP LEAD" : "Batalkan GET LEAD"}</button>`
+            : !agent.followUpDueBlocked && agentPresenceIsCurrent(agent) && agent.notificationEnabled
               ? `<button class="agent-lead-availability get" type="button" data-agent-lead-availability="get" data-agent-id="${agent.id}">GET LEAD</button>`
               : ""
           : "";
@@ -6645,6 +6698,7 @@ function renderAgents() {
             <span>${projectLabel()} <b>${escapeHtml(projectNames.join(", ") || "Belum dipilih")}</b></span>
             ${!isTeamSales() && agent.role === "agent" ? `<span class="agent-get-lead-permission">Benarkan GET LEAD <button type="button" role="switch" aria-checked="${agent.getLeadAllowed !== false}" aria-label="Benarkan GET LEAD untuk ${escapeHtml(agent.name)}" class="switch ${agent.getLeadAllowed !== false ? "active" : ""}" data-agent-get-lead-permission="${escapeHtml(agent.id)}"></button></span>` : ""}
             ${!isTeamSales() && agent.followUpDueBlocked ? '<span>Lead baharu disekat <b>Selesaikan Follow Up Due</b></span>' : ""}
+            ${!isTeamSales() && agent.role === "agent" ? `<span data-agent-availability-status="${escapeHtml(agent.id)}">Giliran lead <b>${escapeHtml(agentLeadDisplayLabel(agentLeadDisplayState(agent)))}</b></span>` : ""}
           </div>
           <div class="agent-card-actions">
             ${actionButtons}

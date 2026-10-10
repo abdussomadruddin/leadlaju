@@ -7,7 +7,7 @@ test('Closed permission disables only GET LEAD with a clear explanation',()=>{
   const element=()=>({hidden:false,disabled:false,classList:{toggle(){}},setAttribute(){},textContent:''});
   const elements=Object.fromEntries(['agentLeadControls','getLeadButton','stopLeadButton','agentLeadStatus','agentLeadStatusMessage'].map(k=>[k,element()]));
   const user={role:'agent',getLeadAllowed:false,leadReady:false};
-  const c=vm.createContext({elements,getCurrentUser:()=>user,isTeamSales:()=>false});
+  const c=vm.createContext({elements,getCurrentUser:()=>user,isTeamSales:()=>false,agentLeadDisplayState:()=>user.getLeadAllowed===false?'denied':'stopped'});
   vm.runInContext(source.slice(source.indexOf('function renderAgentLeadControls('),source.indexOf('\nfunction updateCountdown(')),c);
   c.renderAgentLeadControls();
   assert.equal(elements.agentLeadControls.hidden,false);
