@@ -546,6 +546,8 @@ svg {
 }
 
 .dashboard-follow-up { margin-top: 16px; }
+.agent-dashboard #own-performance-metrics { margin-bottom: 0; }
+.agent-dashboard #own-performance + .dashboard-follow-up { margin-top: 12px; }
 .agent-dashboard.team-sales-dashboard .own-performance { margin-top: 0; }
 .agent-dashboard.team-sales-dashboard .new-lead-section { margin-top: 20px; }
 .agent-dashboard.team-sales-dashboard .dashboard-summary,
@@ -4157,6 +4159,11 @@ td small {
   opacity: 1;
   visibility: visible;
   transition-delay: 0s;
+}
+
+/* The cover is non-interactive, but its recovery button must receive taps. */
+.lifecycle-sync-overlay.visible #retry-dashboard-startup {
+  pointer-events: auto;
 }
 
 .lifecycle-sync-overlay.login-transition-cover {

@@ -722,7 +722,12 @@ function loadState() {
 }
 
 function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  // Remote data is authoritative; do not duplicate the full brand snapshot
+  // into legacy storage (or let a full/disabled phone cache break login).
+  if (!remoteDatabaseMode) {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+    catch (error) { console.warn('Local state storage unavailable', error?.name); }
+  }
   saveDashboardCache();
 }
 
@@ -737,12 +742,13 @@ function saveDashboardCache() {
   try {
     const snapshot = structuredClone(state);
     snapshot.agents.forEach(agent => delete agent.password);
-    snapshot.leads = snapshot.leads.map(lead => lead.status === "new" ? {
+    const hideNewContacts = activeBrand.distribution_mode !== 'team_sales';
+    snapshot.leads = snapshot.leads.map(lead => hideNewContacts && lead.status === "new" ? {
       ...lead, phone: "", email: "",
       notes: String(lead.notes || "").replace(/[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[Emel disembunyikan]").replace(/(?:\+?60|0)[ \t]*1[\d \t().-]{7,20}\d/g, "[Telefon disembunyikan]"),
     } : lead);
     snapshot.leads.forEach((lead,index)=>{
-      if (lead.status!=="new") return;
+      if (!hideNewContacts || lead.status!=="new") return;
       const phone=String(state.leads[index].phone||"").replace(/\D/g,"");
       if (phone.length>=7) lead.notes=lead.notes.replace(new RegExp("\\+?"+phone.split("").join("[ \\t().-]*"),"g"),"[Telefon disembunyikan]");
     });
@@ -1045,6 +1051,80 @@ function isTransientRemoteLoadError(error) {
   return ['57014', '53300', '57P01', '08000', '08006'].includes(error?.code) ||
     [502, 503, 504].includes(Number(error?.status)) ||
     /timeout|timed out|failed to fetch|network|fetch failed|aborterror|aborted|load failed|connection.*(closed|reset)/i.test(`${error?.name || ''} ${error?.message || ''}`);
+}
+
+function isInvalidAuthSessionError(error) {
+  return ['session_not_found', 'refresh_token_not_found', 'refresh_token_already_used', 'bad_jwt', 'user_not_found'].includes(error?.code) ||
+    Number(error?.status) === 401 || error?.name === 'AuthSessionMissingError';
+}
+
+async function boundedSessionRequest(request) {
+  let timer;
+  try {
+    return await Promise.race([request(), new Promise((_, reject) => {
+      timer = window.setTimeout(() => reject(new Error('Session check timed out')), REMOTE_REQUEST_TIMEOUT_MS);
+    })]);
+  } finally { window.clearTimeout(timer); }
+}
+
+async function validateStartupSession(expectedUserId) {
+  try {
+    let result = await boundedSessionRequest(() => remoteDatabaseClient.auth.getUser());
+    if (result.error && isInvalidAuthSessionError(result.error)) {
+      const refreshed = await boundedSessionRequest(() => remoteDatabaseClient.auth.refreshSession());
+      if (refreshed.error) return isInvalidAuthSessionError(refreshed.error) ? 'invalid' : 'unavailable';
+      if (!refreshed.data?.session?.user) return 'invalid';
+      result = await boundedSessionRequest(() => remoteDatabaseClient.auth.getUser());
+    }
+    if (result.error) return isInvalidAuthSessionError(result.error) ? 'invalid' : 'unavailable';
+    return result.data?.user?.id === expectedUserId ? 'valid' : 'invalid';
+  } catch (error) { return isInvalidAuthSessionError(error) ? 'invalid' : 'unavailable'; }
+}
+
+let startupRecoveryPending = false;
+async function retryDashboardStartup() {
+  if (startupRecoveryPending) return;
+  startupRecoveryPending = true;
+  const button = document.querySelector('#retry-dashboard-startup');
+  if (button) button.disabled = true;
+  const recoveryUserId = state.currentUserId;
+  const recoveryVersion = ++brandContextVersion;
+  dashboardReadRequests.clear();
+  ownPerformanceLoading = false;
+  teamPerformancePending.clear();
+  const status = elements.lifecycleSyncOverlay.querySelector('strong');
+  if (status) status.textContent = 'Menyemak sesi dan menyambung semula…';
+  try {
+    const sessionState = remoteDatabaseClient ? await validateStartupSession(recoveryUserId) : 'valid';
+    if (recoveryVersion !== brandContextVersion || recoveryUserId !== state.currentUserId) return;
+    if (sessionState === 'invalid') {
+      // Sign out this browser only, never other devices. Hide all previous-user data.
+      await boundedSessionRequest(() => remoteDatabaseClient.auth.signOut({ scope: 'local' })).catch(() => {});
+      if (recoveryVersion !== brandContextVersion || recoveryUserId !== state.currentUserId) return;
+      remoteRealtimeChannels.forEach(channel => remoteDatabaseClient.removeChannel(channel));
+      remoteRealtimeChannels = [];
+      state = { ...structuredClone(defaultState), currentUserId: null };
+      activeBrandId = ''; activeBrand = null; startupFromCache = false;
+      dashboardCacheMetrics.own = dashboardCacheMetrics.team = null;
+      initialDashboardSyncState = 'failed';
+      window.clearTimeout(startupRetryTimer);
+      window.clearTimeout(lifecycleIntroTimer);
+      document.querySelectorAll('.modal.open').forEach(closeModal);
+      showLogin();
+      hideLifecycleSyncOverlay();
+      setLoginError('Sesi telah tamat. Log masuk semula menggunakan kata laluan terkini.');
+      return;
+    }
+    if (sessionState === 'unavailable') {
+      if (status) status.textContent = 'Sambungan belum tersedia. Sesi dikekalkan; cuba semula.';
+      button?.removeAttribute('hidden');
+      return;
+    }
+    await beginColdStartSync();
+  } finally {
+    startupRecoveryPending = false;
+    if (button) button.disabled = false;
+  }
 }
 
 async function readDashboardSnapshot() {
@@ -1768,7 +1848,7 @@ async function performLogin(event) {
     const cached = await restoreTrustedDashboardCache(data.user.id);
     const loaded = cached || await loadRemoteState(data.user.id);
     if (!loaded) {
-      if (!isTransientRemoteLoadError(lastRemoteLoadError)) await remoteDatabaseClient.auth.signOut();
+      if (isInvalidAuthSessionError(lastRemoteLoadError)) await remoteDatabaseClient.auth.signOut({ scope: 'local' });
       setLoginError(isTransientRemoteLoadError(lastRemoteLoadError)
         ? 'Sesi anda masih aktif. Data belum dapat dimuatkan; tekan Log masuk untuk cuba semula.'
         : "Akaun berjaya disahkan tetapi data sistem tidak dapat dimuatkan.");
@@ -3042,7 +3122,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261010-agent-session-v158")
+      .register("/sw.js?v=20261017-import-recovery-v166")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -3987,20 +4067,26 @@ function normalizeLeadImportRows(table) {
   });
 }
 
+let importUploadRunning = false;
 function renderLeadImportPreview() {
-  const invalid = pendingLeadImportRows.filter((row) => row.errors.length).length;
+  const invalid = pendingLeadImportRows.filter((row) => row.errors.length && !row.importStatus).length;
   elements.leadImportCount.textContent = `${pendingLeadImportRows.length} baris`;
   elements.leadImportSummary.hidden = pendingLeadImportRows.length === 0;
   elements.leadImportSummary.classList.toggle("has-errors", invalid > 0);
   elements.leadImportSummary.textContent = pendingLeadImportRows.length
     ? invalid ? `${invalid} baris perlu dibaiki sebelum upload.` : `${pendingLeadImportRows.length} lead sedia untuk diupload.`
     : "";
-  elements.uploadLeadsButton.disabled = !pendingLeadImportRows.length || invalid > 0;
-  elements.clearLeadImport.disabled = !pendingLeadImportRows.length;
+  if (pendingLeadImportRows.some(row=>row.importStatus)) {
+    const count = status => pendingLeadImportRows.filter(row=>row.importStatus===status).length;
+    elements.leadImportSummary.textContent = `${count('inserted')} berjaya · ${count('duplicate')} duplicate · ${count('failed')} gagal · ${count('unknown')} belum disahkan`;
+  }
+  elements.uploadLeadsButton.disabled = importUploadRunning || !pendingLeadImportRows.length || invalid > 0 || pendingLeadImportRows.every(row => ["inserted", "duplicate"].includes(row.importStatus));
+  elements.uploadLeadsButton.textContent = pendingLeadImportRows.some(row => row.importStatus) ? "Cuba semula yang gagal / belum disahkan" : "Upload lead ke Supabase";
+  elements.clearLeadImport.disabled = importUploadRunning || !pendingLeadImportRows.length;
   elements.leadImportPreview.innerHTML = pendingLeadImportRows.length
-    ? pendingLeadImportRows.slice(0, 100).map((row) => `
+    ? pendingLeadImportRows.filter(row => !document.querySelector('#lead-import-result-filter')?.value || row.importStatus === document.querySelector('#lead-import-result-filter').value).map((row) => `
       <tr class="${row.errors.length ? "import-row-error" : ""}">
-        <td><strong>${escapeHtml(row.name || `Baris ${row.rowNumber}`)}</strong>${row.errors.length ? `<small>${escapeHtml(row.errors.join(" · "))}</small>` : ""}</td>
+        <td><strong>${escapeHtml(row.name || `Baris ${row.rowNumber}`)}</strong><small>Baris ${row.rowNumber} · ${escapeHtml(({inserted:'Berjaya',duplicate:'Duplicate',failed:'Gagal',pending:'Sedang disahkan',unknown:'Belum disahkan'})[row.importStatus] || 'Sedia')}</small>${row.errors.length ? `<small>${escapeHtml(row.errors.join(" · "))}</small>` : ""}</td>
         <td>${escapeHtml(row.phone)}</td>
         <td>${escapeHtml(row.email)}</td>
         <td>${escapeHtml(row.city)}</td>
@@ -4041,15 +4127,24 @@ async function importedLeadId(row) {
 }
 
 async function uploadImportedLeads() {
+  if (importUploadRunning || pendingLeadImportRows.some(row=>row.errors.length && !row.importStatus)) return;
   if (!isAdmin() || !remoteDatabaseMode || !remoteDatabaseClient || !pendingLeadImportRows.length) return;
+  importUploadRunning = true;
   elements.uploadLeadsButton.disabled = true;
   elements.clearLeadImport.disabled = true;
   elements.uploadLeadsButton.classList.add("is-loading");
+  const context = brandContextVersion;
+  const userId = state.currentUserId;
+  const rows = pendingLeadImportRows;
+  elements.leadImportFile.disabled = true;
+  try {
   let inserted = 0;
   let duplicates = 0;
   const failures = [];
   for (let index = 0; index < pendingLeadImportRows.length; index += 1) {
     const row = pendingLeadImportRows[index];
+    if (context !== brandContextVersion || userId !== state.currentUserId) break;
+    if (["inserted", "duplicate"].includes(row.importStatus)) continue;
     elements.leadImportStatus.textContent = `Mengupload ${index + 1} daripada ${pendingLeadImportRows.length}...`;
     const leadInput = {
       id: await importedLeadId(row),
@@ -4060,25 +4155,47 @@ async function uploadImportedLeads() {
       source: "Manual Lead",
       city: row.city,
       notes: "",
-      created_at: new Date().toISOString(),
+      created_at: row.importCreatedAt ||= new Date().toISOString(),
       status: "new",
     };
-    const { data, error } = await remoteDatabaseClient.rpc("admin_ingest_manual_lead", { p_lead: leadInput });
-    if (error || !data?.ok) failures.push({ row, message: error?.message || data?.error || "Upload gagal" });
-    else if (data.result === "duplicate") duplicates += 1;
-    else inserted += 1;
-  }
-  elements.uploadLeadsButton.classList.remove("is-loading");
-  if (failures.length) {
-    pendingLeadImportRows = failures.map(({ row, message }) => ({ ...row, errors: [message] }));
-    elements.leadImportStatus.textContent = `${inserted} berjaya, ${duplicates} duplicate, ${failures.length} gagal.`;
-    elements.leadImportStatus.classList.add("error");
+    row.importStatus = "pending";
+    row.errors = [];
     renderLeadImportPreview();
-  } else {
-    await loadRemoteState(state.currentUserId);
-    resetLeadImport();
-    elements.leadImportStatus.textContent = `${inserted} lead baharu berjaya diupload${duplicates ? `, ${duplicates} duplicate diabaikan` : ""}.`;
-    showToast("Import selesai", `${inserted} lead baharu telah masuk ke Supabase.`, "success");
+    elements.uploadLeadsButton.disabled = true;
+    elements.clearLeadImport.disabled = true;
+    let result;
+    for (let attempt=0; attempt<3; attempt++) {
+      if (context !== brandContextVersion || userId !== state.currentUserId) break;
+      try { result = await remoteDatabaseClient.rpc("admin_ingest_manual_lead", { p_lead: leadInput }); }
+      catch (error) { result = {error}; }
+      if (!result.error && result.data?.ok) break;
+      const message = result.error?.message || result.data?.error || "Upload gagal";
+      if (!/timeout|timed out|abort|network|fetch|load failed|connection|deadlock|lock timeout/i.test(message)) break;
+      if (attempt<2) await new Promise(resolve => window.setTimeout(resolve,500*(attempt+1)));
+    }
+    if (context !== brandContextVersion || userId !== state.currentUserId) return;
+    const {data,error} = result || {};
+    if (error || !data?.ok) {
+      const message=error?.message || data?.error || "Upload gagal";
+      row.importStatus=/abort|network|fetch|load failed|connection/i.test(message)?"unknown":"failed";
+      row.errors=[message]; failures.push({row,message});
+    } else if (data.result === "duplicate") { row.importStatus="duplicate"; duplicates++; }
+    else { row.importStatus="inserted"; inserted++; }
+    renderLeadImportPreview();
+    elements.uploadLeadsButton.disabled = true;
+    elements.clearLeadImport.disabled = true;
+  }
+  if (context === brandContextVersion && userId === state.currentUserId) {
+    const count = status => rows.filter(row=>row.importStatus===status).length;
+    elements.leadImportStatus.textContent = `${count('inserted')} berjaya, ${count('duplicate')} duplicate, ${count('failed')} gagal, ${count('unknown')} belum disahkan. Agihan diproses di background.`;
+    elements.leadImportStatus.classList.toggle("error",failures.length>0);
+    void loadRemoteState(state.currentUserId).catch(()=>{});
+  }
+  } finally {
+    importUploadRunning = false;
+    elements.uploadLeadsButton.classList.remove("is-loading");
+    elements.leadImportFile.disabled = false;
+    renderLeadImportPreview();
   }
 }
 
@@ -5640,10 +5757,10 @@ function displayLeadPhone(lead) {
   return canRevealLeadContact(lead) && lead.phone ? lead.phone : "•••• •••• ••••";
 }
 
-// Keep Team Sales contact actions available without revealing a New lead's
-// contact details in the card before the server confirms the first action.
+// Team Sales owners may see/copy New contact details immediately.
+// Agent mode keeps its existing CALL NOW privacy gate.
 function canRevealLeadContact(lead) {
-  return canViewLeadPhone(lead) && lead.status !== "new";
+  return canViewLeadPhone(lead) && (isTeamSales() || lead.status !== "new");
 }
 
 function countsTowardLeadBadge(lead) {
@@ -6124,12 +6241,12 @@ function renderLeadFollowUpButton(lead, actionAttribute = "data-lead-follow-up")
   const followUpCount = Math.min(6, Math.max(0, Number(lead?.followUpCount) || 0));
   const whatsappUrl = lead && canViewLeadPhone(lead) && !(isTeamSales() && lead.status === "new") ? whatsappLeadUrl(lead.phone) : "";
   const title = followUpCount >= 6
-    ? "Maksimum Follow Up 6"
+    ? "Buka WhatsApp"
     : !lead ? "Data lead belum tersedia"
       : !whatsappUrl ? isTeamSales() ? "Tekan Call atau WhatsApp dahulu" : "Tekan CALL NOW dahulu"
         : `Rekod Follow Up ${followUpCount + 1} dan buka WhatsApp`;
   const icon = `<svg class="lead-follow-up-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20.5 11.7a8.5 8.5 0 0 1-12.6 7.5L3.5 20.5l1.3-4.3a8.5 8.5 0 1 1 15.7-4.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8.3 8.2c-.4.4-.7 1-.7 1.5 0 2.8 3.1 5.9 5.9 6.2.6.1 1.2-.2 1.6-.6l.7-.8-2.1-1.1-.9.9a7.4 7.4 0 0 1-3.1-3.1l.9-.9-1.1-2.1-.8.7Z" fill="currentColor"/></svg>`;
-  return `<button class="contact-edit-button lead-follow-up-button follow-up-stage-${followUpCount}" type="button" ${actionAttribute}="${escapeHtml(lead?.id || "")}" ${!whatsappUrl || followUpCount >= 6 ? "disabled" : ""} title="${title}">${icon}<span>Follow Up${followUpCount ? ` ${followUpCount}` : ""}</span></button>`;
+  return `<button class="contact-edit-button lead-follow-up-button follow-up-stage-${followUpCount}" type="button" ${actionAttribute}="${escapeHtml(lead?.id || "")}" ${!whatsappUrl ? "disabled" : ""} title="${title}">${icon}<span>Follow Up${followUpCount ? ` ${followUpCount}` : ""}</span></button>`;
 }
 
 function renderLeadCopyButton(lead, actionAttribute = "data-lead-copy") {
@@ -7127,18 +7244,46 @@ async function loadBulletinFeed() {
   if (requestBrandVersion !== brandContextVersion) return false;
   state.bulletins = (data?.bulletins || []).map(normalizeBulletin);
   state.bulletinUnreadCount = Number(data?.unread_count) || 0;
+  if (activeView === 'bulletins') await markAllVisibleBulletinsRead();
   return true;
 }
 
+const bulletinReadRequests = new Map();
 async function markBulletinRead(id) {
   const bulletin = state.bulletins.find((item) => item.id === id);
-  if (!bulletin || isAdmin() || bulletin.readAt || !remoteDatabaseMode) return true;
-  const { error } = await remoteDatabaseClient.rpc("mark_bulletin_read", { p_bulletin_id: id });
-  if (error) throw error;
-  bulletin.readAt = new Date().toISOString();
-  state.bulletinUnreadCount = Math.max(0, state.bulletinUnreadCount - 1);
-  renderBulletins();
-  return true;
+  if (!bulletin || bulletin.status !== 'published' || isAdmin() || bulletin.readAt || !remoteDatabaseMode) return true;
+  const version = brandContextVersion;
+  const userId = state.currentUserId;
+  const key = `${version}:${userId}:${id}`;
+  if (bulletinReadRequests.has(key)) return bulletinReadRequests.get(key);
+  const pending = (async () => {
+    const { error } = await remoteDatabaseClient.rpc("mark_bulletin_read", { p_bulletin_id: id });
+    if (error) throw error;
+    if (version !== brandContextVersion || userId !== state.currentUserId) return false;
+    const current = state.bulletins.find(item => item.id === id);
+    if (current && !current.readAt) {
+      current.readAt = new Date().toISOString();
+      state.bulletinUnreadCount = Math.max(0, state.bulletinUnreadCount - 1);
+      renderBulletins();
+      saveDashboardCache();
+    }
+    return true;
+  })();
+  bulletinReadRequests.set(key, pending);
+  try { return await pending; }
+  finally { if (bulletinReadRequests.get(key) === pending) bulletinReadRequests.delete(key); }
+}
+
+async function markAllVisibleBulletinsRead() {
+  if (activeView !== 'bulletins' || isAdmin() || !remoteDatabaseMode || !state.currentUserId) return;
+  const version = brandContextVersion;
+  const userId = state.currentUserId;
+  const unread = state.bulletins.filter(item => item.status === 'published' && !item.readAt);
+  for (let index = 0; index < unread.length; index += 4) {
+    if (version !== brandContextVersion || userId !== state.currentUserId || activeView !== 'bulletins') return;
+    const results = await Promise.allSettled(unread.slice(index, index + 4).map(item => markBulletinRead(item.id)));
+    if (results.some(result => result.status === 'rejected')) console.warn('Some bulletin read acknowledgements will retry on the next feed sync');
+  }
 }
 
 function bulletinCard(bulletin, featured = false) {
@@ -7240,7 +7385,10 @@ async function loadFollowUpDueFeed() {
   const { data, error } = await remoteDatabaseClient.rpc("get_follow_up_due");
   if (error) throw error;
   if (requestBrandVersion !== brandContextVersion) return false;
-  state.followUpDue = (data?.leads || []).map(normalizeFollowUpDue);
+  state.followUpDue = (data?.leads || []).map(normalizeFollowUpDue).filter(item => {
+    const lead = state.leads.find(lead => lead.id === item.id);
+    return !lead || Number(lead.followUpCount || 0) < 4;
+  });
   state.followUpServerNow = data?.server_now ? new Date(data.server_now).getTime() : Date.now();
   state.followUpLoadedAt = Date.now();
   if (Number.isInteger(data?.follow_up_due_limit) && activeBrand) activeBrand.follow_up_due_limit = data.follow_up_due_limit;
@@ -7270,7 +7418,10 @@ let followUpSection = "due";
 let pendingFollowUpSection = new URLSearchParams(window.location.search).get("section");
 
 function followUpSectionRows(section) {
-  if (section === "due") return Array.isArray(state.followUpDue) ? state.followUpDue : [];
+  if (section === "due") return Array.isArray(state.followUpDue) ? state.followUpDue.filter(item => {
+    const lead = state.leads.find(lead => lead.id === item.id);
+    return !lead || Number(lead.followUpCount || 0) < 4;
+  }) : [];
   return state.leads.filter(lead => lead.status === section &&
     (isAdmin() || lead.assignedAgentId === state.currentUserId) && !isVisuallyExpiredAssignment(lead))
     .sort((a, b) => section === "new" ? new Date(a.createdAt || a.receivedAt) - new Date(b.createdAt || b.receivedAt) : new Date(b.createdAt || b.receivedAt) - new Date(a.createdAt || a.receivedAt))
@@ -7341,7 +7492,7 @@ document.querySelector("#follow-up-limit-form")?.addEventListener("submit", asyn
 function renderFollowUpDue() {
   if (!elements.followUpDueList) return;
   renderFollowUpLimitSetting();
-  const rows = Array.isArray(state.followUpDue) ? state.followUpDue : [];
+  const rows = followUpSectionRows('due');
   const sectionRows = followUpSectionRows(followUpSection);
   elements.followUpDueList.dataset.section = followUpSection;
   document.querySelectorAll("[data-follow-up-section]").forEach(button => {
@@ -7998,8 +8149,8 @@ function switchView(viewName, { historyMode = "push" } = {}) {
   if (viewName === "brands") loadMasterManagement();
   if (viewName === "bulletins") {
     openRequestedBulletin();
-    const latest = state.bulletins.find((bulletin) => bulletin.status === "published");
-    if (latest) markBulletinRead(latest.id).catch(() => false);
+    void markAllVisibleBulletinsRead();
+    loadBulletinFeed().then(renderBulletins).catch(error => console.warn('Bulletin feed refresh failed', error));
   }
   if (viewName === "follow-up-due" && Date.now() - state.followUpLoadedAt > 30000) {
     loadFollowUpDueFeed().then(renderFollowUpDue).catch((error) => console.warn("Follow-up feed failed", error));
@@ -8751,7 +8902,12 @@ async function recordLeadFollowUp(leadId, button) {
   const lead = state.leads.find((item) => item.id === leadId);
   if (!lead || !canAccessLead(lead) || !canViewLeadPhone(lead)) return false;
   const whatsappUrl = whatsappLeadUrl(lead.phone);
-  if (!whatsappUrl || Number(lead.followUpCount) >= 6) return false;
+  if (!whatsappUrl) return false;
+  // At the cap this is a contact shortcut only: no RPC, counter or activity write.
+  if (Number(lead.followUpCount) >= 6) {
+    window.location.assign(whatsappUrl);
+    return true;
+  }
   const previousCount = Number(lead.followUpCount) || 0;
   const previousStatus = lead.status;
   if (remoteDatabaseRequired && !remoteDatabaseMode) {
@@ -8774,7 +8930,7 @@ async function recordLeadFollowUp(leadId, button) {
       queueRemoteReload();
     } else {
       lead.followUpCount = previousCount + 1;
-      if (lead.followUpCount === 3) applySheetStatusToLead(lead, "all_offer_presented");
+      if (lead.followUpCount >= 4 && lead.status === "contacted") applySheetStatusToLead(lead, "all_offer_presented");
       saveState();
     }
     lead.updatedAt = Date.now();
@@ -9471,6 +9627,12 @@ elements.agentPasswordForm.addEventListener("submit", updateAgentPassword);
 elements.contactForm.addEventListener("submit", updateContact);
 elements.leadImportFile?.addEventListener("change", handleLeadImportFile);
 elements.uploadLeadsButton?.addEventListener("click", uploadImportedLeads);
+document.querySelector('#lead-import-result-filter')?.addEventListener('change', renderLeadImportPreview);
+document.querySelector('#download-import-report')?.addEventListener('click', () => {
+  const safe = value => /^[=+@\-\t\r]/.test(String(value || '')) ? `'${value}` : value;
+  const rows = [['Baris','Nama','Telefon','Email','Projek/Produk','Keputusan','Sebab'], ...pendingLeadImportRows.map(row => [row.rowNumber,row.name,row.phone,row.email,row.project,({inserted:'Berjaya',duplicate:'Duplicate',failed:'Gagal',unknown:'Belum disahkan',pending:'Sedang disahkan'})[row.importStatus] || 'Sedia',row.errors.join(' · ')])];
+  downloadFile(new Blob(['\uFEFF'+rows.map(row=>row.map(value=>csvCell(safe(value))).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'}),'laporan-import-lead.csv');
+});
 elements.clearLeadImport?.addEventListener("click", resetLeadImport);
 elements.downloadSampleCsv?.addEventListener("click", downloadLeadSampleCsv);
 elements.downloadSampleXlsx?.addEventListener("click", downloadLeadSampleXlsx);
@@ -9620,11 +9782,7 @@ window.addEventListener("online", () => {
   }
 });
 document.querySelector("#retry-dashboard-startup")?.addEventListener("click", () => {
-  brandContextVersion++;
-  dashboardReadRequests.clear();
-  ownPerformanceLoading = false;
-  teamPerformancePending.clear();
-  void beginColdStartSync();
+  void retryDashboardStartup();
 });
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) updateSalesLeadWaitingTimes();
@@ -9784,7 +9942,7 @@ async function bootstrap() {
           return;
         }
       }
-      if (loaded || !isTransientRemoteLoadError(lastRemoteLoadError)) await remoteDatabaseClient.auth.signOut();
+      if (loaded || isInvalidAuthSessionError(lastRemoteLoadError)) await remoteDatabaseClient.auth.signOut({ scope: 'local' });
     }
     showLogin();
     return;

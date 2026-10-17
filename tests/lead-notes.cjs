@@ -44,15 +44,17 @@ test('Locked New Lead notes mask contact details and escape HTML', () => {
   assert(context.renderNewLeadNotes({notes}).includes('fixture@example.com'));
 });
 
-test('Team Sales New notes stay masked until confirmed Contacted, while actions remain authorized', () => {
+test('Team Sales New notes reveal authorized contacts immediately', () => {
   context.isTeamSales=()=>true;
   context.canViewLeadPhone=()=>true;
   const lead={status:'new',phone:'601126929192',notes:'Remark\n+60 11-2692 9192\n601126929192\nfixture@example.com'};
   const locked=context.renderNewLeadNotes(lead);
-  assert(!locked.includes('2692'));assert(!locked.includes('601126929192'));
-  assert(!locked.includes('fixture@example.com'));assert(locked.includes('Call atau WhatsApp'));
+  assert(locked.includes('2692'));assert(locked.includes('601126929192'));
+  assert(locked.includes('fixture@example.com'));
   assert.equal(context.canViewLeadPhone(lead),true,'Display masking does not disable contact action permission');
   lead.status='contacted';
   assert(context.renderNewLeadNotes(lead).includes('2692'));
   assert(context.renderNewLeadNotes(lead).includes('fixture@example.com'));
+  context.canViewLeadPhone=()=>false;
+  assert(!context.renderNewLeadNotes({...lead,status:'new'}).includes('fixture@example.com'));
 });

@@ -8,19 +8,20 @@ test('only temporary failures qualify for dashboard retry',()=>{
 test('retry is bounded, brand-aware, and transient login failure preserves session',()=>{
  assert.match(source,/isTransientRemoteLoadError\(error\) && attempt < 2/);
  assert.match(source,/return performLoadRemoteState\(userId, attempt \+ 1\)/);
- assert.match(source,/if \(!isTransientRemoteLoadError\(lastRemoteLoadError\)\) await remoteDatabaseClient.auth.signOut\(\)/);
+ assert.match(source,/if \(isInvalidAuthSessionError\(lastRemoteLoadError\)\) await remoteDatabaseClient.auth.signOut\(\{ scope: 'local' \}\)/);
  assert.match(source,/if \(brandResult.error\) throw brandResult.error/);
  assert.match(source,/window.clearTimeout\(timeout\)/);
 });
-test('exhausted transient login retries do not sign out; denied access does',async()=>{
+test('dashboard failures preserve login; only invalid authentication signs out locally',async()=>{
  const start=source.indexOf('async function performLogin('),end=source.indexOf('\nfunction ',start);
- for(const transient of [true,false]){
+ for(const [transient,invalid] of [[true,false],[false,false],[false,true]]){
   let signOuts=0,message='';
   const context={elements:{loginEmail:{value:'test@example.invalid'},loginPassword:{value:'fixture'}},remoteDatabaseClient:{auth:{signInWithPassword:async()=>({data:{user:{id:'fixture'}}}),signOut:async()=>signOuts++}},loadRemoteState:async()=>false,lastRemoteLoadError:{},isTransientRemoteLoadError:()=>transient,setLoginError:text=>message=text};
   context.restoreTrustedDashboardCache=async()=>false;
+  context.isInvalidAuthSessionError=()=>invalid;
   vm.runInNewContext(source.slice(start,end),context);
   await context.performLogin({preventDefault(){}});
-  assert.equal(signOuts,transient?0:1);
+  assert.equal(signOuts,invalid?1:0);
   assert.match(message,transient?/Sesi anda masih aktif/:/data sistem tidak/);
  }
 });
