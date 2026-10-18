@@ -23,8 +23,9 @@ while(true){
  await new Promise(r=>setTimeout(r,100));
 }
 const migration=fs.readFileSync('supabase/migrations/20261018172414_safe_cron_log_retention.sql','utf8');
-query(`begin;${migration}
+const installed=query("select exists(select 1 from supabase_migrations.schema_migrations where version='20261018172414') installed")[0].installed;
+query(`begin;${installed ? '' : migration}
 select cron.schedule('leadlaju-cron-log-retention','17 19 * * *','select leadlaju_private.prune_completed_cron_logs()');
-insert into supabase_migrations.schema_migrations(version,name,statements) values('20261018172414','safe_cron_log_retention',array[$migration$${migration}$migration$]);commit;`);
+insert into supabase_migrations.schema_migrations(version,name,statements) values('20261018172414','safe_cron_log_retention',array[$migration$${migration}$migration$]) on conflict(version) do nothing;commit;`);
 query('vacuum cron.job_run_details;');
 console.log({backupDirectory:destination,batches,deleted});
