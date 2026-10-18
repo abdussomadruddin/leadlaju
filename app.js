@@ -1271,11 +1271,24 @@ async function performLoadRemoteState(userId, attempt = 0) {
   }
 }
 
+let realtimeSubscriptionRequest = null;
 async function subscribeToRemoteDatabase() {
+  const key = `${brandContextVersion}:${state.currentUserId}:${activeBrandId}`;
+  if (realtimeSubscriptionRequest?.key === key) return realtimeSubscriptionRequest.promise;
+  const request = {key};
+  request.promise = createRemoteSubscriptions().finally(() => {
+    if (realtimeSubscriptionRequest === request) realtimeSubscriptionRequest = null;
+  });
+  realtimeSubscriptionRequest = request;
+  return request.promise;
+}
+async function createRemoteSubscriptions() {
   if (!remoteDatabaseClient || !remoteDatabaseMode || !state.currentUserId) return null;
+  const expectedVersion = brandContextVersion, expectedUser = state.currentUserId;
   remoteRealtimeChannels.forEach((channel) => remoteDatabaseClient.removeChannel(channel));
   remoteRealtimeChannels = [];
   await remoteDatabaseClient.realtime.setAuth();
+  if (expectedVersion !== brandContextVersion || expectedUser !== state.currentUserId) return null;
   const topics = [`user:${state.currentUserId}`];
   if (isAdmin() && activeBrandId) topics.push(`brand:${activeBrandId}:operations`);
   const subscriptionBrandVersion = brandContextVersion;
@@ -3122,7 +3135,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261018-lead-export-v167")
+      .register("/sw.js?v=20261019-safe-sync-v168")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -7308,7 +7321,27 @@ function validBulletinUrl(value) {
   try { const url = new URL(String(value || "")); return url.protocol === "https:" ? url.href : ""; } catch { return ""; }
 }
 
-async function loadBulletinFeed() {
+const sharedFeedReads = new Map();
+function sharedFeedRead(name, operation) {
+  const version = brandContextVersion, user = state.currentUserId;
+  const key = `${version}:${user}:${name}`;
+  const current = sharedFeedReads.get(key);
+  if (current) { current.dirty = true; return current.promise; }
+  const request = {dirty:false};
+  request.promise = Promise.resolve().then(async () => {
+    let result;
+    do {
+      request.dirty = false;
+      if (version !== brandContextVersion || user !== state.currentUserId) return false;
+      result = await operation();
+    } while (request.dirty && version === brandContextVersion && user === state.currentUserId);
+    return result;
+  }).finally(() => { if (sharedFeedReads.get(key) === request) sharedFeedReads.delete(key); });
+  sharedFeedReads.set(key, request);
+  return request.promise;
+}
+function loadBulletinFeed() { return sharedFeedRead('bulletins', readBulletinFeed); }
+async function readBulletinFeed() {
   if (!remoteDatabaseMode || !remoteDatabaseClient || !state.currentUserId) return false;
   const requestBrandVersion = brandContextVersion;
   const { data, error } = await remoteDatabaseClient.rpc("get_bulletin_feed");
@@ -7451,7 +7484,8 @@ function normalizeFollowUpDue(row) {
   };
 }
 
-async function loadFollowUpDueFeed() {
+function loadFollowUpDueFeed() { return sharedFeedRead('follow-up-due', readFollowUpDueFeed); }
+async function readFollowUpDueFeed() {
   if (!remoteDatabaseClient || !remoteDatabaseMode || !state.currentUserId) return false;
   const requestBrandVersion = brandContextVersion;
   const { data, error } = await remoteDatabaseClient.rpc("get_follow_up_due");
