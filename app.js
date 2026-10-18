@@ -1348,6 +1348,13 @@ function handleRemoteBroadcast(message) {
 let realtimeReloadRunning = false;
 let realtimeReloadRequested = false;
 let realtimeReloadPromise = null;
+let syncedPerformanceSignature = null;
+function performanceSyncSignature() {
+  return JSON.stringify([brandContextVersion,state.currentUserId,activeBrandId,todayKey(),
+    typeof teamPerformanceDays === 'undefined' ? null : teamPerformanceDays,
+    state.leads,state.appointments,state.followUpDue,
+    state.agents.map(agent => [agent.id,agent.name,agent.role,agent.active,agent.approvalStatus])]);
+}
 function queueRemoteReload() {
   realtimeReloadRequested = true;
   if (realtimeReloadRunning) return realtimeReloadPromise;
@@ -1359,11 +1366,16 @@ function queueRemoteReload() {
         realtimeReloadRequested = false;
         const version = brandContextVersion;
         if (await loadRemoteState(state.currentUserId) && version === brandContextVersion) {
-          teamPerformanceCache.clear();
           await loadBulletinFeed();
           if (version !== brandContextVersion) continue;
-          if (isAdmin() && isTeamSales()) await loadTeamPerformance();
-          else if (!isAdmin()) await loadOwnPerformance();
+          const signature = performanceSyncSignature();
+          if (signature !== syncedPerformanceSignature) {
+            teamPerformanceCache.clear();
+            let refreshed = true;
+            if (isAdmin() && isTeamSales()) refreshed = await loadTeamPerformance();
+            else if (!isAdmin()) refreshed = await loadOwnPerformance();
+            if (refreshed && version === brandContextVersion) syncedPerformanceSignature = signature;
+          }
           if (version !== brandContextVersion) continue;
           renderDashboardUpdates();
           showDashboardSyncWarning(false);
@@ -3135,7 +3147,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261019-safe-sync-v168")
+      .register("/sw.js?v=20261019-usage-v169")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
