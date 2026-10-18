@@ -3122,7 +3122,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261017-import-recovery-v166")
+      .register("/sw.js?v=20261018-lead-export-v167")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -4196,6 +4196,78 @@ async function uploadImportedLeads() {
     elements.uploadLeadsButton.classList.remove("is-loading");
     elements.leadImportFile.disabled = false;
     renderLeadImportPreview();
+  }
+}
+
+let leadExportRunning = false;
+function exportLeadDate(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) throw new Error('Tarikh lead tidak sah.');
+  // Excel has no timezone; encode the Kuala Lumpur wall clock as a numeric date.
+  return new Date(date.getTime() + 8 * 60 * 60 * 1000);
+}
+
+async function exportAllBrandLeads() {
+  if (leadExportRunning || !isAdmin() || !remoteDatabaseMode || !activeBrandId) return;
+  const button = document.querySelector('#export-all-leads');
+  const progress = document.querySelector('#lead-export-progress');
+  const context = brandContextVersion, user = state.currentUserId, brand = activeBrandId;
+  const valid = () => context === brandContextVersion && user === state.currentUserId && brand === activeBrandId && isAdmin();
+  leadExportRunning = true; button.disabled = true; button.classList.add('is-loading');
+  progress.textContent = 'Memuatkan semua lead…';
+  try {
+    if (!window.ExcelJS) throw new Error('Excel belum tersedia. Cuba semula.');
+    const workbook = new window.ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Semua Lead');
+    let after = null, cutoff = null, total = null, count = 0, metadata;
+    const seen = new Set();
+    do {
+      if (!valid()) return;
+      const {data,error} = await remoteDatabaseClient.rpc('export_brand_leads_page',{p_after:after,p_cutoff:cutoff});
+      if (!valid()) return;
+      if (error) throw error;
+      if (!data || data.brand_id !== brand || !Array.isArray(data.rows)) throw new Error('Respons eksport tidak sah.');
+      if (!metadata) {
+        metadata=data; cutoff=data.cutoff; total=Number(data.total);
+        if (!Number.isSafeInteger(total) || total<0) throw new Error('Jumlah eksport tidak sah.');
+        sheet.addRow(['ID Lead','Nama','Telefon','Emel',data.distribution_mode==='team_sales'?'Produk':'Projek','Sumber','Status','Pemilik','Follow Up','Nota/Remark','Tarikh Lead Masuk (KL)','Tarikh Kemas Kini (KL)']);
+      }
+      for (const row of data.rows) {
+        if (!row.id || seen.has(row.id)) throw new Error('Rekod eksport berulang. Cuba semula.');
+        seen.add(row.id);
+        const text = value => String(value ?? '');
+        const excelRow=sheet.addRow([text(row.id),text(row.name),text(row.phone),text(row.email),text(row.project),text(row.source),LEAD_STATUS_LABELS[row.status] || text(row.status),text(row.owner || 'Belum diagih'),Number(row.follow_up_count)||0,text(row.notes),exportLeadDate(row.created_at),exportLeadDate(row.updated_at)]);
+        excelRow.getCell(3).numFmt='@';
+        excelRow.getCell(10).alignment={vertical:'top',wrapText:true};
+        excelRow.getCell(11).numFmt=excelRow.getCell(12).numFmt='dd/mm/yyyy hh:mm:ss';
+        count++;
+      }
+      progress.textContent=`Memuatkan ${count} daripada ${total} lead…`;
+      if (!data.has_more) break;
+      const next=data.rows.at(-1)?.id;
+      if (!next || next===after) throw new Error('Pagination eksport gagal.');
+      after=next;
+    } while (true);
+    if (count!==total) throw new Error('Data berubah semasa eksport. Cuba semula untuk fail lengkap.');
+    sheet.views=[{state:'frozen',ySplit:1}];
+    sheet.autoFilter={from:'A1',to:`L${Math.max(1,count+1)}`};
+    [38,28,20,32,26,22,24,28,12,65,26,26].forEach((width,index)=>sheet.getColumn(index+1).width=width);
+    sheet.getRow(1).font={bold:true,color:{argb:'FFFFFFFF'}};
+    sheet.getRow(1).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF2868DC'}};
+    sheet.getRow(1).height=30;
+    progress.textContent='Menyediakan fail Excel…';
+    const buffer=await workbook.xlsx.writeBuffer();
+    if (!valid()) return;
+    const slug=String(metadata.brand_name || 'brand').normalize('NFKD').replace(/[^a-zA-Z0-9]+/g,'-').replace(/^-|-$/g,'').toLowerCase() || 'brand';
+    const day=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kuala_Lumpur',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+    downloadFile(new Blob([buffer],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),`leadlaju-semua-lead-${slug}-${day}.xlsx`);
+    progress.textContent=`${count} lead berjaya dieksport.`;
+  } catch(error) {
+    if (valid()) progress.textContent=`Eksport gagal: ${error.message || 'Sambungan terganggu'}. Tekan Download untuk cuba semula. Tiada fail separa dimuat turun.`;
+  } finally {
+    leadExportRunning=false; button.disabled=false; button.classList.remove('is-loading');
+    if (!valid()) progress.textContent='';
   }
 }
 
@@ -9627,6 +9699,7 @@ elements.agentPasswordForm.addEventListener("submit", updateAgentPassword);
 elements.contactForm.addEventListener("submit", updateContact);
 elements.leadImportFile?.addEventListener("change", handleLeadImportFile);
 elements.uploadLeadsButton?.addEventListener("click", uploadImportedLeads);
+document.querySelector('#export-all-leads')?.addEventListener('click', exportAllBrandLeads);
 document.querySelector('#lead-import-result-filter')?.addEventListener('change', renderLeadImportPreview);
 document.querySelector('#download-import-report')?.addEventListener('click', () => {
   const safe = value => /^[=+@\-\t\r]/.test(String(value || '')) ? `'${value}` : value;
