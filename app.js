@@ -1392,13 +1392,24 @@ let realtimeReloadRunning = false;
 let realtimeReloadRequested = false;
 let realtimeReloadPromise = null;
 let syncedPerformanceSignature = null;
+let remotePollRetryAt = 0;
+let remotePollFailures = 0;
+let remotePollContext = null;
 function performanceSyncSignature() {
   return JSON.stringify([brandContextVersion,state.currentUserId,activeBrandId,todayKey(),
     typeof teamPerformanceDays === 'undefined' ? null : teamPerformanceDays,
     state.leads,state.appointments,state.followUpDue,
     state.agents.map(agent => [agent.id,agent.name,agent.role,agent.active,agent.approvalStatus])]);
 }
-function queueRemoteReload() {
+function queueRemoteReload(options = {}) {
+  const context = `${brandContextVersion}:${state.currentUserId}`;
+  if (remotePollContext !== context) {
+    remotePollContext = context;
+    remotePollFailures = 0;
+    remotePollRetryAt = 0;
+  }
+  // Only idle fallback polling backs off. Realtime, resume and user actions stay immediate.
+  if (options?.backgroundPoll && Date.now() < remotePollRetryAt) return Promise.resolve(false);
   realtimeReloadRequested = true;
   if (realtimeReloadRunning) return realtimeReloadPromise;
   if (!remoteDatabaseMode || !state.currentUserId) return Promise.resolve(false);
@@ -1409,6 +1420,8 @@ function queueRemoteReload() {
         realtimeReloadRequested = false;
         const version = brandContextVersion;
         if (await loadRemoteState(state.currentUserId) && version === brandContextVersion) {
+          remotePollFailures = 0;
+          remotePollRetryAt = 0;
           await loadBulletinFeed();
           if (version !== brandContextVersion) continue;
           const signature = performanceSyncSignature();
@@ -1423,11 +1436,17 @@ function queueRemoteReload() {
           renderDashboardUpdates();
           showDashboardSyncWarning(false);
         } else if (version === brandContextVersion) {
+          remotePollRetryAt = Date.now() + Math.min(120000, 30000 * 2 ** Math.min(++remotePollFailures, 2));
           showDashboardSyncWarning(true);
+          // Do not replay an accumulated event burst immediately after a failed read.
+          break;
         }
       }
     } catch (error) {
-      showDashboardSyncWarning(true);
+      if (remotePollContext === context) {
+        remotePollRetryAt = Date.now() + Math.min(120000, 30000 * 2 ** Math.min(++remotePollFailures, 2));
+        showDashboardSyncWarning(true);
+      }
       console.warn("Background dashboard sync failed", error);
     } finally { realtimeReloadRunning = false; realtimeReloadPromise = null; }
   })();
@@ -3190,7 +3209,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261020-device-report-v171")
+      .register("/sw.js?v=20261020-bounded-io-v172")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -4649,6 +4668,7 @@ function agentSheetPayload(agent) {
   };
 }
 
+let agentPresenceRequest = null;
 async function updateAgentPresence(online, force = false) {
   const user = getCurrentUser();
   if (!user?.id || user.role !== "agent") return false;
@@ -4657,13 +4677,23 @@ async function updateAgentPresence(online, force = false) {
     return true;
   }
   if (remoteDatabaseMode) {
-    const { data, error } = await remoteDatabaseClient.rpc("heartbeat_agent", {
+    const version = brandContextVersion;
+    const payload = {
       p_session_started_at: new Date(agentPresenceSessionStartedAt || now).toISOString(),
       p_notification_ready: Notification.permission === "granted",
-    });
-    if (error || !data?.ok) return false;
-    lastAgentPresenceHeartbeatAt = online ? now : 0;
-    return true;
+    };
+    const key = JSON.stringify([version,user.id,online,payload]);
+    if (agentPresenceRequest?.key === key) return agentPresenceRequest.promise;
+    const request = {key};
+    request.promise = (async () => {
+      const {data,error} = await remoteDatabaseClient.rpc("heartbeat_agent", payload);
+      if (version !== brandContextVersion || getCurrentUser()?.id !== user.id || error || !data?.ok) return false;
+      lastAgentPresenceHeartbeatAt = online ? now : 0;
+      return true;
+    })();
+    agentPresenceRequest = request;
+    try { return await request.promise; }
+    finally { if (agentPresenceRequest === request) agentPresenceRequest = null; }
   }
   const updated = await postGoogleSheetAction({
     action: "update_agent_presence",
@@ -9459,7 +9489,7 @@ async function syncGoogleSheet(options = {}) {
 function scheduleSync() {
   window.clearInterval(syncTimer);
   if (remoteDatabaseMode) {
-    syncTimer = window.setInterval(() => queueRemoteReload(), 30000);
+    syncTimer = window.setInterval(() => queueRemoteReload({backgroundPoll:true}), 30000);
     return;
   }
   if (!getSheetEndpoint()) return;
