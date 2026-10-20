@@ -193,6 +193,8 @@ function renderPushDeviceReport() {
   const content = document.querySelector("#push-device-report-content");
   if (!content || !isAdmin()) return;
   document.querySelector("#push-device-report h2").textContent = `Laporan peranti ${isTeamSales() ? "Team Sales" : "ejen"} · ${activeBrand?.name || "Brand dipilih"}`;
+  const download = document.querySelector("#download-push-device-report");
+  if (download && download.dataset.actionPending !== "true") download.disabled = false;
   content.innerHTML = state.agents.filter(agent => agent.role === "agent").map(agent => `<section><h3>${escapeHtml(agent.name)}</h3>${renderAgentPushDevices(agent)}</section>`).join("") || "<p>Tiada ejen dalam brand ini.</p>";
 }
 
@@ -203,6 +205,47 @@ function pushDeviceLabel(device) {
   const received = new Date(device.checkReceivedAt || 0).getTime();
   if (started && received >= started && received-started <= 60000 && Date.now()-received < 86400000) return "Sedia terima notifikasi";
   return "Belum disahkan";
+}
+
+function pushDeviceExportRows(agents, devices) {
+  const statuses = ["Sedia terima notifikasi", "Belum disahkan", "Terputus"];
+  return statuses.map(status => ({status, rows: agents.filter(agent => agent.role === "agent").flatMap(agent => {
+    const own = devices.filter(device => device.userId === agent.id);
+    if (!own.length) return status === "Belum disahkan" ? [[agent.name, "Tiada rekod peranti", status, "", ""]] : [];
+    return own.filter(device => pushDeviceLabel(device) === status).map(device => [agent.name, device.device || "Tidak diketahui", status, device.checkAt || "", device.checkReceivedAt || ""]);
+  })}));
+}
+
+async function downloadPushDeviceReport(button) {
+  if (!isAdmin() || button.disabled || !document.querySelector("#push-device-report")?.open) return;
+  const version = brandContextVersion;
+  const user = state.currentUserId;
+  const valid = () => version === brandContextVersion && user === state.currentUserId && isAdmin() && document.querySelector("#push-device-report")?.open;
+  const finish = beginButtonFeedback(button);
+  button.disabled = true;
+  try {
+    if (!await loadPushDeviceStatus()) throw new Error("Laporan tidak dapat dikemas kini. Cuba semula.");
+    if (!valid()) return;
+    if (!window.ExcelJS) throw new Error("Excel belum tersedia. Refresh dan cuba semula.");
+    const workbook = new window.ExcelJS.Workbook();
+    const brand = activeBrand?.name || "Brand";
+    const stamp = new Intl.DateTimeFormat("sv-SE", {timeZone:"Asia/Kuala_Lumpur",dateStyle:"short",timeStyle:"medium"}).format(new Date());
+    const dateText = value => value && Number.isFinite(new Date(value).getTime()) ? new Intl.DateTimeFormat("ms-MY", {timeZone:"Asia/Kuala_Lumpur",dateStyle:"short",timeStyle:"medium"}).format(new Date(value)) : "-";
+    for (const group of pushDeviceExportRows(state.agents, pushDeviceStatus)) {
+      const sheet = workbook.addWorksheet(group.status, {views:[{state:"frozen",ySplit:1}]});
+      sheet.addRow(["Brand", isTeamSales() ? "Team Sales" : "Ejen", "Peranti", "Status", "Semakan (Kuala Lumpur)", "Pengesahan push (Kuala Lumpur)", "Dieksport (Kuala Lumpur)"]);
+      group.rows.forEach(row => sheet.addRow([brand, ...row.slice(0,3), dateText(row[3]), dateText(row[4]), stamp]));
+      sheet.getRow(1).font = {bold:true};
+      sheet.columns.forEach(column => { column.width=30; column.alignment={vertical:"top",wrapText:true}; column.numFmt="@"; });
+      sheet.autoFilter={from:{row:1,column:1},to:{row:Math.max(1,sheet.rowCount),column:7}};
+    }
+    const buffer = await workbook.xlsx.writeBuffer();
+    if (!valid()) return;
+    const slug = brand.replace(/[^a-z0-9]+/gi,"-").replace(/^-|-$/g,"") || "brand";
+    downloadFile(new Blob([buffer], {type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}), `leadlaju-peranti-${slug}-${stamp.slice(0,10)}.xlsx`);
+  } catch(error) {
+    if (valid()) showToast("Download gagal", error.message || "Cuba semula.", "error");
+  } finally { finish(); button.disabled = !valid(); }
 }
 
 function renderAgentPushDevices(agent) {
@@ -3147,7 +3190,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261020-copy-notes-v170")
+      .register("/sw.js?v=20261020-device-report-v171")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -9522,6 +9565,8 @@ window.addEventListener("popstate", (event) => {
   switchView(event.state?.leadLajuView || getRequestedStartView(), { historyMode: "none" });
 });
 document.addEventListener("click", (event) => {
+  const deviceDownload = event.target.closest("#download-push-device-report");
+  if (deviceDownload) { void downloadPushDeviceReport(deviceDownload); return; }
   if (event.target.closest("#close-push-device-report")) { document.querySelector("#push-device-report").close(); return; }
   const pushTestButton = event.target.closest("#check-all-push-devices");
   if (pushTestButton) {
@@ -9532,6 +9577,7 @@ document.addEventListener("click", (event) => {
     const report = document.querySelector("#push-device-report");
     const progress = document.querySelector("#push-device-report-progress");
     report.showModal();
+    document.querySelector("#download-push-device-report").disabled = true;
     progress.textContent = "Memuatkan semua peranti…";
     document.querySelector("#push-device-report-content").textContent = "";
     void (async () => {
