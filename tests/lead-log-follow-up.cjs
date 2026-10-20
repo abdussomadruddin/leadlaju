@@ -45,6 +45,18 @@ test('copy button uses the requested inquiry text and stays locked before CALL N
   assert.match(app, /data-lead-copy/);
 });
 
+test('copy removes repeated contact lines but preserves source notes and other remarks', () => {
+  const source = app.match(/function leadDetailsCopyText\(lead\) \{[\s\S]*?\n\}/)[0];
+  const format = vm.runInNewContext(`(${source})`);
+  const lead = {name:'Zaki bdull',phone:'60163623618',email:'zieggreen@gmail.com',project:'LG',source:'Tiktok',notes:'Zaki bdull\r\n+60 16-362 3618\r\nZieggreen@gmail.com\r\nBerniaga/Freelance\r\nRM3500-RM5000\r\nYa'};
+  const original = lead.notes;
+  assert.equal(format(lead).split('Nota Lain:\n')[1], 'Berniaga/Freelance\nRM3500-RM5000\nYa');
+  assert.equal(lead.notes, original);
+  assert.equal(format({...lead,notes:'Nama: ZAKI BDULL\nNo Phone: 016-3623618\nEmail: ZIEGGREEN@gmail.com'}).split('Nota Lain:\n')[1], '-');
+  assert.match(format({...lead,notes:'Hubungi Zaki bdull esok\n60123456789\nother@example.com'}), /Hubungi Zaki bdull esok\n60123456789\nother@example.com$/);
+  assert.match(format({notes:'Ya\nRM3500-RM5000'}), /Ya\nRM3500-RM5000$/);
+});
+
 test('follow-up has its own filter with all six counts including zero', () => {
   assert.match(html, /id="lead-follow-up-filter"/);
   assert.match(app, /\[1, 2, 3, 4, 5, 6\]/);

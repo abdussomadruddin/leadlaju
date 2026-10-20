@@ -3147,7 +3147,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261019-usage-v169")
+      .register("/sw.js?v=20261020-copy-notes-v170")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -6352,6 +6352,21 @@ function renderLeadCopyButton(lead, actionAttribute = "data-lead-copy") {
 }
 
 function leadDetailsCopyText(lead) {
+  // Clean only the copied text; keep the original remarks and access gates intact.
+  const normalizedText = (value) => String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+  const normalizedPhone = (value) => {
+    const digits = String(value || "").replace(/\D/g, "");
+    return digits.startsWith("0") ? `60${digits.slice(1)}` : digits;
+  };
+  const name = normalizedText(lead.name);
+  const email = normalizedText(lead.email);
+  const phone = normalizedPhone(lead.phone);
+  const notes = String(lead.notes || "").split(/\r?\n/).filter((line) => {
+    const value = line.replace(/^\s*(?:nama|name|no\.?\s*(?:phone|telefon)|phone|telefon|email|e-mel|emel)\s*:\s*/i, "").trim();
+    const text = normalizedText(value);
+    if (text && ((name && text === name) || (email && text === email))) return false;
+    return !(phone && /^[+\d\s().-]+$/.test(value) && normalizedPhone(value) === phone);
+  }).join("\n").trim();
   const project = String(lead.project || "Tidak dinyatakan").trim();
   const rawSource = String(lead.sourceSystem || lead.source_system || lead.source || "Manual Lead").trim();
   const source = /tik[\s_-]*tok/i.test(rawSource) ? "Tiktok"
@@ -6364,7 +6379,7 @@ function leadDetailsCopyText(lead) {
     `No Phone: ${String(lead.phone || "").replace(/\D/g, "") || "-"}`,
     `Email: ${String(lead.email || "-").trim()}`,
     "Nota Lain:",
-    String(lead.notes || "-").trim() || "-",
+    notes || "-",
   ].join("\n");
 }
 
