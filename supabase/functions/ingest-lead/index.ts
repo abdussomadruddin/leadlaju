@@ -79,7 +79,7 @@ Deno.serve(async (request) => {
     notes: clean(body.notes || body.nota),
     created_at: clean(body.created_at || body["Tarikh & Masa"] || new Date().toISOString()),
   };
-  const fromNotes = sourceSystem === "tiktok_ads" && Boolean(canonical.notes)
+  const fromNotes = providers.has(sourceSystem) && Boolean(canonical.notes)
     && (body.details_from_notes === true || !canonical.name || !normalizeNotesPhone(canonical.phone));
   if (fromNotes) {
     try {
