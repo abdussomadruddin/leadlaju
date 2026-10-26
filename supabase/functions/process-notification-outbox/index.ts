@@ -145,14 +145,14 @@ Deno.serve(async (request) => {
     const revision = Number(first.payload?.assignment_revision) || 0;
     let leadQuery = admin.from("leads")
       // Both legacy and brand-scoped foreign keys exist; choose the brand-safe one.
-      .select("id,brand_id,name,phone,email,city,source,notes,status,queue_state,assigned_agent_id,received_at,expires_at,assignment_revision,status_revision,created_at,projects!leads_project_id_fkey_brand(name)")
+      .select("id,brand_id,name,phone,email,city,source,notes,status,queue_state,assigned_agent_id,received_at,expires_at,assignment_revision,status_revision,created_at,admin_assigned,neglected_at,projects!leads_project_id_fkey_brand(name)")
       .eq("brand_id", brandId)
       .eq("id", leadId)
       .eq("assigned_agent_id", first.user_id)
       .eq("assignment_revision", revision)
       .eq("status", "new")
       .eq("queue_state", salesLead ? "sales_assigned" : "active");
-    if (!salesLead) leadQuery = leadQuery.gt("expires_at", new Date().toISOString());
+    if (!salesLead) leadQuery = leadQuery.or(`admin_assigned.eq.true,expires_at.gt.${new Date().toISOString()}`);
     const { data: lead, error: leadError } = await leadQuery.maybeSingle();
     if (leadError || !lead) {
       await admin.rpc("finish_notification_outbox", {
@@ -191,7 +191,7 @@ Deno.serve(async (request) => {
         await webpush.sendNotification({
           endpoint: row.endpoint,
           keys: { p256dh: row.p256dh, auth: row.auth_secret },
-        }, await withReceipt(notification, row, outboxId), { TTL: salesLead ? 86400 : 300, urgency: "high" });
+        }, await withReceipt(notification, row, outboxId), { TTL: salesLead || lead.admin_assigned ? 86400 : 300, urgency: "high" });
         delivered += 1;
         await admin.from("push_subscriptions").update({
           last_success_at: new Date().toISOString(), failure_count: 0, updated_at: new Date().toISOString(),

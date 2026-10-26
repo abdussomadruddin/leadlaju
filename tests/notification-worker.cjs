@@ -25,6 +25,7 @@ async function runWorker({ mode = 'team_sales', allowed = true, leadExists = tru
         select(value) { selections.push({ table, value }); return query; },
         eq(key, value) { filters.push({ table, key, value }); return query; },
         gt(key, value) { filters.push({ table, key, value, operator: 'gt' }); return query; },
+        or(value) { filters.push({table,key:'expires_at',value,operator:'or'}); return query; },
         update() { return query; },
         async maybeSingle() {
           if (table !== 'leads') return { data: allowed ? { id: 'fixture' } : null };

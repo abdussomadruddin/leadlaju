@@ -45,6 +45,7 @@ try {
    if(file.endsWith('_team_sales_daily_follow_up_rules.sql')) continue;
    if(file.endsWith('_follow_up_due_half_hour_slots.sql')) continue;
    if(file.endsWith('_new_lead_reminder_5pm.sql')) continue;
+   if(file.endsWith('_agent_neglected_leads.sql')) continue;
    if(file.endsWith('_master_brand_isolation.sql')) {
      await client.query(`insert into public.projects(id,name,source_project_id) values($1,'Legacy Safrich Project','legacy-source')`,[legacyId]);
      legacyCounts=(await client.query(`select table_name,(xpath('/row/c/text()',query_to_xml(format('select count(*) c from public.%I',table_name),false,true,'')))[1]::text::int count from information_schema.tables where table_schema='public' and table_type='BASE TABLE'`)).rows;
@@ -545,5 +546,7 @@ try {
  await commitUser(permissionAgent,sa,"select public.unregister_push_subscription('receipt-phone-1')");
  check(!(await client.query('select public.acknowledge_push_receipt($1) ok',[receipt])).rows[0].ok,'Logged-out device cannot revive readiness');
  check((await client.query('select active from public.push_subscriptions where id=$1',[devices[1].id])).rows[0].active,'Logout preserves other device');
- console.log(`PASS: ${checks} real PostgreSQL brand isolation and distribution assertions`);
+ await client.query(fs.readFileSync(path.join(root,'supabase/migrations',files.find(file=>file.endsWith('_agent_neglected_leads.sql'))),'utf8'));
+ await client.query(fs.readFileSync(path.join(root,'scripts/test-neglected-leads.sql'),'utf8'));
+ console.log(`PASS: ${checks} real PostgreSQL brand isolation and distribution assertions; Neglected Lead transaction scenarios passed`);
 } finally { if(client) await client.end(); await pg.stop(); }

@@ -5903,3 +5903,13 @@ button, [role="button"] { transition: background-color 180ms ease, border-color 
   #startup-recovery strong { animation:none; }
   button, [role="button"] { transition:none; }
 }
+.neglected-panel { padding: 20px; }
+.neglected-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; }
+.neglected-toolbar input[type="search"], .neglected-toolbar select { border: 1px solid #dbe1ec; border-radius: 12px; background: white; color: #18233b; padding: 10px; max-width: 100%; }
+.neglected-rows { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,300px),1fr)); gap: 12px; margin: 14px 0; }
+.neglected-row { border: 1px solid #e3d8cb; border-radius: 14px; padding: 14px; overflow-wrap: anywhere; }
+.neglected-row label { display: flex; gap: 10px; align-items: center; }
+.neglected-row small { color: #69778c; }
+.neglected-note { white-space: pre-wrap; font-size: .88rem; }
+.neglected-badge { display: inline-block; color: #a34913; background: #fff1df; border-radius: 8px; padding: 3px 7px; margin: 4px; font-size: .72rem; font-weight: 700; }
+@media(max-width:600px) { .neglected-panel {padding:12px;} .neglected-toolbar>* { flex: 1 1 140px; } }

@@ -1054,6 +1054,9 @@ function mapLead(row) {
     id: row.id,
     dedupeKey: row.dedupe_key || row.id,
     brandId: row.brand_id || null,
+    neglectedAt: row.neglected_at || null,
+    neglectedHeld: Boolean(row.neglected_held),
+    adminAssigned: Boolean(row.admin_assigned),
     name: row.name,
     phone: row.phone || "",
     email: row.email || "",
@@ -1246,7 +1249,7 @@ async function performLoadRemoteState(userId, attempt = 0) {
     const currentUser = profiles.find((agent) => agent.id === userId);
     if (!currentUser) throw new Error("Profil pengguna belum tersedia.");
 
-    const remoteLeads = (snapshot?.leads || []).map(mapLead);
+    const remoteLeads = (snapshot?.leads || []).filter(row => !row.neglected_held).map(mapLead);
     // A request started before a push snapshot can return without that assignment.
     // Keep the newer local canonical snapshot until a later authoritative read catches up.
     locallyCommittedLeads.forEach((localLead) => {
@@ -1352,6 +1355,21 @@ async function createRemoteSubscriptions() {
 }
 
 function handleRemoteBroadcast(message) {
+  if (message?.event === 'assignment_revoked' && message.payload?.brandId === activeBrandId) {
+    const {leadId,revision} = message.payload;
+    state.leads = state.leads.filter(lead => lead.id !== leadId || Number(lead.assignmentRevision) > Number(revision));
+    state.followUpDue = (state.followUpDue || []).filter(lead => lead.id !== leadId);
+    renderAll();
+    void loadFollowUpDueFeed().then(renderFollowUpDue).catch(() => {});
+    queueRemoteReload();
+    return;
+  }
+  if (message?.event === "neglected_changed") {
+    window.NeglectedLead?.invalidate();
+    void loadFollowUpDueFeed().then(renderFollowUpDue).catch(() => {});
+    queueRemoteReload();
+    return;
+  }
   if (message?.event === "push_device_probe") {
     void answerSilentDeviceProbe(message.payload).catch(() => {});
     return;
@@ -2947,7 +2965,7 @@ function getNotificationStartUrl(viewName = "") {
 function getRequestedStartView() {
   const params = new URLSearchParams(window.location.search);
   const requestedView = params.get("view") || window.location.hash.replace(/^#/, "");
-  return ["dashboard", "leads", "appointments", "follow-up-due", "bulletins", "agents", "performance", "projects", "lead-monitor", "import-leads", "integrations", "brands"].includes(requestedView) ? requestedView : isMaster() ? "brands" : "dashboard";
+  return ["dashboard", "leads", "appointments", "follow-up-due", "neglected", "bulletins", "agents", "performance", "projects", "lead-monitor", "import-leads", "integrations", "brands"].includes(requestedView) ? requestedView : isMaster() ? "brands" : "dashboard";
 }
 
 async function openNotificationLead(leadId) {
@@ -3023,7 +3041,7 @@ function assignmentSnapshotDisposition(leadSnapshot) {
   }
   const expiresAt = parseLeadTimestamp(leadSnapshot.expires_at || leadSnapshot.expiresAt, 0);
   const active = String(leadSnapshot.queue_state || leadSnapshot.queueState || "").toLowerCase() === "active";
-  if (normalizeSheetStatus(leadSnapshot.status) !== "new" || !active || expiresAt <= Date.now()) {
+  if (normalizeSheetStatus(leadSnapshot.status) !== "new" || !active || (!leadSnapshot.admin_assigned && !leadSnapshot.adminAssigned && expiresAt <= Date.now())) {
     return { accepted: false, terminal: true };
   }
   const existing = state.leads.find((lead) => lead.id === leadSnapshot.id || lead.dedupeKey === leadSnapshot.id);
@@ -3035,7 +3053,7 @@ function assignmentSnapshotDisposition(leadSnapshot) {
     return { accepted: false, terminal: true };
   }
   const currentActive = getVisibleActiveLead();
-  if (currentActive && currentActive.id !== leadSnapshot.id && currentActive.dedupeKey !== leadSnapshot.id) {
+  if (currentActive && !currentActive.adminAssigned && !leadSnapshot.admin_assigned && !leadSnapshot.adminAssigned && currentActive.id !== leadSnapshot.id && currentActive.dedupeKey !== leadSnapshot.id) {
     const incomingReceivedAt = parseLeadTimestamp(leadSnapshot.received_at || leadSnapshot.receivedAt, 0);
     if (incomingReceivedAt > Number(currentActive.receivedAt || 0)) {
       return { accepted: true, terminal: false, supersededLead: currentActive };
@@ -3180,7 +3198,7 @@ async function showLatestCachedNotificationLead() {
       ))
       .filter(({ lead }) => normalizeSheetStatus(lead.status) === "new" &&
         String(lead.queue_state || lead.queueState || "").toLowerCase() === "active" &&
-        parseLeadTimestamp(lead.expires_at || lead.expiresAt, 0) > now)
+        (lead.admin_assigned || lead.adminAssigned || parseLeadTimestamp(lead.expires_at || lead.expiresAt, 0) > now))
       .sort((left, right) =>
         parseLeadTimestamp(right.lead.received_at || right.lead.receivedAt, 0) -
         parseLeadTimestamp(left.lead.received_at || left.lead.receivedAt, 0));
@@ -3209,7 +3227,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261020-bounded-io-v172")
+      .register("/sw.js?v=20261026-neglected-v173")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -6065,6 +6083,13 @@ function renderActiveLead() {
   elements.notificationCount.style.display = newLeadCount ? "grid" : "none";
   renderAgentLeadControls();
 
+  if (!isTeamSales() && !isAdmin() && visibleLeads.some(item => item.status === 'new' && item.adminAssigned)) {
+    const pending = visibleLeads.filter(item => item.status === 'new' && item.assignedAgentId && item.queueState !== 'queued');
+    elements.activeLeadContainer.innerHTML = `<div class="sales-new-leads">${pending.map(item => `<article class="sales-lead-card"><strong>${escapeHtml(item.name)} ${renderNeglectedBadge(item)}</strong><p>${escapeHtml(item.project)}</p>${renderNewLeadNotes(item)}<small>${item.adminAssigned ? 'Ditugaskan oleh admin · tiada timer luput' : 'Lead giliran biasa'}</small><button class="log-call-now-button" type="button" data-neglected-call="${escapeHtml(item.id)}">CALL NOW</button></article>`).join('')}</div>`;
+    lastRenderedActiveLeadKey = null;
+    return;
+  }
+
   if (isTeamSales()) {
     const salesLeads = visibleLeads.filter(item => item.status === "new" && item.assignedAgentId).sort(compareLeadLogOrder);
     elements.activeLeadContainer.classList.toggle("has-active-lead", salesLeads.length > 0);
@@ -6107,6 +6132,7 @@ function renderActiveLead() {
     fragment.querySelector(".lead-arrival").textContent = `Masuk ${relativeTime(lead.receivedAt)}`;
     fragment.querySelector(".lead-avatar").textContent = initials(lead.name);
     fragment.querySelector(".lead-name").textContent = lead.name;
+    fragment.querySelector(".lead-name").insertAdjacentHTML('afterend', renderNeglectedBadge(lead));
     fragment.querySelector(".lead-project").textContent = lead.project || "Tidak dinyatakan";
     fragment.querySelector(".lead-phone").textContent = "•••• •••• ••••";
     const notes = document.createElement("div");
@@ -6124,13 +6150,17 @@ function renderActiveLead() {
   updateCountdown();
 }
 
+function renderNeglectedBadge(lead) {
+  return !isTeamSales() && lead?.neglectedAt ? '<span class="neglected-badge">Neglected Lead</span>' : '';
+}
+
 function getAdminActiveLeads() {
   return state.leads
     .filter((lead) =>
       lead.status === "new" &&
       lead.queueState !== "queued" &&
       Boolean(lead.assignedAgentId) &&
-      Number(lead.expiresAt) > Date.now() &&
+      (lead.adminAssigned || Number(lead.expiresAt) > Date.now()) &&
       !isVisuallyExpiredAssignment(lead),
     )
     .sort((a, b) => a.expiresAt - b.expiresAt);
@@ -6160,7 +6190,7 @@ function renderAdminActiveLeads() {
     <div class="admin-active-lead-list" aria-label="Lead aktif">
       ${leads.map((lead) => `
         <article class="admin-active-lead" data-lead-id="${escapeHtml(lead.id)}">
-          <span class="admin-active-lead-name">${escapeHtml(lead.name || "Tanpa nama")}</span>
+          <span class="admin-active-lead-name">${escapeHtml(lead.name || "Tanpa nama")}${renderNeglectedBadge(lead)}</span>
           <span class="admin-active-lead-agent">${escapeHtml(getAgent(lead.assignedAgentId)?.name || "Tiada ejen")}</span>
           ${renderNewLeadNotes(lead)}
           <strong class="admin-active-lead-timer">00:00</strong>
@@ -6174,6 +6204,7 @@ function updateAdminActiveLeadCountdowns(leads = getAdminActiveLeads()) {
   elements.activeLeadContainer.querySelectorAll(".admin-active-lead").forEach((article) => {
     const lead = leadById.get(String(article.dataset.leadId));
     if (!lead) return;
+    if (lead.adminAssigned) { article.querySelector('.admin-active-lead-timer').textContent = 'Admin assign'; return; }
     const remaining = Math.max(0, Number(lead.expiresAt) - Date.now());
     const minutes = Math.floor(remaining / 60000);
     const seconds = Math.floor((remaining % 60000) / 1000);
@@ -6668,7 +6699,7 @@ function renderLeadsTable() {
           const expanded = expandedLeadLogIds.has(lead.id);
           return `
             <tr class="lead-log-summary" data-lead-row="${lead.id}">
-              <td data-label="Nama"><strong>${escapeHtml(lead.name)}</strong>${renderSalesLeadWaitingTime(lead)}${renderNewLeadNotes(lead)}</td>
+              <td data-label="Nama"><strong>${escapeHtml(lead.name)}</strong>${renderNeglectedBadge(lead)}${renderSalesLeadWaitingTime(lead)}${renderNewLeadNotes(lead)}</td>
               <td data-label="${projectLabel()}"><strong>${escapeHtml(lead.project || "Tidak dinyatakan")}</strong></td>
               <td data-label="Status"><select class="lead-status-select ${visualStatus}" data-lead-status="${lead.id}" aria-label="Status ${escapeHtml(lead.name)}">${statusOptions}</select></td>
               <td data-label="Call">${callButton}</td>
@@ -7140,13 +7171,12 @@ function inspectLeadMovement(now = Date.now()) {
     }
     if (isAssignedNew) {
       const active = activeByAgent.get(lead.assignedAgentId) || [];
-      active.push(lead);
-      activeByAgent.set(lead.assignedAgentId, active);
-      if (!isTeamSales() && (!Number.isFinite(lead.receivedAt) || !Number.isFinite(lead.expiresAt))) {
+      if (!lead.adminAssigned) { active.push(lead); activeByAgent.set(lead.assignedAgentId, active); }
+      if (!isTeamSales() && !lead.adminAssigned && (!Number.isFinite(lead.receivedAt) || !Number.isFinite(lead.expiresAt))) {
         addIssue(lead, "critical", "missing-runtime", "Masa assignment tidak lengkap",
           "Lead New mempunyai ejen tetapi tiada masa diterima atau masa tamat yang sah.",
           "Server perlu membina semula runtime assignment 5 minit.");
-      } else if (!isTeamSales() && lead.expiresAt <= now) {
+      } else if (!isTeamSales() && !lead.adminAssigned && lead.expiresAt <= now) {
         addIssue(lead, "critical", "expired-active", "Assignment sudah tamat tetapi masih aktif",
           `Masa CALL NOW tamat ${relativeTime(lead.expiresAt)}, tetapi lead masih berada pada ejen.`,
           "Lead perlu ditanda missed, dikeluarkan daripada ejen ini dan masuk semula ke queue.");
@@ -8214,6 +8244,7 @@ async function downloadPerformanceReport() {
 }
 
 function renderAll() {
+  window.NeglectedLead?.sync();
   refreshSalesNewMetric();
   document.querySelector("#lead-import-column-hint").textContent = `Isi name, phone, email, city dan ${isTeamSales() ? "product" : "project"}. Maklumat lain diisi automatik oleh sistem.`;
   enforceSingleActiveLead();
@@ -8242,6 +8273,7 @@ function renderAll() {
 }
 
 const viewTitles = {
+  neglected: "Neglected Lead",
   brands: "Pengurusan Brand",
   leads: "Log Lead",
   appointments: "Appointment Tracker",
@@ -8314,7 +8346,8 @@ function switchView(viewName, { historyMode = "push" } = {}) {
   const targetView = document.getElementById(`${viewName}-view`);
   if (!targetView) return;
   if (viewName === "brands" && !isMaster()) return;
-  if (["agents", "performance", "projects", "lead-monitor", "import-leads", "integrations"].includes(viewName) && !isAdmin()) return;
+  if (["agents", "performance", "projects", "lead-monitor", "import-leads", "integrations", "neglected"].includes(viewName) && !isAdmin()) return;
+  if (viewName === 'neglected' && isTeamSales()) return;
   const changed = activeView !== viewName;
   if (changed && document.body.classList.contains("authenticated") && historyMode !== "none") {
     window.history[historyMode === "replace" ? "replaceState" : "pushState"](
@@ -8328,6 +8361,7 @@ function switchView(viewName, { historyMode = "push" } = {}) {
     return;
   }
   activeView = viewName;
+  if (viewName === 'neglected') window.NeglectedLead?.open();
   if (viewName === "follow-up-due") { followUpSection = pendingFollowUpSection === "new" ? "new" : "due"; pendingFollowUpSection = null; renderFollowUpDue(); }
   document.querySelectorAll(".view").forEach((view) => view.classList.remove("active"));
   targetView.classList.add("active");
