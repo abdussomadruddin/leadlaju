@@ -24,7 +24,7 @@
     <meta name="apple-mobile-web-app-title" content="LeadLaju" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>LeadLaju - Lead Management</title>
-    <link rel="manifest" href="manifest.webmanifest?v=20261026-neglected-v173" />
+    <link rel="manifest" href="manifest.webmanifest?v=20261027-auth-recovery-v174" />
     <link rel="icon" href="assets/icon.svg?v=20260625-pwa-notifications" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="assets/apple-touch-icon.png?v=20260625-pwa-notifications" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -33,10 +33,10 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20261026-neglected-v173" />
+    <link rel="stylesheet" href="styles.css?v=20261027-auth-recovery-v174" />
     <script src="vendor/exceljs.min.js?v=4.4.0" defer></script>
-    <script src="app.js?v=20261026-neglected-v173" defer></script>
-    <script src="neglected.js?v=20261026-neglected-v173" defer></script>
+    <script src="app.js?v=20261027-auth-recovery-v174" defer></script>
+    <script src="neglected.js?v=20261027-auth-recovery-v174" defer></script>
   </head>
   <body class="auth-pending">
     <div id="startup-recovery" style="position:fixed;inset:0;z-index:1000;background:#f7f9fc;display:grid;place-items:center;padding:24px;font-family:system-ui;color:#172238;text-align:center">
@@ -46,23 +46,46 @@
       (() => {
         const panel = document.getElementById('startup-recovery');
         const retry = document.getElementById('startup-retry');
-        retry.onclick = () => location.reload();
+        retry.onclick = async () => {
+          if (!window.retryLeadLajuStartup) { location.reload(); return; }
+          retry.disabled = true;
+          try { await window.retryLeadLajuStartup(); } finally { retry.disabled = false; }
+        };
+        let timer, revealTimer;
+        let revealing = false;
+        const reveal = () => {
+          if (document.body.classList.contains('auth-pending')) return;
+          if (document.body.classList.contains('authenticated') && document.getElementById('lifecycle-sync-overlay')?.classList.contains('visible')) return;
+          if (revealing) return;
+          revealing = true; observe.disconnect(); clearTimeout(timer);
+          const finish = () => {
+            if (!panel.isConnected || panel.style.opacity === '0') return;
+            panel.style.transition = 'opacity 260ms ease'; panel.style.opacity = '0'; panel.style.pointerEvents = 'none';
+            setTimeout(() => panel.remove(), 280);
+          };
+          requestAnimationFrame(() => requestAnimationFrame(finish));
+          // A background tab may suspend animation frames; readiness is already verified.
+          revealTimer = setTimeout(finish, 500);
+        };
+        window.leadLajuStartupWaiting = message => {
+          if (!panel.isConnected) return false;
+          document.getElementById('startup-message').textContent = message;
+          retry.hidden = false; retry.disabled = false;
+          return true;
+        };
         const observe = new MutationObserver(() => {
           if (!document.body.classList.contains('auth-pending')) {
             if (document.body.classList.contains('authenticated') && document.getElementById('lifecycle-sync-overlay')?.classList.contains('visible')) return;
-            observe.disconnect(); clearTimeout(timer);
-            requestAnimationFrame(() => requestAnimationFrame(() => {
-              panel.style.transition = 'opacity 260ms ease'; panel.style.opacity = '0'; panel.style.pointerEvents = 'none';
-              setTimeout(() => panel.remove(), 280);
-            }));
+            reveal();
           }
         });
         observe.observe(document.body, {attributes:true,subtree:true,attributeFilter:['class']});
-        const timer = setTimeout(() => {
+        timer = setTimeout(() => {
           if (!document.body.classList.contains('auth-pending') && !document.getElementById('lifecycle-sync-overlay')?.classList.contains('visible')) return;
           document.getElementById('startup-message').textContent = 'Sambungan mengambil masa. Cuba semula tanpa memadam aplikasi.';
           retry.hidden = false;
         }, 15000);
+        reveal();
       })();
     </script>
     <section class="login-screen" id="login-screen" aria-labelledby="login-title">

@@ -1095,7 +1095,8 @@ function mapActivity(row) {
 let lastRemoteLoadError = null;
 function isTransientRemoteLoadError(error) {
   return ['57014', '53300', '57P01', '08000', '08006'].includes(error?.code) ||
-    [502, 503, 504].includes(Number(error?.status)) ||
+    [408, 429, 500, 502, 503, 504].includes(Number(error?.status)) ||
+    error?.name === 'AuthRetryableFetchError' ||
     /timeout|timed out|failed to fetch|network|fetch failed|aborterror|aborted|load failed|connection.*(closed|reset)/i.test(`${error?.name || ''} ${error?.message || ''}`);
 }
 
@@ -1111,6 +1112,56 @@ async function boundedSessionRequest(request) {
       timer = window.setTimeout(() => reject(new Error('Session check timed out')), REMOTE_REQUEST_TIMEOUT_MS);
     })]);
   } finally { window.clearTimeout(timer); }
+}
+
+let startupSessionRead = null;
+let startupSessionWaiting = false;
+let authStartupRetryTimer = null;
+let authStartupRetryAttempts = 0;
+function scheduleAuthStartupRetry(force = false) {
+  if (!startupSessionWaiting || authStartupRetryTimer || (!force && authStartupRetryAttempts >= 1)) return;
+  authStartupRetryAttempts++;
+  authStartupRetryTimer = window.setTimeout(() => {
+    authStartupRetryTimer = null;
+    if (startupSessionWaiting) void bootstrap();
+  }, 1000);
+}
+async function readStartupSession() {
+  const client = remoteDatabaseClient;
+  if (!startupSessionRead || startupSessionRead.client !== client) {
+    const flight = {client, timedOut:false, promise:Promise.resolve().then(() => client.auth.getSession())};
+    startupSessionRead = flight;
+    const settled = () => {
+      if (startupSessionRead !== flight) return;
+      startupSessionRead = null;
+      if (flight.timedOut && startupSessionWaiting) scheduleAuthStartupRetry(true);
+    };
+    flight.promise.then(settled, settled);
+  }
+  const flight = startupSessionRead;
+  try {
+    const result = await boundedSessionRequest(() => flight.promise);
+    if (result.error) throw result.error;
+    return result;
+  } catch(error) {
+    if (/Session check timed out/i.test(error?.message || '')) flight.timedOut = true;
+    throw error;
+  }
+}
+function recoverStartupAuth(error) {
+  startupSessionWaiting = true;
+  const message = 'Sambungan pengesahan mengambil masa. Sesi dikekalkan; sedang mencuba semula.';
+  if (!window.leadLajuStartupWaiting?.(message)) {
+    showLogin();
+    setLoginError(message);
+  }
+  scheduleAuthStartupRetry();
+}
+function loginAuthErrorMessage(error) {
+  if (Number(error?.status) === 429) return 'Terlalu banyak cubaan. Tunggu sebentar sebelum cuba semula.';
+  if (isTransientRemoteLoadError(error)) return 'Sambungan pengesahan terganggu sementara. Cuba log masuk semula; ini bukan pengesahan kata laluan salah.';
+  if (error?.code === 'invalid_credentials' || error?.code === 'invalid_grant' || /invalid login credentials/i.test(error?.message || '')) return 'Emel atau kata laluan tidak betul.';
+  return 'Log masuk belum dapat disahkan. Cuba semula; jika berterusan, hubungi admin.';
 }
 
 async function validateStartupSession(expectedUserId) {
@@ -1947,7 +1998,7 @@ async function performLogin(event) {
   if (remoteDatabaseClient) {
     const { data, error } = await remoteDatabaseClient.auth.signInWithPassword({ email, password });
     if (error || !data.user) {
-      setLoginError("Emel atau kata laluan tidak betul.");
+      setLoginError(loginAuthErrorMessage(error));
       return;
     }
     const cached = await restoreTrustedDashboardCache(data.user.id);
@@ -3227,7 +3278,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261026-neglected-v173")
+      .register("/sw.js?v=20261027-auth-recovery-v174")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -10141,6 +10192,27 @@ document.addEventListener("keydown", (event) => {
 });
 
 async function bootstrap() {
+  if (bootstrap.pending) return bootstrap.pending;
+  const pending = performBootstrap();
+  bootstrap.pending = pending;
+  try {
+    const result = await pending;
+    if (!startupSessionWaiting) authStartupRetryAttempts = 0;
+    return result;
+  }
+  catch(error) {
+    if (isTransientRemoteLoadError(error)) recoverStartupAuth(error);
+    else {
+      startupSessionWaiting = false;
+      window.clearTimeout(authStartupRetryTimer); authStartupRetryTimer = null;
+      if (isInvalidAuthSessionError(error)) await boundedSessionRequest(() => remoteDatabaseClient.auth.signOut({scope:'local'})).catch(() => {});
+      showLogin();
+      setLoginError(isInvalidAuthSessionError(error) ? 'Sesi telah tamat. Log masuk semula menggunakan kata laluan terkini.' : 'Aplikasi belum dapat dimuatkan. Cuba log masuk semula.');
+    }
+  } finally { if (bootstrap.pending === pending) bootstrap.pending = null; }
+}
+
+async function performBootstrap() {
   // Capture before the SDK consumes and removes the Auth URL fragment.
   const authFragment = new URLSearchParams(window.location.hash.slice(1));
   const recoveryRequested = remotePasswordRecoveryPending
@@ -10152,7 +10224,9 @@ async function bootstrap() {
   if (!remoteDatabaseClient) await initRemoteDatabase();
 
   if (remoteDatabaseClient) {
-    const { data } = await remoteDatabaseClient.auth.getSession();
+    const { data } = await readStartupSession();
+    startupSessionWaiting = false;
+    window.clearTimeout(authStartupRetryTimer); authStartupRetryTimer = null;
     if (authLinkFailed || ((recoveryRequested || remotePasswordRecoveryPending) && !data.session?.user)) {
       showLogin();
       openResetPasswordModal();
@@ -10186,6 +10260,7 @@ async function bootstrap() {
           return;
         }
       }
+      if (!loaded && isTransientRemoteLoadError(lastRemoteLoadError)) throw lastRemoteLoadError;
       if (loaded || isInvalidAuthSessionError(lastRemoteLoadError)) await remoteDatabaseClient.auth.signOut({ scope: 'local' });
     }
     showLogin();
@@ -10304,6 +10379,8 @@ document.addEventListener("click", event => {
   runButtonActionFeedback(link, () => handleSalesContact(link.dataset.salesLead, link.dataset.salesContact, link.href))
     .catch(error => { console.error("Contact action failed", error); showToast("Tindakan belum selesai", "Semak sambungan dan cuba lagi.", "error"); });
 });
+window.retryLeadLajuStartup = () => { authStartupRetryAttempts = 0; return bootstrap(); };
+window.addEventListener('online', () => { if(startupSessionWaiting) scheduleAuthStartupRetry(true); });
 bootstrap().catch((error) => {
   console.error("Startup recovery", error);
   showLogin();

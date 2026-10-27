@@ -7,7 +7,10 @@ const source = fs.readFileSync('app.js', 'utf8');
 function bootstrapFixture({ hash = '', search = '', session = { user: { id: 'test' } }, event = false } = {}) {
   const calls = [];
   const context = vm.createContext({
-    URLSearchParams, window: { location: { hash, search } },
+    URLSearchParams, window: { location: { hash, search }, clearTimeout() {} },
+    readStartupSession: async () => ({data:{session}}),
+    startupSessionWaiting:false,authStartupRetryAttempts:0,authStartupRetryTimer:null,
+    isTransientRemoteLoadError:()=>false,isInvalidAuthSessionError:()=>false,
     remotePasswordRecoveryPending: event,
     remoteDatabaseClient: { auth: { getSession: async () => ({ data: { session } }) } },
     state: { integration: {} }, normalizeIntegration: x => x, saveState() {},
