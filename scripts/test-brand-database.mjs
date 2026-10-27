@@ -548,5 +548,18 @@ try {
  check((await client.query('select active from public.push_subscriptions where id=$1',[devices[1].id])).rows[0].active,'Logout preserves other device');
  await client.query(fs.readFileSync(path.join(root,'supabase/migrations',files.find(file=>file.endsWith('_agent_neglected_leads.sql'))),'utf8'));
  await client.query(fs.readFileSync(path.join(root,'scripts/test-neglected-leads.sql'),'utf8'));
- console.log(`PASS: ${checks} real PostgreSQL brand isolation and distribution assertions; Neglected Lead transaction scenarios passed`);
+ await client.query(fs.readFileSync(path.join(root,'scripts/test-resource-efficiency.sql'),'utf8'));
+ const concurrent=pg.getPgClient();await concurrent.connect();
+ try {
+   await concurrent.query("set statement_timeout='2s'");
+   for(const [lock,query] of [
+     ['leadlaju-scheduler-expiry','select leadlaju_private.expire_assignments(now()) n'],
+     ['leadlaju-scheduler-due-gate','select leadlaju_private.sweep_agent_due_gate() n'],
+   ]) {
+     await client.query('select pg_advisory_lock(hashtextextended($1,0))',[lock]);
+     try {check((await concurrent.query(query)).rows[0].n===0,'Duplicate scheduler exits without waiting');}
+     finally {await client.query('select pg_advisory_unlock(hashtextextended($1,0))',[lock]);}
+   }
+ } finally {await concurrent.end();}
+ console.log(`PASS: ${checks} real PostgreSQL brand isolation and distribution assertions; Neglected Lead, idle dispatch and concurrent scheduler scenarios passed`);
 } finally { if(client) await client.end(); await pg.stop(); }

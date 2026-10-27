@@ -358,8 +358,10 @@ test('all refresh entry points use Supabase state while remote mode is active', 
   const sheetRead = app.indexOf('const syncStartedAt = Date.now();', syncStart);
   const remoteBranch = app.slice(syncStart, sheetRead);
   assert.match(remoteBranch, /if \(remoteDatabaseMode\)/);
-  assert.match(remoteBranch, /await loadRemoteState\(state\.currentUserId\)/);
-  assert.match(remoteBranch, /renderDashboardUpdates\(\)/);
+  assert.match(remoteBranch, /await queueRemoteReload\(\{ joinCurrent: true \}\)/);
+  const pipeline = app.slice(app.indexOf('function queueRemoteReload('), app.indexOf('async function persistProfile'));
+  assert.match(pipeline, /await loadRemoteState\(state\.currentUserId\)/);
+  assert.match(pipeline, /renderDashboardUpdates\(\)/);
   assert.doesNotMatch(remoteBranch, /getSheetEndpoint|fetch\(/);
   assert.match(app, /const wasRemoteDatabaseMode = remoteDatabaseMode/);
   assert.match(app, /remoteDatabaseMode = wasRemoteDatabaseMode/);
@@ -373,11 +375,11 @@ test('production runtime config enables Supabase without requiring a query flag'
 
 test('all production devices invalidate the old app shell for the mandatory agent PWA gate', () => {
   const worker = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
-  assert.match(worker, /leadlaju-pwa-v20261027-auth-recovery-v174/);
+  assert.match(worker, /leadlaju-pwa-v20261027-resource-efficiency-v175/);
   assert.match(worker, /existingClient\.navigate\(targetUrl\)/);
-  assert.match(html, /app\.js\?v=20261027-auth-recovery-v174/);
+  assert.match(html, /app\.js\?v=20261027-resource-efficiency-v175/);
   assert.match(html, /vendor\/exceljs\.min\.js\?v=4\.4\.0/);
-  assert.match(app, /register\("\/sw\.js\?v=20261027-auth-recovery-v174"\)/);
+  assert.match(app, /register\("\/sw\.js\?v=20261027-resource-efficiency-v175"\)/);
   assert.doesNotMatch(app, /get\("backend"\) === "sheet"/);
   assert.match(app, /remoteDatabaseRequired = window\.location\.protocol !== "file:"/);
   assert.match(app, /if \(remoteDatabaseRequired\)[\s\S]*Operasi server lama tidak akan digunakan/);
@@ -427,8 +429,10 @@ test('phone resume and realtime reconnect perform canonical bulletin catch-up', 
   const lifecycleBody = app.match(/function runLifecycleAuthoritativeSync\([^\n]*[\s\S]*?\n}\n\nfunction beginColdStartSync/)?.[0] || '';
   const subscriptionBody = app.match(/async function subscribeToRemoteDatabase\(\)[\s\S]*?\n}\n\nfunction handleRemoteBroadcast/)?.[0] || '';
   const focusBody = app.match(/window\.addEventListener\("focus"[\s\S]*?\n}\);/)?.[0] || '';
-  assert.match(lifecycleBody, /await loadBulletinFeed\(\)/);
-  assert.match(subscriptionBody, /Realtime bulletin catch-up failed/);
+  assert.match(lifecycleBody, /queueRemoteReload\(\{ joinCurrent: true/);
+  assert.match(subscriptionBody, /queueRemoteReload\(\{ joinCurrent: true/);
+  const pipeline = app.slice(app.indexOf('function queueRemoteReload('), app.indexOf('async function persistProfile'));
+  assert.match(pipeline, /await loadBulletinFeed\(\)/);
   assert.match(focusBody, /beginResumeSync\(\)/);
 });
 

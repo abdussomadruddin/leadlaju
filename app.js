@@ -1395,9 +1395,8 @@ async function createRemoteSubscriptions() {
       .subscribe((status) => {
         if (subscriptionBrandVersion !== brandContextVersion) return;
         if (status === "SUBSCRIBED") {
-          queueRemoteReload();
-          loadBulletinFeed().then(() => renderBulletins()).catch((error) => console.warn("Realtime bulletin catch-up failed", error));
-          loadFollowUpDueFeed().then(() => renderFollowUpDue()).catch((error) => console.warn("Realtime follow-up catch-up failed", error));
+          // The canonical reload already includes both feeds and performance.
+          queueRemoteReload({ joinCurrent: true });
         }
       });
     remoteRealtimeChannels.push(channel);
@@ -1411,13 +1410,11 @@ function handleRemoteBroadcast(message) {
     state.leads = state.leads.filter(lead => lead.id !== leadId || Number(lead.assignmentRevision) > Number(revision));
     state.followUpDue = (state.followUpDue || []).filter(lead => lead.id !== leadId);
     renderAll();
-    void loadFollowUpDueFeed().then(renderFollowUpDue).catch(() => {});
     queueRemoteReload();
     return;
   }
   if (message?.event === "neglected_changed") {
     window.NeglectedLead?.invalidate();
-    void loadFollowUpDueFeed().then(renderFollowUpDue).catch(() => {});
     queueRemoteReload();
     return;
   }
@@ -1430,7 +1427,6 @@ function handleRemoteBroadcast(message) {
     return;
   }
   if (message?.event === "follow_up_limit_changed") {
-    loadFollowUpDueFeed().then(() => renderFollowUpDue()).catch(error => console.warn("Realtime due limit refresh failed", error));
     queueRemoteReload();
     return;
   }
@@ -1460,6 +1456,7 @@ function handleRemoteBroadcast(message) {
 let realtimeReloadRunning = false;
 let realtimeReloadRequested = false;
 let realtimeReloadPromise = null;
+let realtimeReloadContext = null;
 let syncedPerformanceSignature = null;
 let remotePollRetryAt = 0;
 let remotePollFailures = 0;
@@ -1478,33 +1475,48 @@ function queueRemoteReload(options = {}) {
     remotePollRetryAt = 0;
   }
   // Only idle fallback polling backs off. Realtime, resume and user actions stay immediate.
+  if (options?.backgroundPoll && typeof document !== 'undefined' && document.visibilityState === 'hidden') return Promise.resolve(false);
   if (options?.backgroundPoll && Date.now() < remotePollRetryAt) return Promise.resolve(false);
-  realtimeReloadRequested = true;
+  if (realtimeReloadRunning && realtimeReloadContext !== context) {
+    // Never let a new account/brand inherit the completion of the old flight.
+    return realtimeReloadPromise.then(() => context === `${brandContextVersion}:${state.currentUserId}`
+      ? queueRemoteReload({ ...options, joinCurrent: true, snapshotReady: false }) : false);
+  }
+  // A poll/resume/refresh can share the current read. A mutation broadcast must
+  // request a trailing read, because its change may postdate the running query.
+  if (!realtimeReloadRunning || !(options?.joinCurrent || options?.backgroundPoll)) realtimeReloadRequested = true;
   if (realtimeReloadRunning) return realtimeReloadPromise;
   if (!remoteDatabaseMode || !state.currentUserId) return Promise.resolve(false);
   realtimeReloadRunning = true;
+  realtimeReloadContext = context;
   realtimeReloadPromise = (async () => {
+    let succeeded = false;
+    let snapshotReady = options?.snapshotReady === true;
     try {
-      while (realtimeReloadRequested && remoteDatabaseMode && state.currentUserId) {
+      while (realtimeReloadRequested && remoteDatabaseMode && state.currentUserId && context === `${brandContextVersion}:${state.currentUserId}`) {
         realtimeReloadRequested = false;
         const version = brandContextVersion;
-        if (await loadRemoteState(state.currentUserId) && version === brandContextVersion) {
+        const loaded = snapshotReady || await loadRemoteState(state.currentUserId);
+        snapshotReady = false;
+        if (loaded && version === brandContextVersion) {
           remotePollFailures = 0;
           remotePollRetryAt = 0;
           await loadBulletinFeed();
           if (version !== brandContextVersion) continue;
           const signature = performanceSyncSignature();
+          let refreshed = true;
           if (signature !== syncedPerformanceSignature) {
             teamPerformanceCache.clear();
-            let refreshed = true;
             if (isAdmin() && isTeamSales()) refreshed = await loadTeamPerformance();
             else if (!isAdmin()) refreshed = await loadOwnPerformance();
             if (refreshed && version === brandContextVersion) syncedPerformanceSignature = signature;
           }
           if (version !== brandContextVersion) continue;
           renderDashboardUpdates();
-          showDashboardSyncWarning(false);
+          succeeded = refreshed !== false;
+          showDashboardSyncWarning(!succeeded);
         } else if (version === brandContextVersion) {
+          succeeded = false;
           remotePollRetryAt = Date.now() + Math.min(120000, 30000 * 2 ** Math.min(++remotePollFailures, 2));
           showDashboardSyncWarning(true);
           // Do not replay an accumulated event burst immediately after a failed read.
@@ -1512,12 +1524,14 @@ function queueRemoteReload(options = {}) {
         }
       }
     } catch (error) {
+      succeeded = false;
       if (remotePollContext === context) {
         remotePollRetryAt = Date.now() + Math.min(120000, 30000 * 2 ** Math.min(++remotePollFailures, 2));
         showDashboardSyncWarning(true);
       }
       console.warn("Background dashboard sync failed", error);
-    } finally { realtimeReloadRunning = false; realtimeReloadPromise = null; }
+    } finally { realtimeReloadRunning = false; realtimeReloadPromise = null; realtimeReloadContext = null; }
+    return succeeded && context === `${brandContextVersion}:${state.currentUserId}`;
   })();
   return realtimeReloadPromise;
 }
@@ -2792,16 +2806,10 @@ function failLifecycleSync() {
 function runLifecycleAuthoritativeSync(options = {}) {
   const syncVersion = brandContextVersion;
   if (typeof remoteDatabaseMode !== "undefined" && remoteDatabaseMode) {
-    return (options.snapshotReady ? Promise.resolve(true) : loadRemoteState(state.currentUserId))
+    return queueRemoteReload({ joinCurrent: true, snapshotReady: options.snapshotReady })
       .then(async (success) => {
         if (syncVersion !== brandContextVersion) return false;
         if (success) {
-          await loadBulletinFeed();
-          if (syncVersion !== brandContextVersion) return false;
-          renderDashboardUpdates();
-          const performanceReady = !isAdmin() ? await loadOwnPerformance() : isTeamSales() ? await loadTeamPerformance() : true;
-          if (performanceReady === false) throw new Error("Prestasi belum dapat dimuatkan");
-          if (syncVersion !== brandContextVersion) return false;
           saveDashboardCache();
           showDashboardSyncWarning(false);
           completeLifecycleAuthoritativeRender();
@@ -3278,7 +3286,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261027-auth-recovery-v174")
+      .register("/sw.js?v=20261027-resource-efficiency-v175")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -7896,7 +7904,20 @@ function renderTeamPerformance(report) {
   ].join("");
 }
 
-async function loadTeamPerformance() {
+const performanceReadRequests = new Map();
+function sharedPerformanceRead(name, operation) {
+  const key = `${brandContextVersion}:${state.currentUserId}:${todayKey()}:${name}`;
+  if (performanceReadRequests.has(key)) return performanceReadRequests.get(key);
+  const pending = (async () => operation())().finally(() => {
+    if (performanceReadRequests.get(key) === pending) performanceReadRequests.delete(key);
+  });
+  performanceReadRequests.set(key, pending);
+  return pending;
+}
+function loadTeamPerformance() {
+  return sharedPerformanceRead(`team:${teamPerformanceDays}`, readTeamPerformance);
+}
+async function readTeamPerformance() {
   if (!isAdmin() || !isTeamSales()) return;
   const panel = document.querySelector("#team-performance");
   const status = document.querySelector("#team-performance-status");
@@ -8007,7 +8028,8 @@ function renderOwnPerformance(current, previous) {
   ].join("");
 }
 
-async function loadOwnPerformance() {
+function loadOwnPerformance() { return sharedPerformanceRead('own', readOwnPerformance); }
+async function readOwnPerformance() {
   if (isAdmin() || !elements.ownPerformance || !remoteDatabaseMode || !remoteDatabaseClient) {
     if (!isAdmin() && elements.ownPerformanceStatus) elements.ownPerformanceStatus.textContent = "Prestasi hanya tersedia apabila tersambung ke Supabase.";
     return;
@@ -9385,26 +9407,16 @@ async function deleteLeadEverywhere(leadId) {
 
 async function syncGoogleSheet(options = {}) {
   if (remoteDatabaseMode) {
-    if (syncInProgress) return false;
-    syncInProgress = true;
-    try {
-      const loaded = await loadRemoteState(state.currentUserId);
-      if (!loaded) { showDashboardSyncWarning(true); return false; }
-      renderDashboardUpdates();
-      showDashboardSyncWarning(false);
-      if (
-        options.lifecycleSync ||
-        (typeof initialDashboardSyncState !== "undefined" && initialDashboardSyncState === "failed")
-      ) {
-        completeLifecycleAuthoritativeRender();
-      }
-      return true;
-    } finally {
-      syncInProgress = false;
-      const waiters = syncCompletionWaiters;
-      syncCompletionWaiters = [];
-      waiters.forEach((resolve) => resolve());
+    const version = brandContextVersion;
+    const loaded = await queueRemoteReload({ joinCurrent: true });
+    if (version !== brandContextVersion || !loaded) return false;
+    if (
+      options.lifecycleSync ||
+      (typeof initialDashboardSyncState !== "undefined" && initialDashboardSyncState === "failed")
+    ) {
+      completeLifecycleAuthoritativeRender();
     }
+    return true;
   }
   const syncStartedAt = Date.now();
   const endpoint = getSheetEndpoint();

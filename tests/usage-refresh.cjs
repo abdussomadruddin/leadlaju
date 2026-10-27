@@ -44,3 +44,56 @@ test('a failed read does not immediately replay an accumulated event burst',asyn
  const first=c.queueRemoteReload();c.queueRemoteReload();c.queueRemoteReload();release();await first;
  assert.equal(calls,1);
 });
+
+test('poll, refresh and resume join a running sync without a redundant trailing read',async()=>{
+ const {c,counts}=setup();let release,calls=0;
+ c.loadRemoteState=async()=>{calls++;await new Promise(resolve=>release=resolve);return true};
+ const first=c.queueRemoteReload();
+ const joins=Array.from({length:20},(_,i)=>c.queueRemoteReload(i%2?{backgroundPoll:true}:{joinCurrent:true}));
+ release();assert.deepEqual(await Promise.all([first,...joins]),Array(21).fill(true));
+ assert.equal(calls,1);assert.equal(counts().performance,1);assert.equal(counts().bulletins,1);
+});
+test('hidden pages skip only fallback polls; realtime and resume remain immediate',async()=>{
+ const {c}=setup();let calls=0;c.document={visibilityState:'hidden'};
+ c.loadRemoteState=async()=>{calls++;return true};
+ assert.equal(await c.queueRemoteReload({backgroundPoll:true}),false);assert.equal(calls,0);
+ assert.equal(await c.queueRemoteReload(),true);
+ assert.equal(await c.queueRemoteReload({joinCurrent:true}),true);assert.equal(calls,2);
+ c.document.visibilityState='visible';await c.queueRemoteReload({backgroundPoll:true});assert.equal(calls,3);
+});
+test('a mutation arriving during a read still forces a fresh trailing snapshot',async()=>{
+ const {c}=setup();let release,calls=0;
+ c.loadRemoteState=async()=>{calls++;if(calls===1)await new Promise(resolve=>release=resolve);return true};
+ const first=c.queueRemoteReload();c.queueRemoteReload();c.queueRemoteReload({joinCurrent:true});
+ release();assert.equal(await first,true);assert.equal(calls,2);
+});
+test('lifecycle with a ready snapshot loads feeds and performance without rereading dashboard',async()=>{
+ const {c,counts}=setup();let calls=0;c.loadRemoteState=async()=>{calls++;return true};
+ assert.equal(await c.queueRemoteReload({snapshotReady:true,joinCurrent:true}),true);
+ assert.equal(calls,0);assert.deepEqual(counts(),{performance:1,bulletins:1});
+});
+test('sync failure and permission context changes cannot report success',async()=>{
+ const {c}=setup();c.loadOwnPerformance=async()=>false;
+ assert.equal(await c.queueRemoteReload(),false);
+ let release;c.loadRemoteState=async()=>{await new Promise(resolve=>release=resolve);return true};
+ const pending=c.queueRemoteReload();c.brandContextVersion++;release();assert.equal(await pending,false);
+});
+test('a new brand waits for its own fresh snapshot instead of the old flight result',async()=>{
+ const {c}=setup();let release,calls=0;
+ c.loadRemoteState=async()=>{calls++;if(calls===1)await new Promise(resolve=>release=resolve);return true};
+ const old=c.queueRemoteReload();c.brandContextVersion++;
+ const current=c.queueRemoteReload({joinCurrent:true});release();
+ assert.equal(await old,false);assert.equal(await current,true);assert.equal(calls,2);
+});
+test('performance readers await the same result and isolate brand and range',async()=>{
+ const c=vm.createContext({state:{currentUserId:'a'},brandContextVersion:1,todayKey:()=> '2026-10-27'});
+ vm.runInContext(source.slice(source.indexOf('const performanceReadRequests ='),source.indexOf('function loadTeamPerformance()')),c);
+ let release,calls=0;const work=async()=>{calls++;await new Promise(resolve=>release=resolve);return true};
+ const a=c.sharedPerformanceRead('own',work),b=c.sharedPerformanceRead('own',work);
+ assert.equal(a,b);assert.equal(calls,1);
+ c.brandContextVersion++;assert.equal(await c.sharedPerformanceRead('own',()=>true),true);
+ assert.equal(await c.sharedPerformanceRead('team:1',()=>true),true);
+ release();assert.deepEqual(await Promise.all([a,b]),[true,true]);
+ await assert.rejects(c.sharedPerformanceRead('own',()=>{throw Error('offline')}));
+ assert.equal(await c.sharedPerformanceRead('own',()=>true),true);
+});
