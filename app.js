@@ -3286,7 +3286,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261027-resource-efficiency-v175")
+      .register("/sw.js?v=20261027-sales-copy-v176")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -6546,10 +6546,10 @@ function leadDetailsCopyText(lead) {
   ].join("\n");
 }
 
-async function copyLeadDetails(leadId) {
+async function copyLeadDetails(leadId, button = lastInteractionButton) {
   const lead = state.leads.find((item) => item.id === leadId);
   if (!lead || !canAccessLead(lead) || !canRevealLeadContact(lead)) return false;
-  const finishFeedback = beginButtonFeedback(lastInteractionButton);
+  const finishFeedback = beginButtonFeedback(button);
   try {
     await navigator.clipboard.writeText(leadDetailsCopyText(lead));
     showToast("Details disalin", `${lead.name} telah disalin.`, "success");
@@ -6561,6 +6561,15 @@ async function copyLeadDetails(leadId) {
     finishFeedback();
   }
 }
+
+function handleLeadCopyClick(event) {
+  const copy = event.target.closest("[data-lead-copy], [data-follow-up-due-copy]");
+  if (!copy || copy.disabled) return;
+  void copyLeadDetails(copy.dataset.leadCopy || copy.dataset.followUpDueCopy, copy);
+}
+// Cards are rendered in several containers, including the Team Sales dashboard.
+// One delegated handler covers existing and newly rendered cards exactly once.
+document.addEventListener("click", handleLeadCopyClick);
 
 let salesPerformanceRange = null;
 let salesLeadDrilldown = null;
@@ -9852,8 +9861,6 @@ elements.monitorList?.addEventListener("click", (event) => {
   renderLeadsTable();
 });
 elements.leadsTableBody.addEventListener("click", (event) => {
-  const copy = event.target.closest("[data-lead-copy]");
-  if (copy) { copyLeadDetails(copy.dataset.leadCopy); return; }
   const followUp = event.target.closest("[data-lead-follow-up]");
   if (followUp) {
     recordLeadFollowUp(followUp.dataset.leadFollowUp, followUp);
@@ -9898,8 +9905,6 @@ elements.appointmentList?.addEventListener("click", (event) => {
 function handleFollowUpDueClick(event) {
   const call = event.target.closest("[data-follow-up-call]");
   if (call) { handleCall(call.dataset.followUpCall); return; }
-  const copy = event.target.closest("[data-follow-up-due-copy]");
-  if (copy) { copyLeadDetails(copy.dataset.followUpDueCopy); return; }
   const action = event.target.closest("[data-follow-up-due-action]");
   if (action) recordLeadFollowUp(action.dataset.followUpDueAction, action);
 }

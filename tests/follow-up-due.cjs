@@ -77,7 +77,8 @@ test('Follow Up Due navigation, filters and direct WhatsApp follow-up are wired 
   assert.match(app, /rpc\("get_follow_up_due"\)/);
   assert.match(app, /data-follow-up-due-action/);
   assert.match(app, /data-follow-up-due-copy/);
-  assert.match(app, /copyLeadDetails\(copy\.dataset\.followUpDueCopy\)/);
+  assert.match(app, /copyLeadDetails\(copy\.dataset\.leadCopy \|\| copy\.dataset\.followUpDueCopy, copy\)/);
+  assert.match(app, /document\.addEventListener\("click", handleLeadCopyClick\)/);
   assert.match(app, /recordLeadFollowUp\(action\.dataset\.followUpDueAction, action\)/);
   assert.doesNotMatch(app, /data-follow-up-open/);
   assert.match(app, /"follow-up-due": "Follow Up"/);
