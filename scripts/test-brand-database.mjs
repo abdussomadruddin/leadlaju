@@ -24,9 +24,9 @@ try {
  grant usage on schema auth to authenticated,service_role;
  create schema realtime;
  grant usage on schema realtime to authenticated;
- create table realtime.messages(topic text,extension text);
+ create table realtime.messages(topic text,extension text,private boolean default true);
  alter table realtime.messages enable row level security;
- grant select on realtime.messages to authenticated;
+ grant select,insert on realtime.messages to authenticated;
  create function realtime.topic() returns text language sql stable as $$select current_setting('realtime.topic',true)$$;
  create function realtime.send(jsonb,text,text,boolean) returns void language sql as $$select null::void$$;
  create function realtime.broadcast_changes(text,text,text,text,text,anyelement,anyelement) returns void language sql as $$select null::void$$;
@@ -86,6 +86,21 @@ try {
    try {await client.query(`select set_config('request.jwt.claims',$1,true),set_config('request.headers',$2,true)`,[JSON.stringify({sub:user,role:'authenticated'}),JSON.stringify({'x-leadlaju-brand':brand})]); await client.query('set local role authenticated'); const r=await client.query(sql,args); await client.query('commit');return r;}
    catch(e){await client.query('rollback');throw e;}
  };
+ // Exercise the actual messages RLS instead of the transport stub.
+ const publishAs=async(user,brand,role,topic,extension='broadcast',privateChannel=true)=>asUser(user,brand,async()=>{
+   if(role==='tenant') await client.query('set local role leadlaju_tenant_executor');
+   await client.query('insert into realtime.messages(topic,extension,private) values($1,$2,$3)',[topic,extension,privateChannel]);
+ });
+ for(const [user,brand,peer,other] of [[agentA,sa,adminA,agentB],[agentB,sb,adminB,agentA]]) {
+   await publishAs(user,brand,'tenant',`user:${peer}`);checks++;
+   await publishAs(user,brand,'tenant',`brand:${brand}:operations`);checks++;
+   await rejects(()=>publishAs(user,brand,'tenant',`user:${other}`),'Tenant cannot send to another brand user');
+   await rejects(()=>publishAs(user,brand,'tenant',`brand:${brand===sa?sb:sa}:operations`),'Tenant cannot send to another brand admin');
+   await rejects(()=>publishAs(user,brand,'tenant',`user:${peer}`,'broadcast',false),'Tenant cannot send public messages');
+   await rejects(()=>publishAs(user,brand,'tenant',`user:${peer}`,'presence'),'Tenant cannot send other extensions');
+   await rejects(()=>publishAs(user,brand,'client',`user:${user}`),'Authenticated client cannot publish');
+ }
+ check(!(await client.query("select pg_has_role('authenticated','leadlaju_tenant_executor','MEMBER') member")).rows[0].member,'Client is not member of server executor');
  const pa=(await commitUser(adminA,sa,`select public.admin_upsert_project('{"name":"Same Project"}') x`)).rows[0].x.project.id;
  const pb=(await commitUser(adminB,sb,`select public.admin_upsert_project('{"name":"Same Project"}') x`)).rows[0].x.project.id;
  check(pa!==pb,'Identical project names are isolated');
