@@ -44,6 +44,26 @@ try {
    assert.match(copied,/No Phone: 60120000000/);checks++;
    assert.match(copied,/Nota Lain:\nYa$/);checks++;
   }
+  const fallback=await page.evaluate(async()=>{
+   const original=navigator.clipboard, exec=document.execCommand;
+   let copied='', calls=0;
+   document.execCommand=command=>{calls++;copied=document.activeElement.value;return command==='copy'};
+   Object.defineProperty(navigator,'clipboard',{configurable:true,value:undefined});
+   const missing=await copyLeadDetails('copy-fixture');
+   Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async()=>{throw new DOMException('Denied','NotAllowedError')}}});
+   const denied=await copyLeadDetails('copy-fixture');
+   document.execCommand=()=>false;
+   const failed=await copyLeadDetails('copy-fixture');
+   document.execCommand=exec;
+   Object.defineProperty(navigator,'clipboard',{configurable:true,value:original});
+   return {missing,denied,failed,calls,copied,leftovers:document.querySelectorAll('[data-copy-fallback]').length};
+  });
+  assert.equal(fallback.missing,true,`${name}: missing Clipboard API fallback`);checks++;
+  assert.equal(fallback.denied,true,`${name}: denied Clipboard API fallback`);checks++;
+  assert.equal(fallback.failed,false);checks++;
+  assert.equal(fallback.calls,2);checks++;
+  assert.match(fallback.copied,/No Phone: 60120000000/);checks++;
+  assert.equal(fallback.leftovers,0);checks++;
   const privacy=await page.evaluate(async()=>{
    const lead=state.leads[0],agent=getCurrentUser(),count=window.__copies.length;
    agent.role='admin';switchView('dashboard');renderActiveLead();

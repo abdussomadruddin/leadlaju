@@ -41,7 +41,7 @@ test('copy button uses the requested inquiry text and stays locked before CALL N
   assert.match(format({project:'LG',source:'Manual'}),/^\*Inquiry For LG From Meta\/Tiktok\*/);
   assert.match(app, /const available = lead && canAccessLead\(lead\) && canRevealLeadContact\(lead\)/);
   assert.match(app, /if \(!lead \|\| !canAccessLead\(lead\) \|\| !canRevealLeadContact\(lead\)\) return false/);
-  assert.match(app, /navigator\.clipboard\.writeText\(leadDetailsCopyText\(lead\)\)/);
+  assert.match(app, /writeLeadClipboard\(leadDetailsCopyText\(lead\)\)/);
   assert.match(app, /data-lead-copy/);
 });
 

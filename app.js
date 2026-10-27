@@ -3286,7 +3286,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261027-sales-copy-v176")
+      .register("/sw.js?v=20261028-clipboard-v177")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -6546,12 +6546,40 @@ function leadDetailsCopyText(lead) {
   ].join("\n");
 }
 
+function copyTextFallback(text) {
+  const previousFocus = document.activeElement;
+  const input = document.createElement("textarea");
+  input.dataset.copyFallback = "true";
+  input.value = text;
+  input.readOnly = true;
+  input.style.cssText = "position:fixed;top:0;left:0;opacity:0;pointer-events:none;font-size:16px";
+  document.body.append(input);
+  try {
+    input.focus({ preventScroll: true });
+    input.select();
+    input.setSelectionRange(0, input.value.length);
+    return document.execCommand("copy") === true;
+  } catch { return false; }
+  finally {
+    input.remove();
+    if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+  }
+}
+
+async function writeLeadClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    try { await navigator.clipboard.writeText(text); return; }
+    catch { /* Some installed browsers deny the async Clipboard API. */ }
+  }
+  if (!copyTextFallback(text)) throw new Error("Clipboard unavailable");
+}
+
 async function copyLeadDetails(leadId, button = lastInteractionButton) {
   const lead = state.leads.find((item) => item.id === leadId);
   if (!lead || !canAccessLead(lead) || !canRevealLeadContact(lead)) return false;
   const finishFeedback = beginButtonFeedback(button);
   try {
-    await navigator.clipboard.writeText(leadDetailsCopyText(lead));
+    await writeLeadClipboard(leadDetailsCopyText(lead));
     showToast("Details disalin", `${lead.name} telah disalin.`, "success");
     return true;
   } catch {
