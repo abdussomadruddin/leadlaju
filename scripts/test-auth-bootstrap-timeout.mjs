@@ -10,13 +10,13 @@ try{for(const [name,device] of [['desktop',{viewport:{width:1366,height:900}}],[
  await page.addInitScript(()=>{
   const profile={id:'user',brand_id:'brand',name:'Admin Fixture',email:'fixture@example.invalid',role:'admin',active:true,approval_status:'approved'};
   window.__sessionReads=0;window.__signOuts=0;
-  window.__client={auth:{getSession:async()=>{window.__sessionReads++;if(window.__sessionReads===1)await new Promise(r=>setTimeout(r,650));return {data:{session:{user:{id:'user'}}}};},getUser:async()=>({data:{user:{id:'user'}}}),signOut:async()=>{window.__signOuts++;return {};},signInWithPassword:async()=>({data:{user:null},error:{name:'AuthRetryableFetchError',status:503,message:'signal is aborted without reason'}}),onAuthStateChange(){}},rpc:async name=>({data:name==='get_dashboard_state'?{profiles:[profile],projects:[],leads:[],appointments:[],events:[]}:{leads:[],bulletins:[],rows:[],weeks:[]}}),from:table=>{const q={select(){return q},eq(){return q},single:async()=>({data:table==='profiles'?profile:{id:'brand',name:'Safrich',active:true,distribution_mode:'agent'}})};return q;},realtime:{setAuth:async()=>{}},channel:()=>{const c={on(){return c},subscribe(){return c}};return c;},removeChannel:async()=>{}};
+  window.__client={auth:{getSession:async()=>{window.__sessionReads++;if(window.__sessionReads===1)await new Promise(r=>setTimeout(r,650));return {data:{session:{user:{id:'user'},access_token:'fixture-token'}}};},getUser:async()=>({data:{user:{id:'user'}}}),signOut:async()=>{window.__signOuts++;return {};},signInWithPassword:async()=>({data:{user:null},error:{name:'AuthRetryableFetchError',status:503,message:'signal is aborted without reason'}}),onAuthStateChange(){}},rpc:async name=>({data:name==='get_dashboard_state'?{profiles:[profile],projects:[],leads:[],appointments:[],events:[]}:{leads:[],bulletins:[],rows:[],weeks:[]}}),from:table=>{const q={select(){return q},eq(){return q},single:async()=>({data:table==='profiles'?profile:{id:'brand',name:'Safrich',active:true,distribution_mode:'agent'}})};return q;},realtime:{setAuth:async()=>{}},channel:()=>{const c={on(){return c},subscribe(){return c}};return c;},removeChannel:async()=>{}};
  });
  await page.goto('http://127.0.0.1:8769/');
  await page.locator('#startup-message').getByText('Sambungan pengesahan mengambil masa.',{exact:false}).waitFor();checks++;
  assert.equal(await page.locator('#login-screen').isVisible(),false);checks++;
  await page.waitForFunction(()=>document.body.classList.contains('authenticated')&&!document.getElementById('startup-recovery'));
- assert.equal(await page.evaluate(()=>window.__sessionReads),2);assert.equal(await page.evaluate(()=>window.__signOuts),0);checks+=2;
+ assert.ok(await page.evaluate(()=>window.__sessionReads>=2 && window.__sessionReads<=5));assert.equal(await page.evaluate(()=>window.__signOuts),0);checks+=2;
  await page.evaluate(()=>{showLogin();hideLifecycleSyncOverlay();});
  await page.locator('#login-email').fill('fixture@example.invalid');await page.locator('#login-password').fill('fixture-password');
  await page.locator('#login-form button[type="submit"]').click();

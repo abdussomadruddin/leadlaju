@@ -23,6 +23,7 @@ function fixture(){
   state:{currentUserId:'u',agents:[{...user,password:'not-for-cache'}],leads:[{id:'l',brandId:'b',status:'new',phone:'60173559147',email:'test@example.com',notes:'Nama test +60 17-355 9147 test@example.com'}]},
   defaultState:{},activeBrandId:'b',activeBrand:brand,remoteDatabaseMode:true,
   monitorLastCanonicalSyncAt:Date.now(),dashboardCacheMetrics:{own:{current:{rows:[]},previous:{rows:[]}}},startupFromCache:false,
+  async requireRemoteSession(id){if(id!==user.id)throw new Error("Wrong account");return {user:{id},access_token:"fixture-token"};},
   getCurrentUser(){return c.state.agents.find(a=>a.id===c.state.currentUserId);},
   localStorage:{getItem:k=>entries.get(k)||null,setItem:(k,v)=>entries.set(k,v)},sessionStorage:{getItem:()=>null},
   isTransientRemoteLoadError:e=>e?.code==='FETCH',showDashboardSyncWarning(){},

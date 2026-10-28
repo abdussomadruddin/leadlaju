@@ -809,6 +809,7 @@ async function restoreTrustedDashboardCache(userId) {
     if (!profile?.active || profile.approval_status !== "approved") return false;
     const brandId = profile.role === "master" ? sessionStorage.getItem(`leadlaju-master-brand:${userId}`) : profile.brand_id;
     if (!brandId) return false;
+    await requireRemoteSession(userId);
     const {data:brand,error:brandError} = await remoteDatabaseClient.from("brands").select("id,name,slug,active,distribution_mode").eq("id",brandId).single();
     if (brandError) throw brandError;
     if (!brand?.active) return false;
@@ -1017,6 +1018,12 @@ async function initRemoteDatabase() {
     // Keep this callback synchronous: Auth holds its initialization lock here.
     remoteDatabaseClient.auth.onAuthStateChange?.((event, session) => {
       if (event === "PASSWORD_RECOVERY" && session?.user) remotePasswordRecoveryPending = true;
+      if (event === "TOKEN_REFRESHED" && session?.access_token) {
+        window.setTimeout(() => {
+          if (session.user?.id !== state.currentUserId || !remoteDatabaseMode) return;
+          void subscribeToRemoteDatabase();
+        }, 0);
+      }
     });
     return remoteDatabaseClient;
   } catch (error) {
@@ -1148,6 +1155,15 @@ async function readStartupSession() {
     throw error;
   }
 }
+async function requireRemoteSession(userId) {
+  const result = await readStartupSession();
+  const session = result.data?.session;
+  if (!session?.access_token || session.user?.id !== userId) {
+    throw Object.assign(new Error("Sesi tidak tersedia untuk akaun ini."), { code: "session_not_found", status: 401 });
+  }
+  return session;
+}
+
 function recoverStartupAuth(error) {
   startupSessionWaiting = true;
   const message = 'Sambungan pengesahan mengambil masa. Sesi dikekalkan; sedang mencuba semula.';
@@ -1282,6 +1298,8 @@ async function performLoadRemoteState(userId, attempt = 0) {
         }
       } else activeBrandId = profile.brand_id;
     }
+    await requireRemoteSession(userId);
+    if (requestBrandVersion !== brandContextVersion) return false;
     const brandResult = await remoteDatabaseClient.from("brands").select("id,name,slug,active,distribution_mode").eq("id", activeBrandId).single();
     if (brandResult.error) throw brandResult.error;
     if (getCurrentUser()?.role === "master" && !masterBrands.length) {
@@ -1369,11 +1387,34 @@ async function performLoadRemoteState(userId, attempt = 0) {
 }
 
 let realtimeSubscriptionRequest = null;
+let realtimeReconnectTimer = null;
+let realtimeReconnectAttempts = 0;
+function scheduleRealtimeReconnect(version, userId) {
+  if (realtimeReconnectTimer || realtimeReconnectAttempts >= 3) return;
+  const delay = [1000, 5000, 15000][realtimeReconnectAttempts++];
+  realtimeReconnectTimer = window.setTimeout(() => {
+    realtimeReconnectTimer = null;
+    if (version !== brandContextVersion || userId !== state.currentUserId || !remoteDatabaseMode) return;
+    void subscribeToRemoteDatabase();
+  }, delay);
+}
 async function subscribeToRemoteDatabase() {
   const key = `${brandContextVersion}:${state.currentUserId}:${activeBrandId}`;
+  if (subscribeToRemoteDatabase.context !== key) {
+    subscribeToRemoteDatabase.context = key;
+    realtimeReconnectAttempts = 0;
+    window.clearTimeout(realtimeReconnectTimer);
+    realtimeReconnectTimer = null;
+  }
   if (realtimeSubscriptionRequest?.key === key) return realtimeSubscriptionRequest.promise;
-  const request = {key};
-  request.promise = createRemoteSubscriptions().finally(() => {
+  const request = {key, version: brandContextVersion, userId: state.currentUserId};
+  request.promise = createRemoteSubscriptions().catch(error => {
+    console.warn("Realtime connection pending", error?.message || "Connection failed");
+    if (request.version === brandContextVersion && request.userId === state.currentUserId) {
+      scheduleRealtimeReconnect(request.version, request.userId);
+    }
+    return null;
+  }).finally(() => {
     if (realtimeSubscriptionRequest === request) realtimeSubscriptionRequest = null;
   });
   realtimeSubscriptionRequest = request;
@@ -1382,19 +1423,34 @@ async function subscribeToRemoteDatabase() {
 async function createRemoteSubscriptions() {
   if (!remoteDatabaseClient || !remoteDatabaseMode || !state.currentUserId) return null;
   const expectedVersion = brandContextVersion, expectedUser = state.currentUserId;
-  remoteRealtimeChannels.forEach((channel) => remoteDatabaseClient.removeChannel(channel));
+  const session = await requireRemoteSession(expectedUser);
+  if (expectedVersion !== brandContextVersion || expectedUser !== state.currentUserId) return null;
+  const previousChannels = remoteRealtimeChannels;
   remoteRealtimeChannels = [];
-  await remoteDatabaseClient.realtime.setAuth();
+  await Promise.all(previousChannels.map(channel => remoteDatabaseClient.removeChannel(channel)));
+  if (expectedVersion !== brandContextVersion || expectedUser !== state.currentUserId) return null;
+  await remoteDatabaseClient.realtime.setAuth(session.access_token);
   if (expectedVersion !== brandContextVersion || expectedUser !== state.currentUserId) return null;
   const topics = [`user:${state.currentUserId}`];
   if (isAdmin() && activeBrandId) topics.push(`brand:${activeBrandId}:operations`);
   const subscriptionBrandVersion = brandContextVersion;
+  const subscribedTopics = new Set();
   topics.forEach((topic) => {
     const channel = remoteDatabaseClient.channel(topic, { config: { private: true } })
       .on("broadcast", { event: "*" }, message => { if (subscriptionBrandVersion === brandContextVersion) handleRemoteBroadcast(message); })
       .subscribe((status) => {
-        if (subscriptionBrandVersion !== brandContextVersion) return;
+        if (subscriptionBrandVersion !== brandContextVersion || expectedUser !== state.currentUserId) return;
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          subscribedTopics.delete(topic);
+          scheduleRealtimeReconnect(subscriptionBrandVersion, expectedUser);
+        }
         if (status === "SUBSCRIBED") {
+          subscribedTopics.add(topic);
+          if (subscribedTopics.size === topics.length) {
+            realtimeReconnectAttempts = 0;
+            window.clearTimeout(realtimeReconnectTimer);
+            realtimeReconnectTimer = null;
+          }
           // The canonical reload already includes both feeds and performance.
           queueRemoteReload({ joinCurrent: true });
         }
@@ -3286,7 +3342,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261028-clipboard-v177")
+      .register("/sw.js?v=20261028-admin-realtime-v178")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });

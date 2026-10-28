@@ -113,6 +113,18 @@ try {
    await client.query(`insert into public.agent_availability(agent_id,brand_id,lead_ready,notification_ready,presence_lease_until) values($1,$2,true,true,now()+interval '1 hour')`,[id,b]);
    await client.query(`insert into public.push_subscriptions(user_id,brand_id,endpoint,p256dh,auth,user_agent) values($1::uuid,$2,$1::text,'test','test','iPhone Safari')`,[id,b]);
  }
+ // Use a real messages INSERT for Master bulk action: the global Master
+ // profile is visible to the executor but must not receive a brand row message.
+ await client.query(`create or replace function realtime.send(jsonb,text,text,boolean) returns void language plpgsql as $$begin insert into realtime.messages(topic,extension,private) values($3,'broadcast',$4);end$$`);
+ for(const brand of [sa,sb]) await asUser(master,brand,async()=>{
+   await client.query('select public.admin_set_all_agent_lead_readiness(true)');
+   await client.query('reset role');
+   const topics=(await client.query('select topic from realtime.messages')).rows.map(r=>r.topic);
+   check(topics.length>0,'Master bulk action publishes real messages');
+   check(!topics.includes(`user:${master}`),'Global Master uses selected brand channel, not global user row events');
+   check(!topics.includes(`user:${brand===sa?agentB:agentA}`),'Master bulk broadcast excludes other brand');
+ });
+ await client.query(`create or replace function realtime.send(jsonb,text,text,boolean) returns void language sql as $$select null::void$$`);
  await commitUser(adminA,sa,`select public.admin_set_all_agent_lead_readiness(true)`);
  const queueA=(await client.query('select * from public.leads where id=$1',[la])).rows[0];
  const queueB=(await client.query('select * from public.leads where id=$1',[lb])).rows[0];

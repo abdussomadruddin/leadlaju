@@ -1,14 +1,14 @@
-const CACHE_NAME = "leadlaju-pwa-v20261028-clipboard-v177";
+const CACHE_NAME = "leadlaju-pwa-v20261028-admin-realtime-v178";
 const LEAD_HANDOFF_CACHE = "leadlaju-notification-snapshots";
 const LEAD_HANDOFF_SCHEMA_VERSION = 1;
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20261028-clipboard-v177",
+  "/styles.css?v=20261028-admin-realtime-v178",
   "/vendor/exceljs.min.js?v=4.4.0",
-  "/app.js?v=20261028-clipboard-v177",
-  "/neglected.js?v=20261028-clipboard-v177",
-  "/manifest.webmanifest?v=20261028-clipboard-v177",
+  "/app.js?v=20261028-admin-realtime-v178",
+  "/neglected.js?v=20261028-admin-realtime-v178",
+  "/manifest.webmanifest?v=20261028-admin-realtime-v178",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",
   "/assets/icon-512.png",
