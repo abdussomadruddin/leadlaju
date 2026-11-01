@@ -928,7 +928,24 @@ async function readContactOutbox(agentId) {
   });
 }
 
-async function submitContactAction(action) {
+const contactActionFlights = new Map();
+let contactOutboxFlight = null;
+function submitContactAction(action) {
+  const key = `${action.agentId}:${action.brandId}:${action.actionId}`;
+  if (contactActionFlights.has(key)) return contactActionFlights.get(key);
+  const pending = sendContactAction(action).catch(async error => {
+    if (!error.authoritativeRejection) {
+      const attempts = Math.min(8, (Number(action.attempts) || 0) + 1);
+      await writeContactOutbox({ ...action, state: "pending", attempts,
+        retryAfter: Date.now() + Math.min(60000, 2000 * 2 ** (attempts - 1)) }).catch(() => false);
+    }
+    throw error;
+  }).finally(() => contactActionFlights.delete(key));
+  contactActionFlights.set(key, pending);
+  return pending;
+}
+
+async function sendContactAction(action) {
   const { data, error } = await remoteDatabaseClient.rpc(action.actionType === "team_sales_contact" ? "team_sales_contact" : "contact_assignment", {
     p_action_id: action.actionId,
     p_lead_id: action.leadId,
@@ -936,9 +953,11 @@ async function submitContactAction(action) {
     ...(action.actionType === "team_sales_contact" ? { p_channel: action.channel } : {}),
   });
   if (error) {
-    if (action.actionType === "team_sales_contact" && ["42501", "P0001", "23505"].includes(error.code)) {
+    // Missing/deleted leads and access/revision conflicts are final. Network and
+    // timeout failures remain pending with the same idempotency key.
+    if (["23503", "42501", "P0001", "23505"].includes(error.code)) {
       error.authoritativeRejection = true;
-      await writeContactOutbox({ ...action, state: "conflict", error: error.message }).catch(() => false);
+      await writeContactOutbox({ ...action, state: "conflict", error: error.message, resolvedAt: Date.now() }).catch(() => false);
     }
     throw error;
   }
@@ -957,19 +976,28 @@ async function submitContactAction(action) {
   return data;
 }
 
-async function flushContactOutbox() {
+function flushContactOutbox() {
+  if (contactOutboxFlight) return contactOutboxFlight;
+  contactOutboxFlight = drainContactOutbox().finally(() => { contactOutboxFlight = null; });
+  return contactOutboxFlight;
+}
+
+async function drainContactOutbox() {
   if (!remoteDatabaseMode || !remoteDatabaseClient || !navigator.onLine) return false;
   const user = getCurrentUser();
   if (!user?.id || (user.role !== "agent" && !isTeamSales())) return false;
+  const contextVersion = brandContextVersion;
   const actions = (await readContactOutbox(user.id).catch(() => []))
-    .filter((action) => !action.state || action.state === "pending");
+    .filter((action) => !action.state || action.state === "pending")
+    .filter(action => !action.retryAfter || action.retryAfter <= Date.now());
   for (const action of actions) {
+    if (contextVersion !== brandContextVersion || getCurrentUser()?.id !== user.id) break;
     if (action.brandId && action.brandId !== activeBrandId) continue;
     await submitContactAction(action).then(() => salesContactStates.delete(action.leadId)).catch(error => {
       if (action.actionType === "team_sales_contact") salesContactStates.set(action.leadId, error.authoritativeRejection ? "failed" : "pending");
     });
   }
-  if (actions.length) queueRemoteReload();
+  if (actions.length && contextVersion === brandContextVersion && getCurrentUser()?.id === user.id) queueRemoteReload();
   return true;
 }
 
@@ -3342,7 +3370,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261028-admin-realtime-v178")
+      .register("/sw.js?v=20261101-resource-efficiency-v179")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });

@@ -136,7 +136,20 @@ try {
  check(outbox.length===2&&outbox.every(x=>x.brand_id===x.recipient_brand&&x.brand_id===x.lead_brand),'Assignment outbox remains same brand');
  const revision=(await client.query('select assignment_revision from public.leads where id=$1',[la])).rows[0].assignment_revision;
  await rejects(()=>asUser(agentB,sb,()=>client.query('select public.contact_assignment(gen_random_uuid(),$1,$2)',[la,revision])),'CALL NOW cannot claim another brand');
- await commitUser(agentA,sa,'select public.contact_assignment(gen_random_uuid(),$1,$2)',[la,revision]);
+ const requestsBefore=(await client.query('select count(*)::int n from public.action_requests')).rows[0].n;
+ await rejects(()=>asUser(agentA,sa,()=>client.query('select public.contact_assignment(gen_random_uuid(),gen_random_uuid(),1)')),'Deleted/missing lead is denied before FK insert');
+ check((await client.query('select count(*)::int n from public.action_requests')).rows[0].n===requestsBefore,'Missing contact creates no action row');
+ await asUser(agentA,sa,async()=>{
+   const stale=(await client.query('select public.contact_assignment(gen_random_uuid(),$1,$2) x',[la,Number(revision)+1])).rows[0].x;
+   check(stale.ok===false&&stale.stale===true,'Stale revision is a terminal canonical response');
+ });
+ check((await client.query('select count(*)::int n from public.action_requests')).rows[0].n===requestsBefore,'Stale revision creates no action row');
+ const contactId=crypto.randomUUID();
+ await commitUser(agentA,sa,'select public.contact_assignment($1,$2,$3)',[contactId,la,revision]);
+ const handledBefore=(await client.query('select leads_handled from public.profiles where id=$1',[agentA])).rows[0].leads_handled;
+ await commitUser(agentA,sa,'select public.contact_assignment($1,$2,$3)',[contactId,la,revision]);
+ check((await client.query('select leads_handled from public.profiles where id=$1',[agentA])).rows[0].leads_handled===handledBefore,'Accepted contact replay does not duplicate handling/cooldown');
+
  await asUser(agentA,sa,async()=>{
    check((await client.query('select id from public.leads')).rows.length===1,'Agent sees own assigned lead');
    const profiles=(await client.query('select public.get_dashboard_state() x')).rows[0].x.profiles;
@@ -591,5 +604,6 @@ try {
      finally {await client.query('select pg_advisory_unlock(hashtextextended($1,0))',[lock]);}
    }
  } finally {await concurrent.end();}
+ await client.query(fs.readFileSync(path.join(root,'scripts/test-retention-live-tail.sql'),'utf8'));
  console.log(`PASS: ${checks} real PostgreSQL brand isolation and distribution assertions; Neglected Lead, idle dispatch and concurrent scheduler scenarios passed`);
 } finally { if(client) await client.end(); await pg.stop(); }

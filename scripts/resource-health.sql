@@ -6,6 +6,13 @@ with recent_cron as materialized (
 select jsonb_build_object(
  'captured_at',now(),'database_started',pg_postmaster_start_time(),
  'database_bytes',pg_database_size(current_database()),
+ 'cron_retention',(select jsonb_build_object('cursor',last_runid,'updated_at',updated_at,
+   'relation_bytes',pg_total_relation_size('cron.job_run_details'))
+   from leadlaju_private.cron_retention_cursor where singleton),
+ 'realtime_partitions',(select jsonb_agg(jsonb_build_object('table',c.relname,
+   'bytes',pg_total_relation_size(c.oid)) order by c.relname)
+   from pg_class c join pg_namespace n on n.oid=c.relnamespace
+   where n.nspname='realtime' and c.relkind='r' and c.relname like 'messages_%'),
  'max_connections',current_setting('max_connections'),
  'connections',(select count(*) from pg_stat_activity),
  'active_queries',(select count(*) from pg_stat_activity where state='active' and pid<>pg_backend_pid()),
