@@ -1,14 +1,14 @@
-const CACHE_NAME = "leadlaju-pwa-v20261101-resource-efficiency-v179";
+const CACHE_NAME = "leadlaju-pwa-v20261102-master-admin-password-v180";
 const LEAD_HANDOFF_CACHE = "leadlaju-notification-snapshots";
 const LEAD_HANDOFF_SCHEMA_VERSION = 1;
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20261101-resource-efficiency-v179",
+  "/styles.css?v=20261102-master-admin-password-v180",
   "/vendor/exceljs.min.js?v=4.4.0",
-  "/app.js?v=20261101-resource-efficiency-v179",
-  "/neglected.js?v=20261101-resource-efficiency-v179",
-  "/manifest.webmanifest?v=20261101-resource-efficiency-v179",
+  "/app.js?v=20261102-master-admin-password-v180",
+  "/neglected.js?v=20261102-master-admin-password-v180",
+  "/manifest.webmanifest?v=20261102-master-admin-password-v180",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",
   "/assets/icon-512.png",

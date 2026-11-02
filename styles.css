@@ -5913,3 +5913,7 @@ button, [role="button"] { transition: background-color 180ms ease, border-color 
 .neglected-note { white-space: pre-wrap; font-size: .88rem; }
 .neglected-badge { display: inline-block; color: #a34913; background: #fff1df; border-radius: 8px; padding: 3px 7px; margin: 4px; font-size: .72rem; font-weight: 700; }
 @media(max-width:600px) { .neglected-panel {padding:12px;} .neglected-toolbar>* { flex: 1 1 140px; } }
+
+.master-admin-password { margin-top: 8px; border-top: 1px solid var(--line); }
+.master-password-error { margin: 0; color: var(--red, #c62828); font-size: 12px; }
+.master-password-error:empty { display: none; }

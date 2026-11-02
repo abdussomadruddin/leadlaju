@@ -2304,6 +2304,7 @@ async function cleanUpPushAfterLogout() {
 }
 
 function logout() {
+  document.querySelectorAll("[data-master-admin-password]").forEach(form => form.reset());
   startupFromCache = false;
   dashboardCacheMetrics = {};
   document.querySelector("#push-device-report")?.close();
@@ -3370,7 +3371,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261101-resource-efficiency-v179")
+      .register("/sw.js?v=20261102-master-admin-password-v180")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -8205,12 +8206,13 @@ async function loadMasterManagement() {
     document.querySelector("#master-admin-list").innerHTML = masterAdmins.length ? masterAdmins.map(a => `<article class="panel master-card">
       <div class="master-card-heading"><div class="master-card-identity"><span class="master-card-avatar master-admin-avatar" aria-hidden="true">${escapeHtml(initials(a.name))}</span><h3>${escapeHtml(a.name)}</h3></div><span class="integration-status ${a.active ? "active" : "inactive"}">${a.active ? "Aktif" : "Tidak aktif"}</span></div>
       <div class="master-admin-meta"><span>${escapeHtml(masterBrands.find(b => b.id === a.brand_id)?.name || "")}</span><p>${escapeHtml(a.email)}</p></div>
-      <details class="master-card-details"><summary>Edit Admin</summary><form class="master-admin-edit" data-master-admin="${a.id}"><label>Nama<input name="name" value="${escapeHtml(a.name)}" maxlength="120" required /></label><label>Telefon<input name="phone" type="tel" value="${escapeHtml(a.phone || "")}" /></label><label class="master-active-label"><input type="checkbox" name="active" ${a.active ? "checked" : ""} />Akaun aktif</label><button class="primary-button" type="submit">Simpan</button></form><button class="secondary-button" data-master-reset="${a.id}" type="button">Hantar reset kata laluan</button></details></article>`).join("") : '<p class="panel master-empty-state">Belum ada Admin. Hantar jemputan untuk mula membina pasukan.</p>';
+      <details class="master-card-details"><summary>Edit Admin</summary><form class="master-admin-edit" data-master-admin="${a.id}"><label>Nama<input name="name" value="${escapeHtml(a.name)}" maxlength="120" required /></label><label>Telefon<input name="phone" type="tel" value="${escapeHtml(a.phone || "")}" /></label><label class="master-active-label"><input type="checkbox" name="active" ${a.active ? "checked" : ""} />Akaun aktif</label><button class="primary-button" type="submit">Simpan</button></form><form class="master-admin-edit master-admin-password" data-master-admin-password="${a.id}" data-brand-id="${a.brand_id}" autocomplete="off"><label>Kata laluan baharu<input name="password" type="password" autocomplete="new-password" minlength="8" required /><small>Minimum 8 aksara.</small></label><label>Sahkan kata laluan<input name="confirmation" type="password" autocomplete="new-password" minlength="8" required /></label><p class="master-password-error" role="alert"></p><button class="primary-button" type="submit">Tukar kata laluan</button></form><button class="secondary-button" data-master-reset="${a.id}" type="button">Hantar reset kata laluan</button></details></article>`).join("") : '<p class="panel master-empty-state">Belum ada Admin. Hantar jemputan untuk mula membina pasukan.</p>';
     renderUser();
   } catch (e) { status.textContent = e?.message || "Pengurusan Master belum dapat dimuatkan."; }
 }
 
 function clearBrandOperationalState() {
+  document.querySelectorAll("[data-master-admin-password]").forEach(form => form.reset());
   dashboardRenderedData.clear();
   startupFromCache = false;
   dashboardCacheMetrics = {};
@@ -8292,8 +8294,40 @@ document.querySelector("#master-admin-form").addEventListener("submit",event=>{
   event.preventDefault(); const form=event.currentTarget; const fields=Object.fromEntries(new FormData(form));
   masterOperation(async()=>{const result=await remoteDatabaseClient.functions.invoke("master-manage-account",{body:{action:"create_admin",...fields}});if(result.error||!result.data?.ok)throw result.error||new Error(result.data?.error);form.reset();showToast("Jemputan dihantar","Admin boleh menetapkan kata laluan melalui emel.","success");});
 });
+async function updateMasterAdminPassword(form) {
+  if (!isMaster() || !remoteDatabaseClient || form.dataset.saving === "true") return;
+  const target = masterAdmins.find(admin => admin.id === form.dataset.masterAdminPassword
+    && admin.brand_id === form.dataset.brandId);
+  if (!target) return;
+  const actorId = state.currentUserId;
+  const error = form.querySelector(".master-password-error");
+  const password = form.elements.password.value;
+  error.textContent = "";
+  if (password.length < 8) { error.textContent = "Kata laluan mesti sekurang-kurangnya 8 aksara."; return; }
+  if (password !== form.elements.confirmation.value) { error.textContent = "Pengesahan kata laluan tidak sepadan."; return; }
+  const button = form.querySelector('[type="submit"]');
+  form.dataset.saving = "true"; button.disabled = true; button.setAttribute("aria-busy", "true");
+  button.textContent = "Menyimpan...";
+  try {
+    const result = await remoteDatabaseClient.functions.invoke("master-manage-account", {
+      body: { action: "update_admin_password", userId: target.id, brand_id: target.brand_id, password },
+    });
+    if (result.error || !result.data?.ok) throw new Error(result.data?.error || "Kata laluan tidak dapat dikemas kini. Cuba semula.");
+    form.reset();
+    if (!isMaster() || state.currentUserId !== actorId) return;
+    showToast("Kata laluan dikemas kini", `Kata laluan baharu untuk ${target.name} telah disimpan.`, "success");
+  } catch (e) { if (isMaster() && state.currentUserId === actorId) error.textContent = e?.message || "Kata laluan tidak dapat dikemas kini. Cuba semula."; }
+  finally {
+    form.dataset.saving = "false"; button.disabled = false; button.removeAttribute("aria-busy");
+    button.textContent = "Tukar kata laluan";
+  }
+}
+
 document.querySelector("#master-admin-list").addEventListener("submit",event=>{
-  event.preventDefault(); const form=event.target.closest("[data-master-admin]"); if(!form)return;
+  event.preventDefault();
+  const passwordForm=event.target.closest("[data-master-admin-password]");
+  if(passwordForm){updateMasterAdminPassword(passwordForm);return;}
+  const form=event.target.closest("[data-master-admin]"); if(!form)return;
   masterOperation(async()=>{const result=await remoteDatabaseClient.functions.invoke("master-manage-account",{body:{action:"update_admin",userId:form.dataset.masterAdmin,...Object.fromEntries(new FormData(form)),active:form.elements.active.checked}});if(result.error||!result.data?.ok)throw result.error||new Error(result.data?.error);});
 });
 document.querySelector("#master-admin-list").addEventListener("click",event=>{

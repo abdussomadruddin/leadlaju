@@ -32,6 +32,27 @@ Deno.serve(async request => {
     const id = clean(body.userId);
     const { data: target, error } = await db.from("profiles").select("id,email,role,brand_id").eq("id", id).eq("role", "admin").maybeSingle();
     if (error || !target) throw new Error("Admin tidak ditemui.");
+    if (action === "update_admin_password") {
+      if (!target.brand_id || clean(body.brand_id) !== target.brand_id) {
+        return reply({ ok: false, error: "Admin tidak sepadan dengan brand. Muat semula senarai." }, 403);
+      }
+      await actorBrand(request, actor, target.brand_id);
+      const password = typeof body.password === "string" ? body.password : "";
+      if (password.length < 8) return reply({ ok: false, error: "Kata laluan mesti sekurang-kurangnya 8 aksara." }, 400);
+      // Establish an audit trail before changing Auth. Never store the password.
+      const audit = await db.from("master_audit_log").insert({ actor_id: actor.id,
+        brand_id: target.brand_id, action, target_id: id, details: { result: "requested" } }).select("id").single();
+      if (audit.error) throw audit.error;
+      const updated = await db.auth.admin.updateUserById(id, { password });
+      const completed = await db.from("master_audit_log").update({
+        details: { result: updated.error ? "failed" : "accepted" },
+      }).eq("id", audit.data.id);
+      if (updated.error) return reply({ ok: false, error: "Kata laluan tidak dapat dikemas kini. Cuba semula." }, 400);
+      // Auth already succeeded: do not falsely tell the operator it failed if
+      // only the audit completion write failed. The requested audit still exists.
+      if (completed.error) console.warn("Admin password audit completion pending");
+      return reply({ ok: true, userId: id, password_updated: true });
+    }
     if (action === "update_admin") {
       const name = clean(body.name);
       if (!name || name.length > 120) throw new Error("Nama tidak sah.");
