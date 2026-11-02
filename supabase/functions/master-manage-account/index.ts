@@ -20,14 +20,16 @@ Deno.serve(async request => {
       const brand = await actorBrand(request, actor, clean(body.brand_id));
       const name = clean(body.name), email = clean(body.email).toLowerCase();
       if (!name || name.length > 120 || !email.includes("@")) throw new Error("Maklumat Admin tidak lengkap.");
-      const invited = await db.auth.admin.inviteUserByEmail(email, { redirectTo: `${Deno.env.get("LEADLAJU_APP_URL") || "https://leadlaju.vercel.app"}/?setup=1` });
-      if (invited.error || !invited.data.user) throw invited.error || new Error("Jemputan tidak berjaya.");
-      const id = invited.data.user.id;
+      const password = typeof body.password === "string" ? body.password : "";
+      if (password.length < 8) return reply({ ok: false, error: "Kata laluan mesti sekurang-kurangnya 8 aksara." }, 400);
+      const created = await db.auth.admin.createUser({ email, password, email_confirm: true });
+      if (created.error || !created.data.user) return reply({ ok: false, error: "Admin tidak dapat didaftarkan. Semak emel belum digunakan dan kata laluan memenuhi syarat." }, 400);
+      const id = created.data.user.id;
       const profile = await db.from("profiles").insert({ id, name, email, phone: clean(body.phone), role: "admin", brand_id: brand.id, active: true, approval_status: "approved" });
       if (profile.error) { await db.auth.admin.deleteUser(id); throw profile.error; }
       const audited = await db.from("master_audit_log").insert({ actor_id: actor.id, brand_id: brand.id, action, target_id: id });
       if (audited.error) throw audited.error;
-      return reply({ ok: true, userId: id, invited: true });
+      return reply({ ok: true, userId: id, created: true });
     }
     const id = clean(body.userId);
     const { data: target, error } = await db.from("profiles").select("id,email,role,brand_id").eq("id", id).eq("role", "admin").maybeSingle();

@@ -24,7 +24,7 @@
     <meta name="apple-mobile-web-app-title" content="LeadLaju" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>LeadLaju - Lead Management</title>
-    <link rel="manifest" href="manifest.webmanifest?v=20261102-appointment-tabs-v183" />
+    <link rel="manifest" href="manifest.webmanifest?v=20261102-admin-create-password-v184" />
     <link rel="icon" href="assets/icon.svg?v=20260625-pwa-notifications" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="assets/apple-touch-icon.png?v=20260625-pwa-notifications" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -33,10 +33,10 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20261102-appointment-tabs-v183" />
+    <link rel="stylesheet" href="styles.css?v=20261102-admin-create-password-v184" />
     <script src="vendor/exceljs.min.js?v=4.4.0" defer></script>
-    <script src="app.js?v=20261102-appointment-tabs-v183" defer></script>
-    <script src="neglected.js?v=20261102-appointment-tabs-v183" defer></script>
+    <script src="app.js?v=20261102-admin-create-password-v184" defer></script>
+    <script src="neglected.js?v=20261102-admin-create-password-v184" defer></script>
   </head>
   <body class="auth-pending">
     <div id="startup-recovery" style="position:fixed;inset:0;z-index:1000;background:#f7f9fc;display:grid;place-items:center;padding:24px;font-family:system-ui;color:#172238;text-align:center">
@@ -774,14 +774,16 @@
               <button class="primary-button" type="submit">Cipta brand</button>
             </form>
             <form class="panel master-form" id="master-admin-form">
-              <div class="master-form-heading"><span class="master-form-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M19 8v6M22 11h-6" /><circle cx="9" cy="7" r="4" /></svg></span><div><h3>Jemput Admin</h3><p>Berikan akses kepada satu brand.</p></div></div>
+              <div class="master-form-heading"><span class="master-form-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M19 8v6M22 11h-6" /><circle cx="9" cy="7" r="4" /></svg></span><div><h3>Daftar Admin</h3><p>Berikan akses kepada satu brand.</p></div></div>
               <div class="master-form-fields">
                 <label class="master-field-wide">Brand<select id="master-admin-brand" name="brand_id" required></select></label>
                 <label>Nama<input name="name" maxlength="120" required placeholder="Nama Admin" autocomplete="name" /></label>
                 <label>Telefon<input name="phone" type="tel" placeholder="Contoh: 0123456789" autocomplete="tel" /></label>
                 <label class="master-field-wide">Emel<input name="email" type="email" required placeholder="nama@contoh.com" autocomplete="email" /></label>
+                <label>Kata laluan<input name="password" type="password" minlength="8" autocomplete="new-password" required /><small>Minimum 8 aksara.</small></label>
+                <label>Sahkan kata laluan<input name="confirmation" type="password" minlength="8" autocomplete="new-password" required /></label>
               </div>
-              <button class="primary-button" type="submit">Hantar jemputan</button><small>Admin menetapkan kata laluan melalui emel sendiri.</small>
+              <button class="primary-button" type="submit">Daftar Admin</button><small>Admin boleh terus log masuk menggunakan emel dan kata laluan ini.</small>
             </form>
           </div>
           <div class="master-directory-grid">
