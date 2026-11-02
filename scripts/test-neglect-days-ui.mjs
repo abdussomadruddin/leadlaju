@@ -10,7 +10,7 @@ try{for(const [name,device] of [['desktop',{viewport:{width:1366,height:900}}],[
   state.agents=[me];state.currentUserId=me.id;activeBrandId='brand';activeBrand={id:'brand',active:true,distribution_mode:'agent',neglect_days:5};remoteDatabaseMode=true;
   window.__settingCalls=[];window.__cacheWrites=0;saveDashboardCache=()=>window.__cacheWrites++;guardLifecycleMutation=()=>true;
   remoteDatabaseClient={rpc:(name,args)=>{window.__settingCalls.push({name,args});return new Promise(resolve=>window.__finishSetting=resolve)}};
-  document.body.classList.remove('logged-out','auth-pending');document.body.classList.add('authenticated');elements.appShell.setAttribute('aria-hidden','false');hideLifecycleSyncOverlay();renderNeglectSetting();
+  document.body.classList.remove('logged-out','auth-pending');document.body.classList.add('authenticated');elements.appShell.setAttribute('aria-hidden','false');hideLifecycleSyncOverlay();renderNeglectSetting();document.querySelectorAll('.view').forEach(view=>view.classList.toggle('active',view.id==='neglected-view'));
  });
  const form=page.locator('#neglect-setting-form'),input=form.locator('input'),save=form.getByRole('button',{name:'Simpan',exact:true});
  assert(await form.isVisible());checks++;assert.equal(await input.inputValue(),'5');checks++;

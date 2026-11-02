@@ -1,6 +1,6 @@
 # Per-brand Neglected Lead duration
 
-Admin/Master of an active Agent brand can choose 3–14 days on the dashboard,
+Admin/Master of an active Agent brand can choose 3–14 days in the Neglected Lead tab,
 default 5. Team Sales cannot use this setting. Saving calls
 `admin_set_neglect_days(p_days integer)` and returns `{ok, neglect_days}`. Brand
 reads carry `neglect_days`. A validated `neglect_settings_changed` brand broadcast
