@@ -5917,3 +5917,8 @@ button, [role="button"] { transition: background-color 180ms ease, border-color 
 .master-admin-password { margin-top: 8px; border-top: 1px solid var(--line); }
 .master-password-error { margin: 0; color: var(--red, #c62828); font-size: 12px; }
 .master-password-error:empty { display: none; }
+
+.appointment-time-tabs { display: flex; gap: 8px; padding: 16px; border-bottom: 1px solid var(--line); }
+.appointment-time-tabs button { flex: 1; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--ink-700); font: inherit; font-weight: 600; cursor: pointer; }
+.appointment-time-tabs button[aria-pressed="true"] { background: #edf3ff; border-color: #b9ceff; color: #215cc5; }
+.appointment-time-tabs span { display: inline-block; padding: 2px 7px; margin-left: 4px; border-radius: 12px; background: rgba(100,116,139,.12); font-size: 12px; }

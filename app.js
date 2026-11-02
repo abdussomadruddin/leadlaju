@@ -3382,7 +3382,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261102-neglect-tab-v182")
+      .register("/sw.js?v=20261102-appointment-tabs-v183")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -6950,6 +6950,8 @@ function findLeadForAppointment(appointment) {
   return matches.find((lead) => lead.assignedAgentId === appointment.assignedAgentId) || (matches.length === 1 ? matches[0] : null);
 }
 
+let appointmentTimeTab = "upcoming";
+
 function renderAppointments() {
   if (!elements.appointmentList) return;
   const selectedStatus = elements.appointmentStatusFilter.value || "all";
@@ -6971,11 +6973,20 @@ function renderAppointments() {
   ].join("");
   elements.appointmentProjectFilter.value = projects.includes(selectedProject) ? selectedProject : "all";
   populateMonthPeriodFilter(elements.appointmentPeriodFilter, visible, (appointment) => appointment.scheduledAt);
-  const filtered = visible.filter((appointment) =>
+  const matching = visible.filter((appointment) =>
     (selectedStatus === "all" || appointment.status === selectedStatus) &&
     (elements.appointmentProjectFilter.value === "all" || appointment.project === elements.appointmentProjectFilter.value) &&
     matchesMonthPeriodFilter(appointment.scheduledAt, elements.appointmentPeriodFilter),
   );
+  const now = Date.now();
+  const isUpcoming = (appointment) => appointment.scheduledAt >= now;
+  document.querySelectorAll("[data-appointment-time]").forEach((button) => {
+    const tab = button.dataset.appointmentTime;
+    button.setAttribute("aria-pressed", String(tab === appointmentTimeTab));
+    button.querySelector("[data-appointment-time-count]").textContent = matching.filter((appointment) => isUpcoming(appointment) === (tab === "upcoming")).length;
+  });
+  const filtered = matching.filter((appointment) => isUpcoming(appointment) === (appointmentTimeTab === "upcoming"));
+  if (appointmentTimeTab === "past") filtered.reverse();
   elements.appointmentCount.textContent = `${filtered.length} appointment`;
   elements.appointmentList.innerHTML = filtered.length
     ? filtered.map((appointment) => {
@@ -7017,7 +7028,7 @@ function renderAppointments() {
         ${actionButtons}
       </article>`;
     }).join("")
-    : '<p class="empty-state">Tiada appointment untuk dipaparkan.</p>';
+    : `<p class="empty-state">${appointmentTimeTab === "upcoming" ? "Tiada appointment akan datang." : "Tiada appointment yang dah lepas."}</p>`;
 }
 
 function openAppointmentModal(leadId, appointmentId = null, mode = "create") {
@@ -10030,6 +10041,12 @@ elements.leadPeriodFilter?.addEventListener("change", resetLeadLogPage);
 elements.leadLogMore?.addEventListener("click", () => {
   leadLogVisibleLimit += LEAD_LOG_PAGE_SIZE;
   renderLeadsTable();
+});
+document.querySelectorAll("[data-appointment-time]").forEach((button) => {
+  button.addEventListener("click", () => {
+    appointmentTimeTab = button.dataset.appointmentTime === "past" ? "past" : "upcoming";
+    renderAppointments();
+  });
 });
 elements.appointmentStatusFilter?.addEventListener("change", renderAppointments);
 elements.appointmentProjectFilter?.addEventListener("change", renderAppointments);
