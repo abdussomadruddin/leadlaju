@@ -46,6 +46,7 @@ try {
    if(file.endsWith('_follow_up_due_half_hour_slots.sql')) continue;
    if(file.endsWith('_new_lead_reminder_5pm.sql')) continue;
    if(file.endsWith('_agent_neglected_leads.sql')) continue;
+   if(file.endsWith('_configurable_agent_neglect_days.sql')) continue;
    if(file.endsWith('_fix_agent_dispatch_neglect_trigger.sql')) continue;
    if(file.endsWith('_master_brand_isolation.sql')) {
      await client.query(`insert into public.projects(id,name,source_project_id) values($1,'Legacy Safrich Project','legacy-source')`,[legacyId]);
@@ -605,5 +606,32 @@ try {
    }
  } finally {await concurrent.end();}
  await client.query(fs.readFileSync(path.join(root,'scripts/test-retention-live-tail.sql'),'utf8'));
+ const neglectDaysMigration=fs.readFileSync(path.join(root,'supabase/migrations',files.find(file=>file.endsWith('_configurable_agent_neglect_days.sql'))),'utf8');
+ await client.query(fs.readFileSync(path.join(root,'scripts/test-neglect-days.sql'),'utf8').replace('-- INSTALL_NEGLECT_DAYS_MIGRATION',()=>neglectDaysMigration));
+ await client.query(neglectDaysMigration);
+ await client.query(fs.readFileSync(path.join(root,'scripts/test-agent-get-lead-after-neglect.sql'),'utf8'));
+ // Two real connections: a scheduler must skip the locked, renewing lead and
+ // then observe the renewed deadline once the activity transaction commits.
+ const race=(await client.query('select gen_random_uuid() b,gen_random_uuid() a,gen_random_uuid() p,gen_random_uuid() l')).rows[0];
+ await client.query("select set_config('request.jwt.claims','{}',false),set_config('request.headers','{}',false),set_config('leadlaju.worker_brand',$1,false)",[race.b]);
+ await client.query("insert into public.brands(id,name,slug) values($1,'Neglect race',$1::uuid::text)",[race.b]);
+ await client.query('insert into public.dispatch_state(brand_id,singleton) values($1,true)',[race.b]);
+ await client.query("insert into auth.users(id,email) values($1,$1::uuid::text||'@test.invalid')",[race.a]);
+ await client.query("insert into public.profiles(id,brand_id,name,email,role,active,approval_status) values($1,$2,'Race Agent',$1::uuid::text||'@test.invalid','agent',true,'approved')",[race.a,race.b]);
+ await client.query("insert into public.projects(id,brand_id,name) values($1,$2,'Race Project')",[race.p,race.b]);
+ await client.query("insert into public.leads(id,brand_id,name,phone,project_id,ingestion_fingerprint,status,queue_state,assigned_agent_id,created_at,contacted_at,neglect_activity_at,notes) values($1,$2,'Race Lead','601100009999',$3,$1::uuid::text,'contacted','contacted',$4,now()-interval '7 days',now()-interval '6 days',now()-interval '6 days','Old note')",[race.l,race.b,race.p,race.a]);
+ const sweeper=pg.getPgClient();await sweeper.connect();
+ try {
+   await sweeper.query("set statement_timeout='2s'");
+   await sweeper.query("select set_config('leadlaju.worker_brand',$1,false)",[race.b]);
+   await client.query('begin');
+   await client.query("select set_config('request.jwt.claims',$1,true),set_config('request.headers',$2,true)",[JSON.stringify({sub:race.a,role:'authenticated'}),JSON.stringify({'x-leadlaju-brand':race.b})]);
+   await client.query("select public.update_lead_notes($1,'Renewed during sweep',(select status_revision from public.leads where id=$1))",[race.l]);
+   check((await sweeper.query('select leadlaju_private.retract_neglected_brand(now()) n')).rows[0].n===0,'Sweep skips an activity transaction holding the lead lock');
+   await client.query('commit');
+   check((await sweeper.query('select leadlaju_private.retract_neglected_brand(now()) n')).rows[0].n===0,'Committed renewal prevents stale deadline retraction');
+   check((await client.query('select assigned_agent_id,neglected_held from public.leads where id=$1',[race.l])).rows[0].assigned_agent_id===race.a,'Activity/sweep race preserves owner');
+ } finally {await client.query('rollback');await sweeper.end();}
+
  console.log(`PASS: ${checks} real PostgreSQL brand isolation and distribution assertions; Neglected Lead, idle dispatch and concurrent scheduler scenarios passed`);
 } finally { if(client) await client.end(); await pg.stop(); }

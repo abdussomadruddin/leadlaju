@@ -810,7 +810,7 @@ async function restoreTrustedDashboardCache(userId) {
     const brandId = profile.role === "master" ? sessionStorage.getItem(`leadlaju-master-brand:${userId}`) : profile.brand_id;
     if (!brandId) return false;
     await requireRemoteSession(userId);
-    const {data:brand,error:brandError} = await remoteDatabaseClient.from("brands").select("id,name,slug,active,distribution_mode").eq("id",brandId).single();
+    const {data:brand,error:brandError} = await remoteDatabaseClient.from("brands").select("id,name,slug,active,distribution_mode,neglect_days").eq("id",brandId).single();
     if (brandError) throw brandError;
     if (!brand?.active) return false;
     const cached = JSON.parse(localStorage.getItem(dashboardCacheKey(userId,brandId)) || "null");
@@ -859,6 +859,7 @@ function renderDashboardUpdates() {
     ["user", [getCurrentUser(), activeBrand], renderUser],
     ["active-lead", [state.leads.filter(lead=>lead.status==="new"), state.currentUserId], renderActiveLead],
     ["stats", [state.leads,state.appointments], renderStats],
+    ["neglect-setting", [activeBrand,state.currentUserId], renderNeglectSetting],
     ["activities", state.activities, renderActivities],
     ["bulletins", [state.bulletins,state.bulletinUnreadCount], renderBulletins],
     ["due", [state.followUpDue,state.leads], renderFollowUpDue],
@@ -1328,7 +1329,7 @@ async function performLoadRemoteState(userId, attempt = 0) {
     }
     await requireRemoteSession(userId);
     if (requestBrandVersion !== brandContextVersion) return false;
-    const brandResult = await remoteDatabaseClient.from("brands").select("id,name,slug,active,distribution_mode").eq("id", activeBrandId).single();
+    const brandResult = await remoteDatabaseClient.from("brands").select("id,name,slug,active,distribution_mode,neglect_days").eq("id", activeBrandId).single();
     if (brandResult.error) throw brandResult.error;
     if (getCurrentUser()?.role === "master" && !masterBrands.length) {
       const result = await remoteDatabaseClient.rpc("master_manage_brand", { p_action: "list" });
@@ -1495,6 +1496,16 @@ function handleRemoteBroadcast(message) {
     state.followUpDue = (state.followUpDue || []).filter(lead => lead.id !== leadId);
     renderAll();
     queueRemoteReload();
+    return;
+  }
+  if (message?.event === "neglect_settings_changed") {
+    const days = Number(message.payload?.neglectDays);
+    if (message.payload?.brandId === activeBrandId && isAdmin() && !isTeamSales()
+      && Number.isInteger(days) && days >= 3 && days <= 14 && activeBrand) {
+      activeBrand.neglect_days = days;
+      renderNeglectSetting();
+      saveDashboardCache();
+    }
     return;
   }
   if (message?.event === "neglected_changed") {
@@ -3371,7 +3382,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261102-master-admin-password-v180")
+      .register("/sw.js?v=20261102-neglect-days-v181")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -7869,6 +7880,55 @@ document.querySelector("#open-blocked-follow-up")?.addEventListener("click", () 
   renderFollowUpDue();
 });
 
+function renderNeglectSetting() {
+  const form = document.querySelector("#neglect-setting-form");
+  if (!form) return;
+  form.hidden = !isAdmin() || !activeBrandId || !activeBrand?.active || activeBrand?.distribution_mode !== "agent";
+  if (form.hidden) return;
+  const input = form.querySelector("input");
+  const days = Number(activeBrand.neglect_days) || 5;
+  const contextChanged = form.dataset.brand !== activeBrandId || form.dataset.user !== state.currentUserId;
+  if (contextChanged) form.querySelector("[data-neglect-status]").textContent = "";
+  if (contextChanged || (document.activeElement !== input && form.dataset.saving !== "true")) {
+    input.value = String(days);
+  }
+  form.dataset.brand = activeBrandId; form.dataset.user = state.currentUserId;
+  form.querySelector("[data-neglect-saved]").textContent = `Tetapan disimpan: ${days} hari`;
+}
+
+async function saveNeglectSetting(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  if (form.dataset.saving === "true" || !isAdmin() || isTeamSales() || !activeBrandId || !guardLifecycleMutation()) return;
+  const input = form.querySelector("input");
+  const days = Number(input.value);
+  if (!Number.isInteger(days) || days < 3 || days > 14) { input.reportValidity(); return; }
+  if (!remoteDatabaseMode) { showToast("Sambungan server diperlukan", "Tempoh belum disimpan.", "error"); return; }
+  const version = brandContextVersion, userId = state.currentUserId, brandId = activeBrandId;
+  const button = form.querySelector("button"), finish = beginButtonFeedback(button);
+  form.dataset.saving = "true"; button.disabled = true; input.disabled = true;
+  const status = form.querySelector("[data-neglect-status]"); status.textContent = "Menyimpan...";
+  try {
+    const {data,error} = await remoteDatabaseClient.rpc("admin_set_neglect_days", {p_days:days});
+    if (error || !data?.ok || !Number.isInteger(data.neglect_days) || data.neglect_days<3 || data.neglect_days>14) throw error || new Error(data?.error || "Tempoh gagal disimpan.");
+    if (version !== brandContextVersion || brandId !== activeBrandId || userId !== state.currentUserId) return;
+    activeBrand.neglect_days = data.neglect_days;
+    input.value = String(data.neglect_days);
+    saveDashboardCache();
+    status.textContent = "Disimpan. Tempoh digunakan selepas aktiviti lead seterusnya.";
+  } catch (error) {
+    if (version === brandContextVersion && userId === state.currentUserId) {
+      input.value = String(activeBrand?.neglect_days || 5);
+      status.textContent = error?.message || "Tempoh gagal disimpan. Cuba semula.";
+    }
+  } finally {
+    finish(); form.dataset.saving = "false"; button.disabled = false; input.disabled = false;
+    if (version === brandContextVersion && userId === state.currentUserId) renderNeglectSetting();
+  }
+}
+
+document.querySelector("#neglect-setting-form")?.addEventListener("submit", saveNeglectSetting);
+
 function renderFollowUpLimitSetting() {
   const form = document.querySelector("#follow-up-limit-form");
   if (!form) return;
@@ -8479,6 +8539,7 @@ function renderAll() {
   syncExpiryAssignmentTimer();
   renderUser();
   renderAdminReminderAlert();
+  renderNeglectSetting();
   renderActiveLead();
   renderStats();
   renderActivities();
