@@ -92,6 +92,7 @@ Deno.serve(async (request) => {
       return Response.json({ ok: false, error: message }, { status: 400, headers: corsHeaders });
     }
   }
+  canonical.phone = normalizeNotesPhone(canonical.phone) || canonical.phone;
   if ((!fromNotes && !canonical.source_lead_id) || !canonical.name || !canonical.phone || !canonical.project) {
     await markAttempt("failed", "source_lead_id, name, phone and project are required");
     return Response.json({

@@ -1,7 +1,9 @@
 // Deterministic parsing: never infer identity from salary/employment answers.
 export function normalizeNotesPhone(value: unknown) {
   const digits = String(value || "").replace(/[^0-9]/g, "");
-  const normalized = digits.startsWith("0") ? `60${digits.slice(1)}` : digits;
+  // Malaysian country code followed by an accidental domestic trunk zero.
+  const corrected = digits.startsWith("6001") ? `60${digits.slice(3)}` : digits;
+  const normalized = corrected.startsWith("0") ? `60${corrected.slice(1)}` : corrected;
   return /^601\d{8,9}$/.test(normalized) ? normalized : "";
 }
 

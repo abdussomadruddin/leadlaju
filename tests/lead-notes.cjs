@@ -58,3 +58,14 @@ test('Team Sales New notes reveal authorized contacts immediately', () => {
   context.canViewLeadPhone=()=>false;
   assert(!context.renderNewLeadNotes({...lead,status:'new'}).includes('fixture@example.com'));
 });
+
+test('Correct only extra Malaysian trunk zero, retaining valid contacts and ambiguity checks', () => {
+  for (const phone of ['+6001161221544','+60 (0)11-6122 1544','+601161221544','01161221544']) {
+    assert.equal(context.normalizeNotesPhone(phone),'601161221544');
+    const lead=context.parseLeadNotes(`Fixture Name\n${phone}\nLG`,projects);
+    assert.equal(lead.phone,'601161221544');
+  }
+  assert.equal(context.normalizeNotesPhone('+60001161221544'),'');
+  assert.equal(context.normalizeNotesPhone('+60011612'),'');
+  assert.throws(()=>context.parseLeadNotes('Fixture Name\n+6001161221544\n+60173559147\nLG',projects));
+});
