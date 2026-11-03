@@ -69,3 +69,10 @@ test('Correct only extra Malaysian trunk zero, retaining valid contacts and ambi
   assert.equal(context.normalizeNotesPhone('+60011612'),'');
   assert.throws(()=>context.parseLeadNotes('Fixture Name\n+6001161221544\n+60173559147\nLG',projects));
 });
+
+test('Repair malformed phones inside notes without changing other content',()=>{
+ const original='Jerry\n+6001136306224\nfixture@example.com\n2_unit';
+ assert.equal(context.repairNotesPhoneText(original),'Jerry\n+601136306224\nfixture@example.com\n2_unit');
+ assert.equal(context.repairNotesPhoneText('+60 (0)11-6122 1544'),'+601161221544');
+ for(const value of ['+601161221544','RM600116','+60011612','+60001161221544']) assert.equal(context.repairNotesPhoneText(value),value);
+});

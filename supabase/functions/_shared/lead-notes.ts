@@ -25,3 +25,10 @@ export function parseLeadNotes(notes: unknown, projects: Array<{ id: string; nam
   if (names.length !== 1) throw new Error("Nama dalam NOTA tidak jelas. Gunakan satu nama sahaja bersama jawapan borang.");
   return { name: names[0], phone: phones[0], email: emails[0] || "", project: projectMatches[0].name };
 }
+
+export function repairNotesPhoneText(value) {
+  return String(value || "").replace(/(?<![\w+])\+?60[ \t().-]*0[ \t().-]*1(?:[ \t().-]*\d){8,9}(?![ \t().-]*\d)/g, (phone) => {
+    const digits = phone.replace(/\D/g, "");
+    return `${phone.startsWith("+") ? "+" : ""}60${digits.slice(3)}`;
+  });
+}

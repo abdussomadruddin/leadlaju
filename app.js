@@ -3382,7 +3382,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261102-admin-create-password-v184")
+      .register("/sw.js?v=20261103-note-phone-v185")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -6173,8 +6173,15 @@ function compareLeadLatestActivity(left, right) {
   return latest(right) - latest(left) || String(left.id || "").localeCompare(String(right.id || ""));
 }
 
+function repairNotesPhoneText(value) {
+  return String(value || "").replace(/(?<![\w+])\+?60[ \t().-]*0[ \t().-]*1(?:[ \t().-]*\d){8,9}(?![ \t().-]*\d)/g, (phone) => {
+    const digits = phone.replace(/\D/g, "");
+    return `${phone.startsWith("+") ? "+" : ""}60${digits.slice(3)}`;
+  });
+}
+
 function leadDisplayNotes(lead, value = lead.notes) {
-  let notes = String(value || "").trim();
+  let notes = repairNotesPhoneText(value).trim();
   if (!canRevealLeadContact(lead)) {
     notes = notes.replace(/[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[Emel dibuka selepas CALL NOW]")
       .replace(/(?:\+?60|0)[ \t]*1[\d \t().-]{7,20}\d/g, "[Telefon dibuka selepas CALL NOW]");
@@ -6611,6 +6618,12 @@ function renderLeadCopyButton(lead, actionAttribute = "data-lead-copy") {
 }
 
 function leadDetailsCopyText(lead) {
+  function repairNotesPhoneText(value) {
+    return String(value || "").replace(/(?<![\w+])\+?60[ \t().-]*0[ \t().-]*1(?:[ \t().-]*\d){8,9}(?![ \t().-]*\d)/g, (phone) => {
+      const digits = phone.replace(/\D/g, "");
+      return `${phone.startsWith("+") ? "+" : ""}60${digits.slice(3)}`;
+    });
+  }
   // Clean only the copied text; keep the original remarks and access gates intact.
   const normalizedText = (value) => String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
   const normalizedPhone = (value) => {
@@ -6620,7 +6633,7 @@ function leadDetailsCopyText(lead) {
   const name = normalizedText(lead.name);
   const email = normalizedText(lead.email);
   const phone = normalizedPhone(lead.phone);
-  const notes = String(lead.notes || "").split(/\r?\n/).filter((line) => {
+  const notes = repairNotesPhoneText(lead.notes).split(/\r?\n/).filter((line) => {
     const value = line.replace(/^\s*(?:nama|name|no\.?\s*(?:phone|telefon)|phone|telefon|email|e-mel|emel)\s*:\s*/i, "").trim();
     const text = normalizedText(value);
     if (text && ((name && text === name) || (email && text === email))) return false;

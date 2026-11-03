@@ -1,6 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.116.0";
 import { serviceClient } from "../_shared/brand-access.ts";
-import { parseLeadNotes, normalizeNotesPhone } from "../_shared/lead-notes.ts";
+import { parseLeadNotes, normalizeNotesPhone, repairNotesPhoneText } from "../_shared/lead-notes.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -76,7 +76,7 @@ Deno.serve(async (request) => {
     city: clean(body.city || body.bandar),
     project: clean(body.project || body.projek || body.product || body.produk),
     source: clean(body.source || body.sumber || (sourceSystem === "meta_ads" ? "Meta Ads" : "TikTok Ads")),
-    notes: clean(body.notes || body.nota),
+    notes: repairNotesPhoneText(clean(body.notes || body.nota)),
     created_at: clean(body.created_at || body["Tarikh & Masa"] || new Date().toISOString()),
   };
   const fromNotes = providers.has(sourceSystem) && Boolean(canonical.notes)
