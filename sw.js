@@ -1,14 +1,14 @@
-const CACHE_NAME = "leadlaju-pwa-v20261103-ipad-safe-area-v186";
+const CACHE_NAME = "leadlaju-pwa-v20261103-iphone-safe-area-v187";
 const LEAD_HANDOFF_CACHE = "leadlaju-notification-snapshots";
 const LEAD_HANDOFF_SCHEMA_VERSION = 1;
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20261103-ipad-safe-area-v186",
+  "/styles.css?v=20261103-iphone-safe-area-v187",
   "/vendor/exceljs.min.js?v=4.4.0",
-  "/app.js?v=20261103-ipad-safe-area-v186",
-  "/neglected.js?v=20261103-ipad-safe-area-v186",
-  "/manifest.webmanifest?v=20261103-ipad-safe-area-v186",
+  "/app.js?v=20261103-iphone-safe-area-v187",
+  "/neglected.js?v=20261103-iphone-safe-area-v187",
+  "/manifest.webmanifest?v=20261103-iphone-safe-area-v187",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",
   "/assets/icon-512.png",

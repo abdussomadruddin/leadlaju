@@ -578,7 +578,7 @@ svg {
   width: 272px;
   flex-direction: column;
   min-height: 0;
-  padding: calc(22px + env(safe-area-inset-top, 0px)) 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  padding: calc(22px + var(--app-safe-top, env(safe-area-inset-top, 0px))) 16px calc(16px + env(safe-area-inset-bottom, 0px));
   color: #fff;
   background:
     radial-gradient(circle at 15% 8%, rgba(70, 111, 197, 0.2), transparent 18rem),
@@ -1027,9 +1027,9 @@ svg {
   z-index: 15;
   top: 0;
   display: flex;
-  min-height: calc(84px + env(safe-area-inset-top, 0px));
+  min-height: calc(84px + var(--app-safe-top, env(safe-area-inset-top, 0px)));
   align-items: center;
-  padding: calc(14px + env(safe-area-inset-top, 0px)) clamp(24px, 4vw, 54px) 14px;
+  padding: calc(14px + var(--app-safe-top, env(safe-area-inset-top, 0px))) clamp(24px, 4vw, 54px) 14px;
   border-bottom: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.94);
   backdrop-filter: blur(12px);
@@ -4878,7 +4878,7 @@ td small {
   }
 
   .sidebar {
-    padding-top: calc(27px + env(safe-area-inset-top, 0px));
+    padding-top: calc(27px + var(--app-safe-top, env(safe-area-inset-top, 0px)));
     transform: translateX(-100%);
     transition: transform 180ms ease;
   }
@@ -4890,7 +4890,7 @@ td small {
 
   .main-content {
     margin-left: 0;
-    padding-top: calc(84px + env(safe-area-inset-top, 0px));
+    padding-top: calc(84px + var(--app-safe-top, env(safe-area-inset-top, 0px)));
   }
 
   .mobile-menu {
@@ -4938,8 +4938,8 @@ td small {
     right: 0;
     left: 0;
     top: 0;
-    min-height: calc(84px + env(safe-area-inset-top, 0px));
-    padding-top: calc(14px + env(safe-area-inset-top, 0px));
+    min-height: calc(84px + var(--app-safe-top, env(safe-area-inset-top, 0px)));
+    padding-top: calc(14px + var(--app-safe-top, env(safe-area-inset-top, 0px)));
     padding-inline: 19px;
   }
 
@@ -4954,13 +4954,13 @@ td small {
   }
 
   .topbar {
-    min-height: calc(71px + env(safe-area-inset-top, 0px));
-    padding-top: calc(12px + env(safe-area-inset-top, 0px));
+    min-height: calc(71px + var(--app-safe-top, env(safe-area-inset-top, 0px)));
+    padding-top: calc(12px + var(--app-safe-top, env(safe-area-inset-top, 0px)));
     padding-bottom: 12px;
   }
 
   .main-content {
-    padding-top: calc(71px + env(safe-area-inset-top, 0px));
+    padding-top: calc(71px + var(--app-safe-top, env(safe-area-inset-top, 0px)));
   }
 
   .appointment-toolbar {
@@ -5508,7 +5508,7 @@ button.performance-metric:focus-visible { outline: 3px solid #2563eb; outline-of
 @media (max-width: 850px) {
   .sidebar { z-index: 35; width: min(290px, calc(100vw - 48px)); padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
   .sidebar .brand { padding-right: 42px; }
-  .mobile-sidebar-close { position: absolute; top: calc(22px + env(safe-area-inset-top, 0px)); right: 14px; display: grid; width: 44px; height: 44px; place-items: center; border: 0; border-radius: 12px; color: #fff; background: #ffffff20; font-size: 28px; }
+  .mobile-sidebar-close { position: absolute; top: calc(22px + var(--app-safe-top, env(safe-area-inset-top, 0px))); right: 14px; display: grid; width: 44px; height: 44px; place-items: center; border: 0; border-radius: 12px; color: #fff; background: #ffffff20; font-size: 28px; }
   .mobile-more-heading { display: block; margin: 20px 10px 8px; color: #a7b7d3; font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
   .sidebar .main-nav { display: flex; min-height: 0; flex: 1; flex-direction: column; align-items: stretch; gap: 3px; overflow-y: auto; margin-top: 0; overscroll-behavior: contain; }
   .sidebar .nav-item { min-height: 42px; flex: none; gap: 10px; padding: 0 10px; border-radius: 9px; font-size: 12px; line-height: 1.2; }
@@ -5517,7 +5517,7 @@ button.performance-metric:focus-visible { outline: 3px solid #2563eb; outline-of
   .mobile-sidebar-scrim:not([hidden]) { position: fixed; z-index: 30; inset: 0; display: block; background: #0a152c75; }
   body.mobile-sidebar-open { overflow: hidden; }
   .mobile-menu { display: none; }
-  .main-content { padding-top: calc(66px + env(safe-area-inset-top, 0px)); padding-bottom: calc(105px + env(safe-area-inset-bottom, 0px)); }
+  .main-content { padding-top: calc(66px + var(--app-safe-top, env(safe-area-inset-top, 0px))); padding-bottom: calc(105px + env(safe-area-inset-bottom, 0px)); }
   .mobile-bottom-nav { position: fixed; z-index: 25; right: max(9px, env(safe-area-inset-right, 0px)); bottom: calc(8px + env(safe-area-inset-bottom, 0px)); left: max(9px, env(safe-area-inset-left, 0px)); display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 2px; min-height: 64px; padding: 5px; border: 1px solid #ffffffd1; border-radius: 19px; background: #f8fbffe6; box-shadow: 0 8px 28px #0f22452e, inset 0 1px #ffffffed; -webkit-backdrop-filter: blur(18px) saturate(1.25); backdrop-filter: blur(18px) saturate(1.25); }
   .mobile-tab { position: relative; display: flex; min-width: 0; min-height: 52px; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 3px 0; border: 0; border-radius: 13px; color: #60738e; background: transparent; font-size: 10px; font-weight: 800; line-height: 1.1; transition: background 150ms ease, color 150ms ease, transform 150ms ease; }
   .mobile-tab svg { width: 21px; height: 21px; flex: none; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
@@ -5527,7 +5527,7 @@ button.performance-metric:focus-visible { outline: 3px solid #2563eb; outline-of
   .mobile-tab-badge, .mobile-tab-dot { position: absolute; top: 0; right: 5px; min-width: 17px; height: 17px; padding: 1px 4px; border: 2px solid #f8fbff; border-radius: 999px; color: #fff; background: #376fbf; font-size: 8px; line-height: 13px; text-align: center; }
   .mobile-tab-badge.alert, .mobile-tab-dot { background: #df4454; }
   .mobile-tab-dot { width: 11px; min-width: 11px; height: 11px; padding: 0; }
-  .topbar { min-height: calc(66px + env(safe-area-inset-top, 0px)); padding: calc(9px + env(safe-area-inset-top, 0px)) 14px 9px; gap: 8px; }
+  .topbar { min-height: calc(66px + var(--app-safe-top, env(safe-area-inset-top, 0px))); padding: calc(9px + var(--app-safe-top, env(safe-area-inset-top, 0px))) 14px 9px; gap: 8px; }
   .page-title { min-width: 0; flex: 1; }
   .page-title h1 { overflow: hidden; font-size: 17px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
   .page-title h1 .desktop-greeting, .page-title h1 .user-name { display: none; }
@@ -5741,8 +5741,8 @@ button.performance-metric:focus-visible { outline: 3px solid #2563eb; outline-of
   .sidebar .brand-mark { width: 36px; height: 36px; }
   .sidebar .brand strong { font-size: 17px; }
   .sidebar .brand small { font-size: 8px; letter-spacing: .04em; }
-  .master-account .topbar { min-height: calc(80px + env(safe-area-inset-top, 0px)); }
-  .master-account .main-content { padding-top: calc(80px + env(safe-area-inset-top, 0px)); }
+  .master-account .topbar { min-height: calc(80px + var(--app-safe-top, env(safe-area-inset-top, 0px))); }
+  .master-account .main-content { padding-top: calc(80px + var(--app-safe-top, env(safe-area-inset-top, 0px))); }
   .brand-context select { width: min(150px, 100%); font-size: 11px; }
   #brands-view { padding-top: 16px; }
   #brands-view .master-page-heading { flex-direction: column; gap: 8px; margin-bottom: 16px; }
@@ -5922,3 +5922,9 @@ button, [role="button"] { transition: background-color 180ms ease, border-color 
 .appointment-time-tabs button { flex: 1; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--ink-700); font: inherit; font-weight: 600; cursor: pointer; }
 .appointment-time-tabs button[aria-pressed="true"] { background: #edf3ff; border-color: #b9ceff; color: #215cc5; }
 .appointment-time-tabs span { display: inline-block; padding: 2px 7px; margin-left: 4px; border-radius: 12px; background: rgba(100,116,139,.12); font-size: 12px; }
+
+/* Reserve status-bar space while iOS standalone safe-area metrics settle. */
+@media (display-mode: standalone) and (pointer: coarse) {
+  :root { --app-safe-top: max(24px, env(safe-area-inset-top, 0px)); }
+}
+:root.installed-phone-app { --app-safe-top: max(44px, env(safe-area-inset-top, 0px)); }
