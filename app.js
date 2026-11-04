@@ -3382,7 +3382,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261103-iphone-safe-area-v187")
+      .register("/sw.js?v=20261104-push-gate-v188")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -3437,6 +3437,7 @@ function isPushEndpointOwnershipConflict(error) {
 }
 
 function pushConnectionErrorMessage(error) {
+  if (error?.code === "account_inactive") return "Akaun tidak aktif. Hubungi Admin untuk mengaktifkan semula akaun sebelum menyambungkan notifikasi.";
   if (error?.name === "NotAllowedError" || Notification.permission === "denied") {
     return "Benarkan notifikasi LeadLaju dalam tetapan telefon, kemudian cuba semula.";
   }
@@ -3450,7 +3451,8 @@ function pushConnectionErrorMessage(error) {
 async function performPushSubscriptionSync(force = false) {
   if (!isPushSupported() || Notification.permission !== "granted") return false;
   const user = getCurrentUser();
-  if (!user?.id || !user.active) return false;
+  if (!user?.id) return false;
+  if (!user.active) throw Object.assign(new Error("Akaun tidak aktif. Hubungi Admin untuk mengaktifkan semula akaun sebelum menyambungkan notifikasi."), { code: "account_inactive" });
 
   const registration = await registerServiceWorker();
   if (!registration?.pushManager) return false;
@@ -4987,7 +4989,7 @@ function getAgentAppAccessState() {
 }
 
 function renderAgentAccessGate(accessState) {
-  const locked = accessState !== "ready";
+  const locked = document.body.classList.contains("authenticated") && getCurrentUser()?.role === "agent" && accessState !== "ready";
   document.body.classList.toggle("agent-access-locked", locked);
   elements.notificationRequiredModal.classList.toggle("open", locked);
   elements.notificationRequiredModal.setAttribute("aria-hidden", String(!locked));
@@ -5036,12 +5038,16 @@ async function verifyAgentPushAccess(force = false) {
   if (!isPhonePushDevice() || !isInstalledApp()) return false;
   if (!("Notification" in window) || Notification.permission !== "granted") return false;
   agentPushAccessCheckInProgress = true;
+  const checkingUserId = state.currentUserId;
+  const checkingBrand = brandContextVersion;
   try {
-    agentPushAccessReady = await syncPushSubscription(force).catch((error) => {
+    const ready = await syncPushSubscription(force).catch((error) => {
       console.warn("Agent push access check failed", error);
       notificationConnectionError = pushConnectionErrorMessage(error);
       return false;
     });
+    if (checkingUserId !== state.currentUserId || checkingBrand !== brandContextVersion) return false;
+    agentPushAccessReady = ready;
     if (agentPushAccessReady) notificationConnectionError = "";
     return agentPushAccessReady;
   } finally {
@@ -9935,6 +9941,11 @@ elements.notificationButton.addEventListener("click", requestNotifications);
 elements.getLeadButton?.addEventListener("click", () => setAgentLeadAvailability(true));
 elements.stopLeadButton?.addEventListener("click", () => setAgentLeadAvailability(false));
 elements.enableRequiredNotifications.addEventListener("click", requestNotifications);
+document.querySelector("#notification-gate-logout")?.addEventListener("click", () => {
+  elements.notificationRequiredModal.classList.remove("open");
+  elements.notificationRequiredModal.setAttribute("aria-hidden", "true");
+  requestLogout();
+});
 elements.addToHomeScreen?.addEventListener("click", addToHomeScreen);
 elements.remindAgentsButton?.addEventListener("click", remindAllAgentsForFollowUp);
 elements.dismissAdminReminderButton?.addEventListener("click", dismissAdminReminder);
@@ -10041,7 +10052,7 @@ elements.sidebarSettings.addEventListener("click", () => setAccountMenuOpen(elem
 elements.editOwnDetails.addEventListener("click", openOwnDetails);
 elements.accountLogout.addEventListener("click", requestLogout);
 elements.logoutButton.addEventListener("click", requestLogout);
-elements.logoutCancel.addEventListener("click", closeLogoutConfirmation);
+elements.logoutCancel.addEventListener("click", () => { closeLogoutConfirmation(); enforceAgentNotificationAccess(); });
 elements.logoutContinue.addEventListener("click", continueLogout);
 elements.ownDetailsForm.addEventListener("submit", saveOwnDetails);
 elements.logoutConfirmModal.addEventListener("click", (event) => {

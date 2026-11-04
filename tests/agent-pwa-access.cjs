@@ -9,13 +9,14 @@ const sw = fs.readFileSync('sw.js', 'utf8');
 
 test('agent access requires a phone, installed web app, permission and push subscription', () => {
   assert.match(app, /function getAgentAppAccessState\(\)[\s\S]*!isPhonePushDevice\(\)[\s\S]*!isInstalledApp\(\)[\s\S]*Notification\.permission !== "granted"[\s\S]*!agentPushAccessReady/);
-  assert.match(app, /agentPushAccessReady = await syncPushSubscription\(force\)/);
+  assert.match(app, /const ready = await syncPushSubscription\(force\)/);
 });
 
 test('agent gate has no logout control and cannot be dismissed to reveal the app', () => {
   assert.match(css, /body\.agent-access-locked \.app-shell[\s\S]*pointer-events: none/);
   const gate = html.slice(html.indexOf('id="notification-required-modal"'), html.indexOf('id="potential-reminder-modal"'));
-  assert.doesNotMatch(gate, /Log keluar|close-notification-reminder/);
+  assert.doesNotMatch(gate, /close-notification-reminder/);
+  assert.match(gate, /id="notification-gate-logout"/);
   assert.doesNotMatch(app, /function closeNotificationReminder\(/);
   assert.match(gate, /id="enable-required-notifications"/);
 });
@@ -26,8 +27,8 @@ test('admin remains exempt from the mandatory agent app gate', () => {
 });
 
 test('new cache version distributes the mandatory access gate', () => {
-  assert.match(html, /20261103-iphone-safe-area-v187/);
-  assert.match(sw, /leadlaju-pwa-v20261103-iphone-safe-area-v187/);
+  assert.match(html, /20261104-push-gate-v188/);
+  assert.match(sw, /leadlaju-pwa-v20261104-push-gate-v188/);
 });
 
 test('manual refresh syncs in place without a page reload or icon flash', () => {
