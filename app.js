@@ -3382,7 +3382,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261104-push-gate-v188")
+      .register("/sw.js?v=20261104-menu-tap-v189")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -10009,6 +10009,7 @@ let mobileSidebarLastGestureAt = 0;
 document.addEventListener("touchstart", (event) => {
   if (!isMobileSidebarViewport() || event.touches.length !== 1) return;
   const touch = event.touches[0];
+  if (event.target.closest("input, textarea, select, button, a, [contenteditable], .mobile-bottom-nav, .table-scroll, .modal-backdrop.open")) return;
   mobileSidebarTouchStart = { x: touch.clientX, y: touch.clientY };
 }, { passive: true });
 document.addEventListener("touchend", (event) => {
@@ -10021,7 +10022,10 @@ document.addEventListener("touchend", (event) => {
   const deltaY = touch.clientY - mobileSidebarTouchStart.y;
   mobileSidebarTouchStart = null;
   if (Math.abs(deltaX) < 64 || Math.abs(deltaX) <= Math.abs(deltaY) * 1.4) return;
-  if (deltaX < 0 && elements.sidebar.classList.contains("open")) {
+  if (deltaX > 0 && !elements.sidebar.classList.contains("open") && document.body.classList.contains("authenticated")) {
+    mobileSidebarLastGestureAt = Date.now();
+    setMobileSidebarOpen(true);
+  } else if (deltaX < 0 && elements.sidebar.classList.contains("open")) {
     mobileSidebarLastGestureAt = Date.now();
     setMobileSidebarOpen(false);
   }
@@ -10597,7 +10601,7 @@ function initializeFloatingNavigation() {
     return tab;
   };
   nav.addEventListener("pointerdown", (event) => {
-    if (!phone() || event.button !== 0 || !event.target.closest(".mobile-tab")) return;
+    if (!phone() || event.button !== 0 || !event.target.closest(".mobile-tab") || event.target.closest("#mobile-more-tab")) return;
     drag = { id: event.pointerId, target: preview(event.clientX, event.clientY) };
     nav.setPointerCapture(event.pointerId);
     nav.classList.add("is-selecting");

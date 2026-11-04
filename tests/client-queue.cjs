@@ -1181,7 +1181,7 @@ test('mobile sidebar closes on content tap or left swipe without hijacking the p
   assert.match(source, /function setMobileSidebarOpen\(open\)/);
   assert.match(source, /elements\.sidebar\.contains\(event\.target\)/);
   assert.match(source, /deltaX < 0 && elements\.sidebar\.classList\.contains\("open"\)/);
-  assert.doesNotMatch(source, /deltaX > 0 && !elements\.sidebar\.classList\.contains\("open"\)/);
+  assert.match(source, /deltaX > 0 && !elements\.sidebar\.classList\.contains\("open"\)/);
   assert.match(source, /Math\.abs\(deltaX\) < 64/);
   assert.match(html, /id="mobile-more-tab"[^>]*aria-controls="sidebar"/);
 });
