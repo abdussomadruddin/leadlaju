@@ -1,14 +1,14 @@
-const CACHE_NAME = "leadlaju-pwa-v20261104-menu-tap-v189";
+const CACHE_NAME = "leadlaju-pwa-v20261105-lead-owner-v190";
 const LEAD_HANDOFF_CACHE = "leadlaju-notification-snapshots";
 const LEAD_HANDOFF_SCHEMA_VERSION = 1;
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20261104-menu-tap-v189",
+  "/styles.css?v=20261105-lead-owner-v190",
   "/vendor/exceljs.min.js?v=4.4.0",
-  "/app.js?v=20261104-menu-tap-v189",
-  "/neglected.js?v=20261104-menu-tap-v189",
-  "/manifest.webmanifest?v=20261104-menu-tap-v189",
+  "/app.js?v=20261105-lead-owner-v190",
+  "/neglected.js?v=20261105-lead-owner-v190",
+  "/manifest.webmanifest?v=20261105-lead-owner-v190",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",
   "/assets/icon-512.png",

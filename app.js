@@ -3382,7 +3382,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261104-menu-tap-v189")
+      .register("/sw.js?v=20261105-lead-owner-v190")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -6910,7 +6910,7 @@ function renderLeadsTable() {
           const expanded = expandedLeadLogIds.has(lead.id);
           return `
             <tr class="lead-log-summary" data-lead-row="${lead.id}">
-              <td data-label="Nama"><strong>${escapeHtml(lead.name)}</strong>${renderNeglectedBadge(lead)}${renderSalesLeadWaitingTime(lead)}${renderNewLeadNotes(lead)}</td>
+              <td data-label="Nama"><strong>${escapeHtml(lead.name)}</strong>${renderNeglectedBadge(lead)}${isTeamSales() && isAdmin() ? `<small class="lead-log-owner">Team Sales: ${escapeHtml(assignedAgentLabel)}</small>` : ""}${renderSalesLeadWaitingTime(lead)}${renderNewLeadNotes(lead)}</td>
               <td data-label="${projectLabel()}"><strong>${escapeHtml(lead.project || "Tidak dinyatakan")}</strong></td>
               <td data-label="Status"><select class="lead-status-select ${visualStatus}" data-lead-status="${lead.id}" aria-label="Status ${escapeHtml(lead.name)}">${statusOptions}</select></td>
               <td data-label="Call">${callButton}</td>
