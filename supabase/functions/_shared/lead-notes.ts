@@ -17,7 +17,15 @@ export function parseLeadNotes(notes: unknown, projects: Array<{ id: string; nam
   const projectMatches = projects.filter(project => values.some(value => value.toLowerCase() === project.name.toLowerCase()) || explicitProject.toLowerCase() === project.name.toLowerCase());
   const projectNames = new Set(projects.map(project => project.name.toLowerCase()));
   const candidates = values.filter(value => !excluded.test(value) && !projectNames.has(value.toLowerCase()) && !normalizeNotesPhone(value) && !value.includes('@') && /^[\p{L}\p{M}][\p{L}\p{M}\s.'’@/-]{1,119}$/u.test(value));
-  const names = [...new Set(candidates)];
+  // A form name can be a handle. Only infer it from unlabelled notes
+  // when it matches the email username, avoiding alphanumeric survey answers.
+  const emailHandle = emails[0]?.split("@")[0];
+  const handles = values.filter(value =>
+    /^[\p{L}][\p{L}\p{Nd}._-]{1,119}$/u.test(value) &&
+    /\p{Nd}/u.test(value) && value.toLowerCase() === emailHandle &&
+    !projectNames.has(value.toLowerCase()),
+  );
+  const names = [...new Set(candidates.length ? candidates : handles)];
   if (phones.length !== 1) throw new Error("NOTA mesti mengandungi satu nombor telefon Malaysia yang sah.");
   if (values.some(value => value.includes('@')) && emails.length === 0) throw new Error("Emel dalam NOTA tidak sah.");
   if (emails.length > 1) throw new Error("NOTA mengandungi lebih daripada satu emel. Sila semak.");

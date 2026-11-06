@@ -76,3 +76,9 @@ test('Repair malformed phones inside notes without changing other content',()=>{
  assert.equal(context.repairNotesPhoneText('+60 (0)11-6122 1544'),'+601161221544');
  for(const value of ['+601161221544','RM600116','+60011612','+60001161221544']) assert.equal(context.repairNotesPhoneText(value),value);
 });
+
+test('accepts a numeric handle matching the email username in ads notes', () => {
+  const notes = 'mesin_basuh_+_aircond_=_free_tv\nejumps83\n+60132775698\nejumps83@example.invalid';
+  assert.equal(context.parseLeadNotes(notes, projects, 'LG').name, 'ejumps83');
+  assert.throws(() => context.parseLeadNotes(notes.replace('ejumps83@example.invalid', 'other@example.invalid'), projects, 'LG'));
+});
