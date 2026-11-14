@@ -3422,7 +3422,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261114-remove-devices-v192")
+      .register("/sw.js?v=20261114-reassign-9am-v193")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -8034,7 +8034,7 @@ async function saveSalesReassignSetting(event) {
     activeBrand.sales_reassign_days = data.sales_reassign_days;
     input.value = String(data.sales_reassign_days);
     saveDashboardCache();
-    status.textContent = "Disimpan. Lead New yang melebihi tempoh akan dipindah dalam beberapa minit.";
+    status.textContent = "Disimpan. Lead New yang melebihi tempoh akan dipindah pada jam 9 pagi.";
   } catch (error) {
     if (version === brandContextVersion && userId === state.currentUserId) {
       input.value = String(activeBrand?.sales_reassign_days || 2);

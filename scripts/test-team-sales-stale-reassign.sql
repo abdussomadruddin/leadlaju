@@ -23,7 +23,8 @@ begin
  perform set_config('leadlaju.worker_brand',s::text,true);
  insert into public.leads(id,brand_id,name,phone,project_id,ingestion_fingerprint,status,queue_state,assigned_agent_id,received_at,assignment_revision,created_at)
  select id,s,nm,'60110000'||right(id::text,4),pr,id::text,'new','sales_assigned',a,rec,1,rec
- from (values(stale,'Stale',now()-interval '49 hours'),(fresh,'Fresh',now()-interval '36 hours')) x(id,nm,rec);
+ from (values(stale,'Stale',(((now() at time zone 'Asia/Kuala_Lumpur')::date-2)::timestamp+interval '15 hours') at time zone 'Asia/Kuala_Lumpur'),
+  (fresh,'Fresh',(((now() at time zone 'Asia/Kuala_Lumpur')::date-1)::timestamp+interval '15 hours') at time zone 'Asia/Kuala_Lumpur')) x(id,nm,rec);
  insert into public.lead_assignments(brand_id,lead_id,agent_id,assignment_revision,assigned_at,expires_at,assignment_mode)
  select s,id,a,1,received_at,null,'team_sales' from public.leads where id in (stale,fresh);
  insert into public.leads(id,brand_id,name,phone,project_id,ingestion_fingerprint,status,queue_state,assigned_agent_id,received_at,contacted_at,assignment_revision,created_at)
@@ -43,7 +44,7 @@ end $setup$;
 set constraints all immediate;
 
 do $test$
-declare f jsonb; s uuid; a uuid; b uuid; c uuid; l public.leads; first_owner uuid; agent_before jsonb; solo_before jsonb; contacted_before jsonb; r jsonb; bad integer; cnt integer;
+declare t0 timestamptz:=(((now() at time zone 'Asia/Kuala_Lumpur')::date)::timestamp+interval '9 hours') at time zone 'Asia/Kuala_Lumpur'; f jsonb; s uuid; a uuid; b uuid; c uuid; l public.leads; first_owner uuid; agent_before jsonb; solo_before jsonb; contacted_before jsonb; r jsonb; bad integer; cnt integer;
 begin
  select data into f from stale_fixture; s:=(f->>'sales')::uuid; a:=(f->>'a')::uuid; b:=(f->>'b')::uuid; c:=(f->>'c')::uuid;
  select to_jsonb(x) into agent_before from public.leads x where id=(f->>'agent_lead')::uuid;
@@ -64,7 +65,8 @@ begin
  if not exists(select 1 from public.notification_outbox where lead_id=l.id and user_id=first_owner and assignment_revision=2 and notification_type='sales_new_lead' and sent_at is null) then raise exception 'New owner not notified';end if;
  if exists(select 1 from public.notification_outbox where lead_id=l.id and user_id=a and sent_at is null) then raise exception 'Old owner reminder not cancelled';end if;
  if not exists(select 1 from public.lead_events where lead_id=l.id and event_type='assigned' and payload->>'reason'='sales_stale_reassign' and (payload->>'previous_owner')::uuid=a) then raise exception 'Event missing';end if;
- if (select assigned_agent_id from public.leads where id=(f->>'fresh')::uuid)<>a then raise exception 'Fresh 36h lead moved';end if;
+ if (select assigned_agent_id from public.leads where id=(f->>'fresh')::uuid)<>a then raise exception 'Yesterday lead moved before its 2 calendar days';end if;
+ if (select schedule from cron.job where jobname='leadlaju-team-sales-stale-reassign')<>'0 1 * * *' then raise exception 'Not scheduled daily at 09:00 KL';end if;
  if (select to_jsonb(x) from public.leads x where id=(f->>'contacted')::uuid) is distinct from contacted_before then raise exception 'Contacted lead changed';end if;
  if (select to_jsonb(x) from public.leads x where id=(f->>'solo_lead')::uuid) is distinct from solo_before then raise exception 'Single-member lead changed';end if;
  if (select to_jsonb(x) from public.leads x where id=(f->>'agent_lead')::uuid) is distinct from agent_before then raise exception 'Agent-mode lead changed';end if;
@@ -72,14 +74,14 @@ begin
 
  -- Two days later the new owner also missed it: goes to the member who never held it.
  perform set_config('leadlaju.worker_brand',s::text,true);
- cnt:=leadlaju_private.reassign_stale_team_sales_brand(now()+interval '49 hours');
+ cnt:=leadlaju_private.reassign_stale_team_sales_brand(t0+interval '2 days');
  if cnt<>2 then raise exception 'Expected stale and fresh leads to move, got %',cnt;end if;
  select * into l from public.leads where id=(f->>'stale')::uuid;
  if l.assigned_agent_id in (a,first_owner) then raise exception 'Second move did not prefer the member who never held it';end if;
  if (select assigned_agent_id from public.leads where id=(f->>'fresh')::uuid)=a then raise exception 'Fresh lead stayed with A';end if;
  -- All three missed it: it keeps rotating but never stays with the latest owner.
  first_owner:=l.assigned_agent_id;
- perform leadlaju_private.reassign_stale_team_sales_brand(now()+interval '98 hours');
+ perform leadlaju_private.reassign_stale_team_sales_brand(t0+interval '4 days');
  if (select assigned_agent_id from public.leads where id=l.id) in (first_owner) then raise exception 'Rotation kept current owner';end if;
  perform set_config('leadlaju.worker_brand','',true);
 
@@ -107,12 +109,21 @@ begin
  if (select count(*) from public.master_audit_log where brand_id=s and action='sales_reassign_days')<>cnt or cnt<>1 then raise exception 'Audit count wrong';end if;
  perform set_config('request.jwt.claims','{}',true);perform set_config('request.headers','{}',true);
  perform set_config('leadlaju.worker_brand',s::text,true);
- update public.leads set received_at=now()-interval '4 days' where id=(f->>'fresh')::uuid;
- if leadlaju_private.reassign_stale_team_sales_brand(now())<>0 then raise exception '5-day setting moved a 4-day lead';end if;
- if leadlaju_private.reassign_stale_team_sales_brand(now()+interval '1 day 1 minute')<>1 then raise exception '5-day setting did not move a 5-day lead';end if;
+ update public.leads set received_at=t0-interval '4 days' where id=(f->>'fresh')::uuid;
+ if leadlaju_private.reassign_stale_team_sales_brand(t0)<>0 then raise exception '5-day setting moved a 4-day lead';end if;
+ if leadlaju_private.reassign_stale_team_sales_brand(t0+interval '1 day')<>1 then raise exception '5-day setting did not move a 5-day lead';end if;
+ -- 1 day = next morning: received late yesterday (23:59 KL) moves today at 09:00.
+ perform set_config('request.jwt.claims',jsonb_build_object('sub',f->>'admin','role','authenticated')::text,true);
+ perform set_config('request.headers',jsonb_build_object('x-leadlaju-brand',s)::text,true);
+ perform public.admin_set_sales_reassign_days(1);
+ perform set_config('request.jwt.claims','{}',true);perform set_config('request.headers','{}',true);
+ update public.leads set received_at=t0-interval '9 hours 1 minute' where id=(f->>'fresh')::uuid;
+ update public.leads set received_at=t0-interval '8 hours 59 minutes' where id=(f->>'stale')::uuid;
+ if leadlaju_private.reassign_stale_team_sales_brand(t0)<>1 then raise exception '1-day setting should move only yesterday lead';end if;
+ if (select received_at from public.leads where id=(f->>'stale')::uuid)<>t0-interval '8 hours 59 minutes' then raise exception 'Today lead moved';end if;
  perform set_config('leadlaju.worker_brand',f->>'agent_brand',true);
  if leadlaju_private.reassign_stale_team_sales_brand(now()+interval '30 days')<>0 then raise exception 'Agent brand swept';end if;
  perform set_config('leadlaju.worker_brand','',true);
 end $test$;
-select 'PASS Team Sales stale New reassignment: default 2 days, 1-5 admin setting, exclusions, agent mode untouched' result;
+select 'PASS Team Sales stale New reassignment: daily 09:00 KL by calendar day, default 2 days, 1-5 admin setting, exclusions, agent mode untouched' result;
 rollback;

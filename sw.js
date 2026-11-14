@@ -1,14 +1,14 @@
-const CACHE_NAME = "leadlaju-pwa-v20261114-remove-devices-v192";
+const CACHE_NAME = "leadlaju-pwa-v20261114-reassign-9am-v193";
 const LEAD_HANDOFF_CACHE = "leadlaju-notification-snapshots";
 const LEAD_HANDOFF_SCHEMA_VERSION = 1;
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=20261114-remove-devices-v192",
+  "/styles.css?v=20261114-reassign-9am-v193",
   "/vendor/exceljs.min.js?v=4.4.0",
-  "/app.js?v=20261114-remove-devices-v192",
-  "/neglected.js?v=20261114-remove-devices-v192",
-  "/manifest.webmanifest?v=20261114-remove-devices-v192",
+  "/app.js?v=20261114-reassign-9am-v193",
+  "/neglected.js?v=20261114-reassign-9am-v193",
+  "/manifest.webmanifest?v=20261114-reassign-9am-v193",
   "/assets/icon.svg?v=20260625-pwa-notifications",
   "/assets/icon-192.png",
   "/assets/icon-512.png",

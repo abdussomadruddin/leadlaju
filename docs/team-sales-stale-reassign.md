@@ -2,8 +2,10 @@
 
 Team Sales sahaja. Brand mode Agent, expiry 5 minit, Neglected Lead dan GET LEAD tidak berubah.
 
-- Lead `new` / `sales_assigned` yang `received_at` melebihi tempoh brand dipindah kepada
-  team sales lain yang aktif, diluluskan dan layak untuk projek yang sama.
+- Lead `new` / `sales_assigned` yang masih belum di-contact dipindah kepada team sales lain
+  yang aktif, diluluskan dan layak untuk projek yang sama, **sekali sehari jam 09:00
+  Asia/Kuala_Lumpur**. Tempoh dikira ikut tarikh: N hari = lead diterima pada hari D
+  dipindah jam 9 pagi hari D+N (1 hari = lead semalam dipindah pagi ini).
 - Tempoh: `brands.sales_reassign_days`, 1–5 hari, lalai 2. Admin/Master ubah di Log Lead
   (`admin_set_sales_reassign_days`). Tetapan baharu terpakai pada semua lead New semasa
   pada pusingan scheduler seterusnya.
@@ -14,8 +16,9 @@ Team Sales sahaja. Brand mode Agent, expiry 5 minit, Neglected Lead dan GET LEAD
   baharu (jam bermula semula untuk pemilik baharu), push `sales_new_lead` kepada pemilik
   baharu, reminder pemilik lama dibatalkan, `assignment_revoked` kepada pemilik lama,
   `lead_events.assigned` dengan `payload.reason='sales_stale_reassign'`.
-- Scheduler: cron `leadlaju-team-sales-stale-reassign` setiap 5 minit, maksimum 200 lead
-  setiap brand setiap pusingan, kunci sama seperti dispatcher Team Sales.
+- Scheduler: cron `leadlaju-team-sales-stale-reassign` `0 1 * * *` (UTC = 09:00 KL),
+  memproses semua backlog dalam batch 500, kunci sama seperti dispatcher Team Sales
+  (`20261114100000_team_sales_reassign_daily_9am.sql`).
 
 ## Release
 
