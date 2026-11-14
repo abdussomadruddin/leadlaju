@@ -633,5 +633,6 @@ try {
    check((await client.query('select assigned_agent_id,neglected_held from public.leads where id=$1',[race.l])).rows[0].assigned_agent_id===race.a,'Activity/sweep race preserves owner');
  } finally {await client.query('rollback');await sweeper.end();}
 
+ await client.query(fs.readFileSync(path.join(root,'scripts/test-team-sales-stale-reassign.sql'),'utf8')); checks++;
  console.log(`PASS: ${checks} real PostgreSQL brand isolation and distribution assertions; Neglected Lead, idle dispatch and concurrent scheduler scenarios passed`);
 } finally { if(client) await client.end(); await pg.stop(); }

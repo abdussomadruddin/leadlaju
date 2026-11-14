@@ -810,7 +810,7 @@ async function restoreTrustedDashboardCache(userId) {
     const brandId = profile.role === "master" ? sessionStorage.getItem(`leadlaju-master-brand:${userId}`) : profile.brand_id;
     if (!brandId) return false;
     await requireRemoteSession(userId);
-    const {data:brand,error:brandError} = await remoteDatabaseClient.from("brands").select("id,name,slug,active,distribution_mode,neglect_days").eq("id",brandId).single();
+    const {data:brand,error:brandError} = await remoteDatabaseClient.from("brands").select("id,name,slug,active,distribution_mode,neglect_days,sales_reassign_days").eq("id",brandId).single();
     if (brandError) throw brandError;
     if (!brand?.active) return false;
     const cached = JSON.parse(localStorage.getItem(dashboardCacheKey(userId,brandId)) || "null");
@@ -860,6 +860,7 @@ function renderDashboardUpdates() {
     ["active-lead", [state.leads.filter(lead=>lead.status==="new"), state.currentUserId], renderActiveLead],
     ["stats", [state.leads,state.appointments], renderStats],
     ["neglect-setting", [activeBrand,state.currentUserId], renderNeglectSetting],
+    ["sales-reassign-setting", [activeBrand,state.currentUserId], renderSalesReassignSetting],
     ["activities", state.activities, renderActivities],
     ["bulletins", [state.bulletins,state.bulletinUnreadCount], renderBulletins],
     ["due", [state.followUpDue,state.leads], renderFollowUpDue],
@@ -1329,7 +1330,7 @@ async function performLoadRemoteState(userId, attempt = 0) {
     }
     await requireRemoteSession(userId);
     if (requestBrandVersion !== brandContextVersion) return false;
-    const brandResult = await remoteDatabaseClient.from("brands").select("id,name,slug,active,distribution_mode,neglect_days").eq("id", activeBrandId).single();
+    const brandResult = await remoteDatabaseClient.from("brands").select("id,name,slug,active,distribution_mode,neglect_days,sales_reassign_days").eq("id", activeBrandId).single();
     if (brandResult.error) throw brandResult.error;
     if (getCurrentUser()?.role === "master" && !masterBrands.length) {
       const result = await remoteDatabaseClient.rpc("master_manage_brand", { p_action: "list" });
@@ -1504,6 +1505,16 @@ function handleRemoteBroadcast(message) {
       && Number.isInteger(days) && days >= 3 && days <= 14 && activeBrand) {
       activeBrand.neglect_days = days;
       renderNeglectSetting();
+      saveDashboardCache();
+    }
+    return;
+  }
+  if (message?.event === "sales_reassign_settings_changed") {
+    const days = Number(message.payload?.salesReassignDays);
+    if (message.payload?.brandId === activeBrandId && isAdmin() && isTeamSales()
+      && Number.isInteger(days) && days >= 1 && days <= 5 && activeBrand) {
+      activeBrand.sales_reassign_days = days;
+      renderSalesReassignSetting();
       saveDashboardCache();
     }
     return;
@@ -3382,7 +3393,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261105-lead-owner-v190")
+      .register("/sw.js?v=20261114-sales-reassign-v191")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -7959,6 +7970,55 @@ async function saveNeglectSetting(event) {
 
 document.querySelector("#neglect-setting-form")?.addEventListener("submit", saveNeglectSetting);
 
+function renderSalesReassignSetting() {
+  const form = document.querySelector("#sales-reassign-form");
+  if (!form) return;
+  form.hidden = !isAdmin() || !activeBrandId || !activeBrand?.active || activeBrand?.distribution_mode !== "team_sales";
+  if (form.hidden) return;
+  const input = form.querySelector("select");
+  const days = Number(activeBrand.sales_reassign_days) || 2;
+  const contextChanged = form.dataset.brand !== activeBrandId || form.dataset.user !== state.currentUserId;
+  if (contextChanged) form.querySelector("[data-sales-reassign-status]").textContent = "";
+  if (contextChanged || (document.activeElement !== input && form.dataset.saving !== "true")) {
+    input.value = String(days);
+  }
+  form.dataset.brand = activeBrandId; form.dataset.user = state.currentUserId;
+  form.querySelector("[data-sales-reassign-saved]").textContent = `Tetapan disimpan: ${days} hari`;
+}
+
+async function saveSalesReassignSetting(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  if (form.dataset.saving === "true" || !isAdmin() || !isTeamSales() || !activeBrandId || !guardLifecycleMutation()) return;
+  const input = form.querySelector("select");
+  const days = Number(input.value);
+  if (!Number.isInteger(days) || days < 1 || days > 5) { input.reportValidity(); return; }
+  if (!remoteDatabaseMode) { showToast("Sambungan server diperlukan", "Tempoh belum disimpan.", "error"); return; }
+  const version = brandContextVersion, userId = state.currentUserId, brandId = activeBrandId;
+  const button = form.querySelector("button"), finish = beginButtonFeedback(button);
+  form.dataset.saving = "true"; button.disabled = true; input.disabled = true;
+  const status = form.querySelector("[data-sales-reassign-status]"); status.textContent = "Menyimpan...";
+  try {
+    const {data,error} = await remoteDatabaseClient.rpc("admin_set_sales_reassign_days", {p_days:days});
+    if (error || !data?.ok || !Number.isInteger(data.sales_reassign_days) || data.sales_reassign_days<1 || data.sales_reassign_days>5) throw error || new Error(data?.error || "Tempoh gagal disimpan.");
+    if (version !== brandContextVersion || brandId !== activeBrandId || userId !== state.currentUserId) return;
+    activeBrand.sales_reassign_days = data.sales_reassign_days;
+    input.value = String(data.sales_reassign_days);
+    saveDashboardCache();
+    status.textContent = "Disimpan. Lead New yang melebihi tempoh akan dipindah dalam beberapa minit.";
+  } catch (error) {
+    if (version === brandContextVersion && userId === state.currentUserId) {
+      input.value = String(activeBrand?.sales_reassign_days || 2);
+      status.textContent = error?.message || "Tempoh gagal disimpan. Cuba semula.";
+    }
+  } finally {
+    finish(); form.dataset.saving = "false"; button.disabled = false; input.disabled = false;
+    if (version === brandContextVersion && userId === state.currentUserId) renderSalesReassignSetting();
+  }
+}
+
+document.querySelector("#sales-reassign-form")?.addEventListener("submit", saveSalesReassignSetting);
+
 function renderFollowUpLimitSetting() {
   const form = document.querySelector("#follow-up-limit-form");
   if (!form) return;
@@ -8587,6 +8647,7 @@ function renderAll() {
   renderUser();
   renderAdminReminderAlert();
   renderNeglectSetting();
+  renderSalesReassignSetting();
   renderActiveLead();
   renderStats();
   renderActivities();
