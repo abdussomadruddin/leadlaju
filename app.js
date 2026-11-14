@@ -196,6 +196,13 @@ function renderPushDeviceReport() {
   const download = document.querySelector("#download-push-device-report");
   if (download && download.dataset.actionPending !== "true") download.disabled = false;
   content.innerHTML = state.agents.filter(agent => agent.role === "agent").map(agent => `<section><h3>${escapeHtml(agent.name)}</h3>${renderAgentPushDevices(agent)}</section>`).join("") || "<p>Tiada ejen dalam brand ini.</p>";
+  const removeAll = document.querySelector("#remove-disconnected-devices");
+  if (removeAll) {
+    const agentIds = new Set(state.agents.filter(agent => agent.role === "agent").map(agent => agent.id));
+    const count = pushDeviceStatus.filter(device => agentIds.has(device.userId) && pushDeviceLabel(device) === "Terputus").length;
+    removeAll.hidden = !isTeamSales() || !count;
+    if (removeAll.dataset.actionPending !== "true") removeAll.textContent = `Buang semua peranti terputus (${count})`;
+  }
 }
 
 function pushDeviceLabel(device) {
@@ -250,7 +257,29 @@ async function downloadPushDeviceReport(button) {
 
 function renderAgentPushDevices(agent) {
   const devices = pushDeviceStatus.filter(device => device.userId === agent.id);
-  return `<div class="agent-push-devices"><small>Notifikasi peranti · bukan status akaun</small>${devices.length ? devices.map(device => `<div><strong>${escapeHtml(device.device)} · ${escapeHtml(pushDeviceLabel(device))}</strong><small>${device.installed ? "App dipasang ketika semakan terakhir" : "Pemasangan app belum disahkan"}${device.seenAt ? ` · ${formatDateTime(new Date(device.seenAt).getTime())}` : ""}</small><small>${device.receivedAt ? `Penerimaan terakhir: ${formatDateTime(new Date(device.receivedAt).getTime())}` : "Belum ada pengesahan daripada telefon."}</small><small>${escapeHtml(silentDeviceCheckLabel(device))}</small></div>`).join("") : "<p>Tiada sambungan notifikasi direkod.</p>"}</div>`;
+  return `<div class="agent-push-devices"><small>Notifikasi peranti · bukan status akaun</small>${devices.length ? devices.map(device => `<div><strong>${escapeHtml(device.device)} · ${escapeHtml(pushDeviceLabel(device))}</strong><small>${device.installed ? "App dipasang ketika semakan terakhir" : "Pemasangan app belum disahkan"}${device.seenAt ? ` · ${formatDateTime(new Date(device.seenAt).getTime())}` : ""}</small><small>${device.receivedAt ? `Penerimaan terakhir: ${formatDateTime(new Date(device.receivedAt).getTime())}` : "Belum ada pengesahan daripada telefon."}</small><small>${escapeHtml(silentDeviceCheckLabel(device))}</small>${isTeamSales() && pushDeviceLabel(device) === "Terputus" ? `<button class="secondary-button" type="button" data-remove-push-device="${escapeHtml(device.id)}">Buang peranti ini</button>` : ""}</div>`).join("") : "<p>Tiada sambungan notifikasi direkod.</p>"}</div>`;
+}
+
+async function removeDisconnectedPushDevices(button, deviceId = null) {
+  if (!isAdmin() || !isTeamSales() || button.disabled || !remoteDatabaseMode || !document.querySelector("#push-device-report")?.open) return;
+  const message = deviceId ? "Buang peranti terputus ini daripada senarai?" : "Buang semua peranti terputus daripada senarai? Peranti yang masih bersambung tidak terjejas.";
+  if (!window.confirm(message)) return;
+  const version = brandContextVersion;
+  const finish = beginButtonFeedback(button);
+  button.disabled = true; button.dataset.actionPending = "true";
+  try {
+    const {data,error} = await remoteDatabaseClient.rpc("admin_remove_disconnected_push_devices", {p_subscription_id: deviceId});
+    if (error || !data?.ok) throw error || new Error("Peranti gagal dibuang.");
+    if (version !== brandContextVersion) return;
+    pushDeviceStatus = pushDeviceStatus.filter(device => !(pushDeviceLabel(device) === "Terputus" && (!deviceId || device.id === deviceId)));
+    showToast("Peranti dibuang", `${data.removed} peranti terputus dibuang.`, "success");
+    await loadPushDeviceStatus().catch(() => {});
+  } catch (error) {
+    if (version === brandContextVersion) showToast("Gagal buang peranti", error?.message || "Cuba semula.", "error");
+  } finally {
+    finish(); button.disabled = false; delete button.dataset.actionPending;
+    if (version === brandContextVersion && document.querySelector("#push-device-report")?.open) renderPushDeviceReport();
+  }
 }
 
 async function answerSilentDeviceProbe(payload) {
@@ -3393,7 +3422,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261114-sales-reassign-v191")
+      .register("/sw.js?v=20261114-remove-devices-v192")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -10023,6 +10052,10 @@ window.addEventListener("popstate", (event) => {
 document.addEventListener("click", (event) => {
   const deviceDownload = event.target.closest("#download-push-device-report");
   if (deviceDownload) { void downloadPushDeviceReport(deviceDownload); return; }
+  const removeAllDevices = event.target.closest("#remove-disconnected-devices");
+  if (removeAllDevices) { void removeDisconnectedPushDevices(removeAllDevices); return; }
+  const removeDevice = event.target.closest("[data-remove-push-device]");
+  if (removeDevice) { void removeDisconnectedPushDevices(removeDevice, removeDevice.dataset.removePushDevice); return; }
   if (event.target.closest("#close-push-device-report")) { document.querySelector("#push-device-report").close(); return; }
   const pushTestButton = event.target.closest("#check-all-push-devices");
   if (pushTestButton) {

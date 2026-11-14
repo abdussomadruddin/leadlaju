@@ -634,5 +634,6 @@ try {
  } finally {await client.query('rollback');await sweeper.end();}
 
  await client.query(fs.readFileSync(path.join(root,'scripts/test-team-sales-stale-reassign.sql'),'utf8')); checks++;
+ await client.query(fs.readFileSync(path.join(root,'scripts/test-team-sales-remove-devices.sql'),'utf8')); checks++;
  console.log(`PASS: ${checks} real PostgreSQL brand isolation and distribution assertions; Neglected Lead, idle dispatch and concurrent scheduler scenarios passed`);
 } finally { if(client) await client.end(); await pg.stop(); }
