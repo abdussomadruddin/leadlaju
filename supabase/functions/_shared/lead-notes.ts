@@ -1,18 +1,30 @@
 // Deterministic parsing: never infer identity from salary/employment answers.
 export function normalizeNotesPhone(value: unknown) {
-  const digits = String(value || "").replace(/[^0-9]/g, "");
+  const raw = String(value || "").trim();
+  if (!/^\+?[\d\s().-]+$/.test(raw)) return "";
+  const digits = raw.replace(/\D/g, "");
+  if (raw.startsWith("+") || digits.startsWith("00")) {
+    const international = raw.startsWith("+") ? digits : digits.slice(2);
+    const corrected = international.replace(/^6001/, "601");
+    return /^[1-9]\d{6,14}$/.test(corrected) ? corrected : "";
+  }
   // Malaysian country code followed by an accidental domestic trunk zero.
   const corrected = digits.startsWith("6001") ? `60${digits.slice(3)}` : digits;
   const normalized = corrected.startsWith("0") ? `60${corrected.slice(1)}` : corrected;
-  return /^601\d{8,9}$/.test(normalized) ? normalized : "";
+  return /^[1-9]\d{6,14}$/.test(normalized) ? normalized : "";
 }
 
-export function parseLeadNotes(notes: unknown, projects: Array<{ id: string; name: string }>, explicitProject = "") {
+export function parseLeadNotes(notes: unknown, projects: Array<{ id: string; name: string }>, explicitProject = "", explicitName = "", explicitPhone = "") {
   const lines = String(notes || "").split(/\r?\n|\\n|\\|\|/).map(line => line.trim()).filter(Boolean);
   const unlabel = (line: string) => line.replace(/^(?:nama(?: penuh)?|full name|name|no(?:mbor)?\s*(?:phone|telefon)|phone(?: number)?|telefon|email|e-mail|emel|projek|project|produk|product)\s*[:=]\s*/i, "").trim();
   const values = lines.map(unlabel);
   const excluded = /^(?:ya|tidak|kerja kerajaan|kerja swasta|berniaga\s*\/\s*freelance|rm\s*\d.*)$/i;
-  const phones = [...new Set(values.filter(value => /^[+\d][\d\s()+.-]+$/.test(value)).map(normalizeNotesPhone).filter(Boolean))];
+  const labelledPhone = /^(?:no(?:mbor)?\s*(?:phone|telefon)|phone(?: number)?|telefon)\s*[:=]/i;
+  const labelledName = /^(?:nama(?: penuh)?|full name|name)\s*[:=]/i;
+  const phones = [...new Set(values.filter(value => /^[+\d][\d\s()+.-]+$/.test(value)).filter(value => /^\+|^00|^0[1-9]|^60/.test(value)).map(normalizeNotesPhone).filter(Boolean))];
+  const barePhones = [...new Set(lines.filter(line => /^[1-9][0-9 ().-]+$/.test(line))
+    .map(normalizeNotesPhone).filter(value => value.length >= 8))];
+  const phone = normalizeNotesPhone(explicitPhone) || lines.filter(line => labelledPhone.test(line)).map(line => normalizeNotesPhone(unlabel(line))).find(Boolean) || phones[0] || (barePhones.length === 1 ? barePhones[0] : "");
   const emails = [...new Set(values.flatMap(value => value.match(/[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?)+/gi) || []).map(value => value.toLowerCase()))];
   const projectMatches = projects.filter(project => values.some(value => value.toLowerCase() === project.name.toLowerCase()) || explicitProject.toLowerCase() === project.name.toLowerCase());
   const projectNames = new Set(projects.map(project => project.name.toLowerCase()));
@@ -26,12 +38,12 @@ export function parseLeadNotes(notes: unknown, projects: Array<{ id: string; nam
     !projectNames.has(value.toLowerCase()),
   );
   const names = [...new Set(candidates.length ? candidates : handles)];
-  if (phones.length !== 1) throw new Error("NOTA mesti mengandungi satu nombor telefon Malaysia yang sah.");
+  if (!phone) throw new Error("Nombor telefon dalam NOTA tidak dapat dikenal pasti.");
   if (values.some(value => value.includes('@')) && emails.length === 0) throw new Error("Emel dalam NOTA tidak sah.");
   if (emails.length > 1) throw new Error("NOTA mengandungi lebih daripada satu emel. Sila semak.");
   if (projectMatches.length !== 1) throw new Error("NOTA mesti sepadan dengan satu projek/produk aktif dalam brand ini.");
-  if (names.length !== 1) throw new Error("Nama dalam NOTA tidak jelas. Gunakan satu nama sahaja bersama jawapan borang.");
-  return { name: names[0], phone: phones[0], email: emails[0] || "", project: projectMatches[0].name };
+  const name = explicitName || lines.filter(line => labelledName.test(line)).map(unlabel).find(Boolean) || (names.length === 1 ? names[0] : "Nama tidak dinyatakan");
+  return { name, phone, email: emails[0] || "", project: projectMatches[0].name };
 }
 
 export function repairNotesPhoneText(value) {

@@ -85,13 +85,14 @@ Deno.serve(async (request) => {
     try {
       const projects = await supabase.from("projects").select("id,name").eq("brand_id", keyBrandId).eq("active", true);
       if (projects.error) throw new Error("Senarai projek/produk belum dapat dimuatkan.");
-      Object.assign(canonical, parseLeadNotes(canonical.notes, projects.data || [], canonical.project));
+      Object.assign(canonical, parseLeadNotes(canonical.notes, projects.data || [], canonical.project, canonical.name, canonical.phone));
     } catch (error) {
       const message = error instanceof Error ? error.message : "NOTA tidak dapat dibaca.";
       await markAttempt("failed", message);
       return Response.json({ ok: false, error: message }, { status: 400, headers: corsHeaders });
     }
   }
+  canonical.name ||= "Nama tidak dinyatakan";
   canonical.phone = normalizeNotesPhone(canonical.phone) || canonical.phone;
   if ((!fromNotes && !canonical.source_lead_id) || !canonical.name || !canonical.phone || !canonical.project) {
     await markAttempt("failed", "source_lead_id, name, phone and project are required");
