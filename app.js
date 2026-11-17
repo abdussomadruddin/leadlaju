@@ -3382,7 +3382,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261105-lead-owner-v190")
+      .register("/sw.js?v=20261117-sales-queue-v191")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -7251,7 +7251,7 @@ function renderAgents() {
             <span>Emel <b>${escapeHtml(agent.email)}</b></span>
             <span>Lead dikendalikan <b>${agent.leadsHandled || 0}</b></span>
             <span>${projectLabel()} <b>${escapeHtml(projectNames.join(", ") || "Belum dipilih")}</b></span>
-            ${!isTeamSales() && agent.role === "agent" ? `<span class="agent-get-lead-permission">Benarkan GET LEAD <button type="button" role="switch" aria-checked="${agent.getLeadAllowed !== false}" aria-label="Benarkan GET LEAD untuk ${escapeHtml(agent.name)}" class="switch ${agent.getLeadAllowed !== false ? "active" : ""}" data-agent-get-lead-permission="${escapeHtml(agent.id)}"></button></span>` : ""}
+            ${agent.role === "agent" ? `<span class="agent-get-lead-permission">${isTeamSales() ? "Giliran lead baharu" : "Benarkan GET LEAD"} <button type="button" role="switch" aria-checked="${agent.getLeadAllowed !== false}" aria-label="${isTeamSales() ? "Giliran lead baharu" : "Benarkan GET LEAD"} untuk ${escapeHtml(agent.name)}" class="switch ${agent.getLeadAllowed !== false ? "active" : ""}" data-agent-get-lead-permission="${escapeHtml(agent.id)}"></button></span>` : ""}
             ${!isTeamSales() && agent.followUpDueBlocked ? '<span>Lead baharu disekat <b>Selesaikan Follow Up Due</b></span>' : ""}
             ${!isTeamSales() && agent.role === "agent" ? `<span data-agent-availability-status="${escapeHtml(agent.id)}">Giliran lead <b>${escapeHtml(agentLeadDisplayLabel(agentLeadDisplayState(agent)))}</b></span>` : ""}
           </div>
@@ -9120,7 +9120,7 @@ async function deleteAgentWithLoading(agent, options = {}) {
 }
 
 async function toggleAgentGetLeadPermission(agentId, button) {
-  if (!isAdmin() || isTeamSales()) return false;
+  if (!isAdmin()) return false;
   const agent = getAgent(agentId);
   if (!agent || agent.role !== "agent") return false;
   if (!remoteDatabaseMode) {
@@ -9139,7 +9139,7 @@ async function toggleAgentGetLeadPermission(agentId, button) {
     if (!allowed) agent.leadReady = false;
     saveState();
     renderAll();
-    showToast(allowed ? "Akses GET LEAD dibuka" : "Akses GET LEAD ditutup", agent.name);
+    showToast(isTeamSales() ? (allowed ? "Giliran lead dihidupkan" : "Giliran lead dihentikan") : (allowed ? "Akses GET LEAD dibuka" : "Akses GET LEAD ditutup"), agent.name);
     queueRemoteReload();
     return true;
   } catch (error) {

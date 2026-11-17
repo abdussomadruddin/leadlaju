@@ -20,5 +20,5 @@ test('GET LEAD has an early client gate and admin permission uses a server RPC',
   assert.match(source,/data-agent-get-lead-permission/);
   assert.match(source,/rpc\("admin_set_agent_get_lead_permission"/);
   assert.match(source,/getLeadAllowed: row.get_lead_allowed !== false/);
-  assert.match(source,/if \(!isAdmin\(\) \|\| isTeamSales\(\)\) return false/);
+  assert.match(source,/function toggleAgentGetLeadPermission[^\n]*\n  if \(!isAdmin\(\)\) return false/);
 });
