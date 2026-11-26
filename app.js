@@ -529,6 +529,7 @@ const elements = {
   leadSearch: document.querySelector("#lead-search"),
   leadFilter: document.querySelector("#lead-filter"),
   leadFollowUpFilter: document.querySelector("#lead-follow-up-filter"),
+  leadProjectFilter: document.querySelector("#lead-project-filter"),
   leadAgentFilter: document.querySelector("#lead-agent-filter"),
   leadPeriodFilter: document.querySelector("#lead-period-filter"),
   leadLogCount: document.querySelector("#lead-log-count"),
@@ -3146,7 +3147,7 @@ async function openNotificationLead(leadId) {
     return;
   }
   elements.leadSearch.value = lead.name;
-  [elements.leadFilter, elements.leadFollowUpFilter, elements.leadAgentFilter, elements.leadPeriodFilter].forEach((field) => { if (field) field.value = "all"; });
+  [elements.leadFilter, elements.leadFollowUpFilter, elements.leadProjectFilter, elements.leadAgentFilter, elements.leadPeriodFilter].forEach((field) => { if (field) field.value = "all"; });
   expandedLeadLogIds.add(lead.id);
   leadLogVisibleLimit = Math.max(LEAD_LOG_PAGE_SIZE, state.leads.length);
   switchView("leads");
@@ -3382,7 +3383,7 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || window.location.protocol === "file:") return null;
   if (!serviceWorkerRegistrationPromise) {
     serviceWorkerRegistrationPromise = navigator.serviceWorker
-      .register("/sw.js?v=20261117-sales-queue-v191")
+      .register("/sw.js?v=20261126-project-filter-v192")
       .then(async (registration) => {
         await registration.update().catch(() => {});
         if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -6722,7 +6723,7 @@ function openSalesOverdueReminder(brandId = new URLSearchParams(window.location.
   if (brandId && brandId !== activeBrandId) return;
   elements.leadSearch.value = "";
   leadLogVisibleLimit = LEAD_LOG_PAGE_SIZE;
-  [elements.leadFilter, elements.leadFollowUpFilter, elements.leadAgentFilter, elements.leadPeriodFilter].forEach(select => { if (select) select.value = "all"; });
+  [elements.leadFilter, elements.leadFollowUpFilter, elements.leadProjectFilter, elements.leadAgentFilter, elements.leadPeriodFilter].forEach(select => { if (select) select.value = "all"; });
   salesLeadDrilldown = { brandId: activeBrandId, overdue: true };
   switchView("leads");
   renderLeadsTable();
@@ -6741,7 +6742,7 @@ function openSalesPerformance(status) {
   if (!isTeamSales()) return;
   elements.leadSearch.value = "";
   leadLogVisibleLimit = LEAD_LOG_PAGE_SIZE;
-  [elements.leadFilter, elements.leadFollowUpFilter, elements.leadAgentFilter, elements.leadPeriodFilter].forEach(select => { if (select) select.value = "all"; });
+  [elements.leadFilter, elements.leadFollowUpFilter, elements.leadProjectFilter, elements.leadAgentFilter, elements.leadPeriodFilter].forEach(select => { if (select) select.value = "all"; });
   if (status === "due") {
     salesLeadDrilldown = null;
     leadLogVisibleLimit = LEAD_LOG_PAGE_SIZE;
@@ -6768,7 +6769,7 @@ document.addEventListener("click", event => {
     salesLeadDrilldown = null;
     leadLogVisibleLimit = LEAD_LOG_PAGE_SIZE;
     elements.leadSearch.value = "";
-    [elements.leadFilter, elements.leadFollowUpFilter, elements.leadAgentFilter, elements.leadPeriodFilter].forEach(select => { if (select) select.value = "all"; });
+    [elements.leadFilter, elements.leadFollowUpFilter, elements.leadProjectFilter, elements.leadAgentFilter, elements.leadPeriodFilter].forEach(select => { if (select) select.value = "all"; });
     renderLeadsTable();
   }
 });
@@ -6786,6 +6787,21 @@ function renderLeadsTable() {
   const visibleLeads = (isAdmin()
     ? state.leads.filter((lead) => !isVisuallyExpiredAssignment(lead))
     : state.leads.filter((lead) => lead.assignedAgentId === state.currentUserId && !isVisuallyExpiredAssignment(lead))).filter(matchesSalesDrilldown);
+  const selectedProject = elements.leadProjectFilter?.value || "all";
+  const projectCounts = new Map();
+  visibleLeads.forEach(lead => {
+    const project = lead.project || "";
+    projectCounts.set(project, (projectCounts.get(project) || 0) + 1);
+  });
+  if (elements.leadProjectFilter) {
+    elements.leadProjectFilter.setAttribute("aria-label", `Tapis ${projectLabel().toLowerCase()}`);
+    updateSelectOptions(elements.leadProjectFilter, [
+      `<option value="all">Semua ${projectLabel().toLowerCase()}</option>`,
+      ...[...projectCounts.keys()].filter(Boolean).sort().map(project =>
+        `<option value="${escapeHtml(project)}">${escapeHtml(project)} (${projectCounts.get(project)})</option>`),
+    ].join(""), selectedProject);
+  }
+  const projectFilter = elements.leadProjectFilter?.value || "all";
   const statusCounts = Object.fromEntries(LEAD_STATUS_OPTIONS.map((status) => [status.value, 0]));
   const followUpCounts = new Map();
   const agentCounts = new Map();
@@ -6850,7 +6866,7 @@ function renderLeadsTable() {
         formatSheetStatus(getLeadVisualStatus(lead)).toLowerCase().includes(search) ||
         String(lead.notes || "").toLowerCase().includes(search);
       const visualStatus = getLeadVisualStatus(lead);
-      return matchesAgent && matchesSearch &&
+      return matchesAgent && matchesSearch && (projectFilter === "all" || lead.project === projectFilter) &&
         (filter === "all" || visualStatus === filter || (filter === "group_follow_up" && ["need_follow_up", "all_offer_presented"].includes(visualStatus)) || (filter === "group_cancelled_rejected" && ["cancelled", "rejected"].includes(visualStatus))) &&
         (followUpFilter === "all" || (followUpFilter === "follow_up" && Number(lead.followUpCount) > 0) || (followUpFilter.startsWith("follow_up_") && Number(lead.followUpCount) === Number(followUpFilter.slice(10)))) &&
         matchesMonthPeriodFilter(lead.createdAt || lead.receivedAt, elements.leadPeriodFilter);
@@ -8342,7 +8358,7 @@ function clearBrandOperationalState() {
   state = { ...structuredClone(defaultState), integration, currentUserId: current?.id, agents: current ? [current] : [], leads: [], projects: [], appointments: [], activities: [], bulletins: [], followUpDue: [] };
   // Remove old rows and dropdown choices before fetching the next brand.
   for (const id of ["performance-rows", "performance-cards", "performance-weeks", "integration-connectors"]) document.getElementById(id)?.replaceChildren();
-  for (const id of ["lead-status-filter", "lead-agent-filter", "lead-period-filter", "follow-up-agent-filter", "follow-up-period-filter", "appointment-agent-filter", "appointment-period-filter", "performance-project", "performance-agent"]) {
+  for (const id of ["lead-status-filter", "lead-project-filter", "lead-agent-filter", "lead-period-filter", "follow-up-agent-filter", "follow-up-period-filter", "appointment-agent-filter", "appointment-period-filter", "performance-project", "performance-agent"]) {
     const select=document.getElementById(id); if(select) select.value="";
   }
   renderAll();
@@ -10093,6 +10109,7 @@ document.querySelectorAll("[data-appointment-time]").forEach((button) => {
     renderAppointments();
   });
 });
+elements.leadProjectFilter?.addEventListener("change", resetLeadLogPage);
 elements.appointmentStatusFilter?.addEventListener("change", renderAppointments);
 elements.appointmentProjectFilter?.addEventListener("change", renderAppointments);
 elements.appointmentPeriodFilter?.addEventListener("change", renderAppointments);
@@ -10329,7 +10346,7 @@ if ("serviceWorker" in navigator) {
         salesLeadDrilldown = null;
         elements.leadSearch.value = "";
         elements.leadFilter.value = "new";
-        [elements.leadFollowUpFilter, elements.leadAgentFilter, elements.leadPeriodFilter].forEach((field) => { if (field) field.value = "all"; });
+        [elements.leadFollowUpFilter, elements.leadProjectFilter, elements.leadAgentFilter, elements.leadPeriodFilter].forEach((field) => { if (field) field.value = "all"; });
       }
       switchView(event.data.view || "dashboard");
     }
