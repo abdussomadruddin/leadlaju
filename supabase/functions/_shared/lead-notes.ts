@@ -14,11 +14,11 @@ export function normalizeNotesPhone(value: unknown) {
   return /^[1-9]\d{6,14}$/.test(normalized) ? normalized : "";
 }
 
-export function parseLeadNotes(notes: unknown, projects: Array<{ id: string; name: string }>, explicitProject = "", explicitName = "", explicitPhone = "") {
+export function parseLeadNotes(notes: unknown, projects: Array<{ id: string; name: string }>, explicitProject = "", explicitName = "", explicitPhone = "", useOrderedName = false) {
   const lines = String(notes || "").split(/\r?\n|\\n|\\|\|/).map(line => line.trim()).filter(Boolean);
   const unlabel = (line: string) => line.replace(/^(?:nama(?: penuh)?|full name|name|no(?:mbor)?\s*(?:phone|telefon)|phone(?: number)?|telefon|email|e-mail|emel|projek|project|produk|product)\s*[:=]\s*/i, "").trim();
   const values = lines.map(unlabel);
-  const excluded = /^(?:ya|tidak|kerja kerajaan|kerja swasta|berniaga\s*\/\s*freelance|rm\s*\d.*)$/i;
+  const excluded = /^(?:tv|aircond|peti[\s_]+sejuk|wash[\s_]*tower(?:[\s_]*\(washer\+dryer\))?|ya|tidak|kerja kerajaan|kerja swasta|berniaga\s*\/\s*freelance|rm\s*\d.*)$/i;
   const labelledPhone = /^(?:no(?:mbor)?\s*(?:phone|telefon)|phone(?: number)?|telefon)\s*[:=]/i;
   const labelledName = /^(?:nama(?: penuh)?|full name|name)\s*[:=]/i;
   const phones = [...new Set(values.filter(value => /^[+\d][\d\s()+.-]+$/.test(value)).filter(value => /^\+|^00|^0[1-9]|^60/.test(value)).map(normalizeNotesPhone).filter(Boolean))];
@@ -42,7 +42,13 @@ export function parseLeadNotes(notes: unknown, projects: Array<{ id: string; nam
   if (values.some(value => value.includes('@')) && emails.length === 0) throw new Error("Emel dalam NOTA tidak sah.");
   if (emails.length > 1) throw new Error("NOTA mengandungi lebih daripada satu emel. Sila semak.");
   if (projectMatches.length !== 1) throw new Error("NOTA mesti sepadan dengan satu projek/produk aktif dalam brand ini.");
-  const name = explicitName || lines.filter(line => labelledName.test(line)).map(unlabel).find(Boolean) || (names.length === 1 ? names[0] : "Nama tidak dinyatakan");
+  const [firstLine = "", secondLine = "", thirdLine = ""] = lines;
+  const orderedName = useOrderedName && !excluded.test(firstLine) &&
+    !projectNames.has(firstLine.toLowerCase()) &&
+    /^[\p{L}][\p{L}\p{M}\p{Nd}\s.'’_-]{0,119}$/u.test(firstLine) &&
+    Boolean(normalizeNotesPhone(secondLine)) &&
+    emails.includes(thirdLine.toLowerCase()) ? firstLine : "";
+  const name = explicitName || lines.filter(line => labelledName.test(line)).map(unlabel).find(Boolean) || orderedName || (names.length === 1 ? names[0] : "Nama tidak dinyatakan");
   return { name, phone, email: emails[0] || "", project: projectMatches[0].name };
 }
 

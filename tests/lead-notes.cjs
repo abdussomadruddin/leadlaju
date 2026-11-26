@@ -24,6 +24,18 @@ test('All excluded form answers are not names, including slash and salary answer
   assert.equal(parsed.name,'Muhammad rafi');
   assert.equal(parsed.phone,'60173559147');
 });
+test('Product answers in unlabelled notes are not candidates for a name', () => {
+  for (const answer of ['tv', 'AIRCOND', 'peti sejuk', 'peti_sejuk', 'WashTower', 'wash tower', 'washtower_(washer+dryer)']) {
+    const notes = ['Ali Ahmad', '+60123456789', answer].join('\n');
+    assert.equal(context.parseLeadNotes(notes, projects, 'LG').name, 'Ali Ahmad');
+  }
+});
+test('Ordered Meta notes preserve the submitted display name', () => {
+  const notes = ['handle123', '+60123456789', 'another@example.com', 'aircond'].join('\n');
+  assert.equal(context.parseLeadNotes(notes, projects, 'LG', '', '', true).name, 'handle123');
+  assert.equal(context.parseLeadNotes(notes, projects, 'LG').name, 'Nama tidak dinyatakan');
+  assert.equal(context.parseLeadNotes(notes, projects, 'LG', 'Ali', '', true).name, 'Ali');
+});
 test('Invalid emails, missing phones and unknown products fail intake', () => {
   for (const notes of ['Ali\n01126929192\ninvalid@email\nLG','Ali\n2500\nLG','Ali\n01126929192\nUnknown Product'])
     assert.throws(()=>context.parseLeadNotes(notes,projects));

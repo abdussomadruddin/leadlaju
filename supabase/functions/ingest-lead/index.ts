@@ -40,7 +40,7 @@ Deno.serve(async (request) => {
   if (!keyRecord) {
     return Response.json({ ok: false, error: "Invalid ingestion key" }, { status: 401, headers: corsHeaders });
   }
-  const { data: brand } = await supabase.from("brands").select("id").eq("id", keyRecord.brand_id).eq("active", true).maybeSingle();
+  const { data: brand } = await supabase.from("brands").select("id,name").eq("id", keyRecord.brand_id).eq("active", true).maybeSingle();
   if (!brand) return Response.json({ ok: false, error: "Brand is inactive" }, { status: 403, headers: corsHeaders });
   supabase = serviceClient(brand.id);
   const keyRecordId = keyRecord.id;
@@ -85,7 +85,8 @@ Deno.serve(async (request) => {
     try {
       const projects = await supabase.from("projects").select("id,name").eq("brand_id", keyBrandId).eq("active", true);
       if (projects.error) throw new Error("Senarai projek/produk belum dapat dimuatkan.");
-      Object.assign(canonical, parseLeadNotes(canonical.notes, projects.data || [], canonical.project, canonical.name, canonical.phone));
+      Object.assign(canonical, parseLeadNotes(canonical.notes, projects.data || [], canonical.project, canonical.name, canonical.phone,
+        sourceSystem === "meta_ads" && clean(brand.name).toLowerCase() === "az hustler"));
     } catch (error) {
       const message = error instanceof Error ? error.message : "NOTA tidak dapat dibaca.";
       await markAttempt("failed", message);
