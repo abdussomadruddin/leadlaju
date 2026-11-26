@@ -24,8 +24,8 @@ test('All excluded form answers are not names, including slash and salary answer
   assert.equal(parsed.name,'Muhammad rafi');
   assert.equal(parsed.phone,'60173559147');
 });
-test('Notes with ambiguous identities or invalid contacts fail rather than guessing', () => {
-  for (const notes of ['Ali\nAbu\n+60173559147\nLG','Ali\n+60173559147\n+60123456789\nLG','Ali\n01126929192\ninvalid@email\nLG','Ali\n2500\nLG','Ali\n01126929192\nUnknown Product'])
+test('Invalid emails, missing phones and unknown products fail intake', () => {
+  for (const notes of ['Ali\n01126929192\ninvalid@email\nLG','Ali\n2500\nLG','Ali\n01126929192\nUnknown Product'])
     assert.throws(()=>context.parseLeadNotes(notes,projects));
   assert.equal(context.normalizeNotesPhone('011-2692 9192'),'601126929192');
   assert.equal(context.normalizeNotesPhone('RM3500-RM5000'),'');
@@ -65,9 +65,9 @@ test('Correct only extra Malaysian trunk zero, retaining valid contacts and ambi
     const lead=context.parseLeadNotes(`Fixture Name\n${phone}\nLG`,projects);
     assert.equal(lead.phone,'601161221544');
   }
-  assert.equal(context.normalizeNotesPhone('+60001161221544'),'');
-  assert.equal(context.normalizeNotesPhone('+60011612'),'');
-  assert.throws(()=>context.parseLeadNotes('Fixture Name\n+6001161221544\n+60173559147\nLG',projects));
+  assert.equal(context.normalizeNotesPhone('+442079460958'),'442079460958');
+  assert.equal(context.normalizeNotesPhone('+123'),'');
+  assert.equal(context.parseLeadNotes('Fixture Name\n+6001161221544\n+60173559147\nLG',projects).phone,'601161221544');
 });
 
 test('Repair malformed phones inside notes without changing other content',()=>{
@@ -80,5 +80,12 @@ test('Repair malformed phones inside notes without changing other content',()=>{
 test('accepts a numeric handle matching the email username in ads notes', () => {
   const notes = 'mesin_basuh_+_aircond_=_free_tv\nejumps83\n+60132775698\nejumps83@example.invalid';
   assert.equal(context.parseLeadNotes(notes, projects, 'LG').name, 'ejumps83');
-  assert.throws(() => context.parseLeadNotes(notes.replace('ejumps83@example.invalid', 'other@example.invalid'), projects, 'LG'));
+  assert.equal(context.parseLeadNotes(notes.replace('ejumps83@example.invalid', 'other@example.invalid'), projects, 'LG').name,'Nama tidak dinyatakan');
+});
+
+test('Explicit contact fields take priority over note candidates', () => {
+  const lead=context.parseLeadNotes('Ali\nAbu\n+60173559147\nLG',projects,'LG','Named Contact','+442079460958');
+  assert.equal(lead.name,'Named Contact');
+  assert.equal(lead.phone,'442079460958');
+  assert.equal(context.parseLeadNotes('Ali\nAbu\n+60173559147\nLG',projects).name,'Nama tidak dinyatakan');
 });

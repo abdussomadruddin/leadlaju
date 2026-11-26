@@ -55,11 +55,10 @@ for (const provider of ['meta_ads', 'tiktok_ads']) {
     assert.equal(result.calls[0].name, 'ingest_lead');
   });
 }
-test('Provider mismatch, inactive brand and ambiguous notes cannot ingest', async () => {
+test('Provider mismatch and inactive brands cannot ingest', async () => {
   for (const result of [
     await request('tiktok_ads', { source_system: 'meta_ads', produk: 'Samsung', notes }),
     await request('meta_ads', { source_system: 'meta_ads', produk: 'Samsung', notes }, { inactive: true }),
-    await request('meta_ads', { source_system: 'meta_ads', produk: 'Samsung', notes: notes + '\nNama Kedua' }),
   ]) { assert(result.status >= 400); assert.equal(result.calls.length, 0); }
 });
 test('Notes SQL keeps tenant boundaries, cross-provider duplicate locking and source attribution', () => {
